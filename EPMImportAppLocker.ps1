@@ -22,20 +22,20 @@ $processedObjects = @{}
 
 # Function to create a new object for Application Groups
 function New-ApplicationGroupObject {
-    <#
-    .SYNOPSIS
-    Creates a new object for storing information about application groups.
+<#
+.SYNOPSIS
+Creates a new object for storing information about application groups.
 
-    .DESCRIPTION
-    This function creates a new object with properties for GroupName, Action, and Applications.
-    The object is added to the hashtable for further processing.
+.DESCRIPTION
+This function creates a new object with properties for GroupName, Action, and Applications.
+The object is added to the hashtable for further processing.
 
-    .PARAMETER GroupName
-    The name of the application group.
+.PARAMETER GroupName
+The name of the application group.
 
-    .PARAMETER Action
-    The action (Allow/Block) associated with the application group.
-    #>    
+.PARAMETER Action
+The action (Allow/Block) associated with the application group.
+#>    
     param (
         [string]$GroupName,
         [string]$Action
@@ -57,32 +57,32 @@ function New-ApplicationGroupObject {
 
 # Function to create the Application Object
 function Set-AppObject {
-    <#
-    .SYNOPSIS
-    Creates an application object based on provided parameters.
+<#
+.SYNOPSIS
+Creates an application object based on provided parameters.
 
-    .DESCRIPTION
-    This function creates an application object based on parameters such as appType, filename, location, publisher, product, and description.
+.DESCRIPTION
+This function creates an application object based on parameters such as appType, filename, location, publisher, product, and description.
 
-    .PARAMETER appType
-    The type of the application.
+.PARAMETER appType
+The type of the application.
 
-    .PARAMETER filename
-    The filename associated with the application.
+.PARAMETER filename
+The filename associated with the application.
 
-    .PARAMETER location
-    The location or path associated with the application.
+.PARAMETER location
+The location or path associated with the application.
 
-    .PARAMETER publisher
-    The publisher of the application.
+.PARAMETER publisher
+The publisher of the application.
 
-    .PARAMETER product
-    The product name associated with the application.
+.PARAMETER product
+The product name associated with the application.
 
-    .PARAMETER description
-    A description of the application.
+.PARAMETER description
+A description of the application.
 
-    #>
+#>
     param (
         [string]$appType,
         [string]$filename,
