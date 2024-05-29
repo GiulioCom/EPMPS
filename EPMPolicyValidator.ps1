@@ -1,28 +1,56 @@
 <#
 .SYNOPSIS
-    
+    This script validates EPM applications definition.
 
 .DESCRIPTION
+    The EPMPolicyValidator script aims to scan policies or application groups, collect information about
+    the application definitions, and validate them. It operates in two modes:
+
+    1. **Audit Mode**: Analyzes the Audit SET Admins events for policy changes and processes only the modified
+       policies. This mode is useful for continuous analysis of policies upon administrator modifications and is
+       suggested to be used as a scheduled task running every 5 minutes.
+    
+    2. **Manual Scan Mode**: Performs a one-time scan of policies for testing or health checks. The script can
+       manually scan all application groups and policies, only application groups, only policies, or specific
+       policies or application groups.
 
 .PARAMETER username
+    Mandatory: Yes
     The EPM username (e.g., user@domain).
 
 .PARAMETER setName
+     Mandatory: No
     The name of the EPM set.
 
 .PARAMETER tenant
+    Mandatory: Yes
     The EPM tenant name (e.g., eu, uk).
 
 .PARAMETER destinationFolder
+    Mandatory: Conditional
+    Specifies the folder where data will be stored. This parameter is mandatory in Audit Mode.
 
+.PARAMETER ScanPolicies
+    Mandatory: No
+    Specifies the type of policy scanning to perform. Valid values are 'all', 'appgroups', or 'policies'.
+
+.PARAMETER name
+    Mandatory: No
+    Specifies the name of the policy or application group when using the -ScanPolicies parameter.
+
+.EXAMPLE
+    1. Audit Mode:
+        .\EPMPolicyValidator.ps1 -username "user@domain" -tenant "eu" -destinationFolder "C:\Data"
+    2. Manual Mode:
+        .\EPMPolicyValidator.ps1 -username "user@domain" -tenant "eu" -ScanPolicies "all"
 
 .NOTES
     File: EPMPolicyValidator.ps1
     Author: Giulio Compagnone
     Company: CyberArk
-    Version: 0.5
+    Version: 0.6
     Created: 02/2024
-    Last Modified: 04/2024
+    Last Modified: 05/2024
 #>
 
 param (
@@ -30,19 +58,20 @@ param (
     [string]$username,
 
     [Parameter(HelpMessage="Please enter valid EPM set name")]
-    [string]$setName,
+    [string]$setName = "",
 
     [Parameter(Mandatory = $true, HelpMessage="Please enter valid EPM tenant (eu, uk, ....)")]
     [string]$tenant,
 
-    [Parameter(Mandatory = $true, HelpMessage="Please provide the destination folder to store data")]
+    [Parameter(HelpMessage = "Please provide the destination folder to store data")]
     [string]$destinationFolder,
 
-    [switch]$ScanPolicies,
-    [string]$scanType,
+    [Parameter(HelpMessage = "Scan policies option: 'all', 'appgroups', or 'policies'")]
+    [ValidateSet("all", "appgroups", "policies")]
+    [string]$ScanPolicies,
+
+    [Parameter(HelpMessage = "Policy \ App Group name, to be used with -ScanPolicies if needed")]
     [string]$name
-#    [string]$Policy,
-#    [string]$AppGroup
 )
 function Invoke-EPMRestMethod  {
 <#
@@ -278,7 +307,6 @@ function Evaluate-Patterns {
         }
     }
 
-
     return $result
 }
 
@@ -287,6 +315,7 @@ function Process-Application{
         [Parameter(Mandatory=$true)]
         [ValidateNotNullOrEmpty()]
         [object]$Application,
+        [string]$PolicyType,
         [string]$Action
     )
 
@@ -321,6 +350,19 @@ function Process-Application{
     $priority1 = 30
     $priority2 = 20
     $priority3 = 10
+
+    # Set the threshold, the value can change based on policy type or policy action
+    # Policy action allow or deny
+    # Policy type Linux
+    $threshold = 0
+    
+    if ($action -eq 2 -or $action -eq 1) {
+        $threshold = 30
+    } elseif ($PolicyType -eq 12) {
+        $threshold = 60
+    } else {
+        $threshold = 90
+    }
     
     $unspportedAppType = $false    
 
@@ -552,7 +594,7 @@ function Process-Application{
             } else {
                 $matchedConditions += [PSCustomObject]@{
                     PatternName = "LIN_SUDO_NO_PASSWORD"
-                    Weight = "Enabled"
+                    Weight = "Disabled"
                 }
             }
             
@@ -596,12 +638,13 @@ function Process-Application{
             $applicationName = $Application.id
         }          
         
-        If ($totalWeight -ge 90){
+        If ($totalWeight -ge $threshold){
             Write-Host "$applicationName - $totalWeight - Compliant to Policy Standards" -ForegroundColor Green
         } else {
             Write-Host "$applicationName - $totalWeight - Not Compliant to Policy Standards" -ForegroundColor Red
         }
-        Write-Host "Application Type: $appTypeName"
+        Write-Host "Application Type: $appTypeName" -ForegroundColor DarkMagenta
+        Write-Host "Application Description: $($Application.description)"  -ForegroundColor DarkMagenta
         # Iterate through $matchedConditions
         foreach ($condition in $matchedConditions) {
             # Print PatternName if Weight is greater than 0
@@ -676,14 +719,43 @@ This command retrieves information about policies associated with the specified 
     }
 
     $policyType = @{
-        1 = "Privilege Management Detect"
-        2 = "Application Control Detect"
-        3 = "Application Control Restrict"
+        1 =	"Privilege Management Detect"
+        2 =	"Application Control Detect"
+        3 =	"Application Control Restrict"
+        4 =	"Ransomware Protection Detect"
+        5 =	"Ransomware Protection Restrict"
+        6 =	"INT Detect"
+        7 =	"INT Restrict"
+        8 =	"INT Block"
+        9 =	"Privilege Management Elevate"
+        10 = "Application Control Block"
         11 = "Advanced Windows"
         12 = "Advanced Linux"
         13 = "Advanced Mac"
+        17 = "Recommended Block Windows OS Applications"
         18 = "Predefined App Groups Win"
         20 = "Developer Applications"
+        22 = "Credentials Rotation"
+        23 = "Trusted Install Package Windows"
+        24 = "Trusted Distributor Windows"
+        25 = "Trusted Updater Windows"
+        26 = "Trusted User/Group Windows"
+        27 = "Trusted Network Location Windows"
+        28 = "Trusted URL Windows"
+        29 = "Trusted Publisher Windows"
+        30 = "Trusted Product Windows"
+        31 = "Trusted Distributor Mac"
+        32 = "Trusted Publisher Mac"
+        36 = "User Policy - Set Security Permissions for File System and Registry Keys"
+        37 = "User Policy - Set Security Permissions for Services"
+        38 = "User Policy - Set Security Permissions for Removable Storage (USB, Optical Discs)"
+        39 = "Collect UAC actions by Local Admin"
+        40 = "JIT Access and Elevation"
+        41 = "Deploy Script"
+        42 = "Execute Script"
+        45 = "Agent Configuration"
+        46 = "Remove Admin"
+        47 = "Deception"
     }
 
     $applicationGroupType = @{
@@ -721,11 +793,13 @@ This command retrieves information about policies associated with the specified 
                             if ($refAppGroups.Id -eq $appGroup.PolicyId) {
                                 $policyTypeName = $policyType[$policy.PolicyType]
                                 $policyAction = $actionMapping[$policy.Action]
-                                Write-Host "The application group '$($appGroup.PolicyName)' was found in the '$($policy.PolicyName)' policy, categorized as '$policyTypeName' with the action set to '$policyAction'" -ForegroundColor Green
+                                Write-Host "The application group '$($appGroup.PolicyName)' - $($appGroup.Description)" -ForegroundColor Green
+                                Write-Host "Was found in the '$($policy.PolicyName)' policy - $($policy.Description)" -ForegroundColor Green
+                                Write-Host "Categorized as '$policyTypeName' with the action set to '$policyAction'" -ForegroundColor Green
                                 # Filter by Allowed Policies
                                 if ($allowedPolicyType -contains $policy.PolicyType) {
                                     foreach ($application in $appGroupDetails.Policy.Applications) {
-                                        Process-Application -Application $application -action $($policy.Action)
+                                        Process-Application -Application $application -PolicyType $($policy.PolicyType) -action $($policy.Action)
                                     }
                                 } else {
                                     Write-Host "Policy '$($policy.PolicyName)' not supported. The supported policy types are: $($supportedPolicyTypes -join ', ')" -ForegroundColor Yellow
@@ -733,31 +807,29 @@ This command retrieves information about policies associated with the specified 
                             }
                         }
                     }
-                }
-                 else {
+                } else {
                     Write-Host "Application Group '$($appGroup.PolicyName)' not supported. The supported application group type are $($supportedApplicationGroupTypes -join ', ')" -ForegroundColor Yellow
                 }    
             }
         }
-    }
-
-    else {
+    } else {
         #Search policy
         $policyFound = $false
         foreach ($policy in $policiesList.Policies) {
             if ($policy.PolicyName -eq $policyName) {
+                $policyTypeName = $policyType[$policy.PolicyType]
+                $policyAction = $actionMapping[$policy.Action]
+                Write-Host "Policy '$policyName' - $($policy.Description) was found"
+                Write-Host "Categorized as '$policyTypeName' with the action set to '$policyAction'" -ForegroundColor Green
+
                 # Filter by Allowed Policies type
                 if ($allowedPolicyType -contains $policy.PolicyType) {
                     $policyFound = $true
                     $policyDetails = Invoke-EPMRestMethod -Uri "$policiesURI/Server/$($policy.PolicyId)" -Method 'GET' -Headers $sessionHeader
                     foreach ($application in $policyDetails.Policy.Applications) {
-                        Process-Application -Application $application -action $($policy.Action)
+                        Process-Application -Application $application -PolicyType $($policy.PolicyType) -action $($policy.Action)
                     }
-        #        } else {
-        #            Write-Host "Policy '$($policy.PolicyName)' not supported. The supported policy types are: $($supportedPolicyTypes -join ', ')" -ForegroundColor Yellow
                 }
-        #    } else { # to be check, generate many output
-        #        Write-Host "Policy '$PolicyName' not supported. The supported policy types are: $($supportedPolicyTypes -join ', ')" -ForegroundColor Yellow
             }
         }
         
@@ -785,10 +857,9 @@ $sessionHeader = @{
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
 # Check if the -ScanPolicies switch is present
-if ($ScanPolicies) {
-    # Check the value of the -ScanPolicies parameter
-    switch ($scanType) {
-        "All" {
+if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
+    switch ($ScanPolicies) {
+        "all" {
             # Perform actions for scanning all policies
             Write-Host "Scanning Policies and Application Groups." -ForegroundColor DarkMagenta
 
@@ -822,9 +893,10 @@ if ($ScanPolicies) {
                 $policyCounter++
             }
         }
-        "AppGroup" {
+        "appgroups" {
             # Perform action for scanning by application group
-            if (-not [string]::IsNullOrEmpty($name)) {
+            if ($PSBoundParameters.ContainsKey('name')) {
+                # Perform actions for scanning selected application group
                 Write-Host "Scanning by application group: $name"
 
                 # Get the Application Group
@@ -838,13 +910,32 @@ if ($ScanPolicies) {
                 
                 Get-PolicyInfo -managerURL $($login.managerURL) -Headers $sessionHeader -setId $($set.setId) -policyName $name -feature "Application Groups" -appGroupList $appGroupList -policiesList $policiesList
             } else {
-                Write-Host "Please specify the application group name."
-                exit
+                # Perform actions for scanning all application groups
+                Write-Host "Scanning all Application Groups." -ForegroundColor DarkMagenta
+
+                $appGroupsFilter = @{
+                    "filter" = "PolicyGroupType EQ 10" # Application Group -> Custom Application Group, Predefined App Group, Predefined Trusted Source 
+                }  | ConvertTo-Json
+                $appGroupList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/ApplicationGroups/Search" -Method 'POST' -Headers $sessionHeader -Body $appGroupsFilter
+                
+                $policiesFilter = @{
+                    "filter" = "PolicyGroupType EQ 3" # Application -> Groups: Advanced, Predefined Policy, Trust
+                }  | ConvertTo-Json    
+                $policiesList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search" -Method 'POST' -Headers $sessionHeader -Body $policiesFilter
+
+                $appGroupsCounter = 1
+                # Get Application Groups
+                foreach ($appGroup in $appGroupList.Policies) {
+                    Write-Host "$appGroupsCounter\$($appGroupList.FilteredCount) Application Group - $($appGroup.PolicyName)" -ForegroundColor Green
+                    Get-PolicyInfo -managerURL $($login.managerURL) -Headers $sessionHeader -setId $($set.setId) -policyName $($appGroup.PolicyName) -feature "Application Groups" -appGroupList $appGroupList -policiesList $policiesList
+                    $appGroupsCounter++
+                }
             }
         }
-        "Policy" {
+        "policies" {
             # Perform action for scanning by policy name
-            if (-not [string]::IsNullOrEmpty($name)) {
+            if ($PSBoundParameters.ContainsKey('name')) {
+                # Perform actions for scanning selected policy name
                 Write-Host "Scanning by policy name: $name"
 
                 # Get the Application Group
@@ -858,8 +949,22 @@ if ($ScanPolicies) {
                 
                 Get-PolicyInfo -managerURL $($login.managerURL) -Headers $sessionHeader -setId $($set.setId) -policyName $name -feature "Server" -appGroupList $appGroupList -policiesList $policiesList
             } else {
-                Write-Host "Please specify the policy name."
-                exit
+                # Perform actions for scanning all policies
+                Write-Host "Scanning all Policies." -ForegroundColor DarkMagenta
+
+                # Get Policies list
+                $policiesFilter = @{
+                    "filter" = "PolicyGroupType EQ 3" # Application -> Groups: Advanced, Predefined Policy, Trust
+                }  | ConvertTo-Json    
+                $policiesList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search" -Method 'POST' -Headers $sessionHeader -Body $policiesFilter
+
+                $policyCounter = 1
+                
+                foreach ($policy in $policiesList.Policies) {
+                    Write-Host "$policyCounter\$($policiesList.FilteredCount) Policy - $($policy.PolicyName)" -ForegroundColor Green
+                    Get-PolicyInfo -managerURL $($login.managerURL) -Headers $sessionHeader -setId $($set.setId) -policyName $($policy.PolicyName) -feature "Server" -policiesList $policiesList
+                    $policyCounter++
+                }
             }
         }
         default {
@@ -875,6 +980,19 @@ if ($ScanPolicies) {
     $eventsNumber = 0
     $lastEventTime
     $filename = "lastProcessedEvent.txt"
+
+    # Check if the 'DestinationFolder' parameter is provided
+    if (!$PSBoundParameters.ContainsKey('DestinationFolder')) {
+        do {
+            # Prompt the user to enter the destination folder
+            $destinationFolder = Read-Host -Prompt "Please provide the destination folder to store data"
+            
+            # Check if the provided value is valid
+            if ([string]::IsNullOrWhiteSpace($destinationFolder)) {
+                Write-Host "Destination folder is required." -ForegroundColor Red
+            }
+        } while ([string]::IsNullOrWhiteSpace($destinationFolder))
+    }
 
     # Prepare destination Folder used to store Last Events Time analyzed
     # Sanitize SET name, could contain charater not allowed
