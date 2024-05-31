@@ -13,8 +13,8 @@
 .PARAMETER tenant
     The EPM tenant name (e.g., eu, uk).
 
-.PARAMETER destinationFolder
-
+.PARAMETER delete
+    Flag to enabled computer deletion
 
 .NOTES
     File: EPMDuplicateComputer.ps1

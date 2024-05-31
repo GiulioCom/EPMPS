@@ -19,7 +19,7 @@
     The EPM username (e.g., user@domain).
 
 .PARAMETER setName
-     Mandatory: No
+    Mandatory: No
     The name of the EPM set.
 
 .PARAMETER tenant
@@ -61,6 +61,7 @@ param (
     [string]$setName = "",
 
     [Parameter(Mandatory = $true, HelpMessage="Please enter valid EPM tenant (eu, uk, ....)")]
+    [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch")]
     [string]$tenant,
 
     [Parameter(HelpMessage = "Please provide the destination folder to store data")]

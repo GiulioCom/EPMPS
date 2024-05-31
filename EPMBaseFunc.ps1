@@ -33,6 +33,7 @@ param (
     [string]$setName,
 
     [Parameter(Mandatory = $true, HelpMessage="Please enter valid EPM tenant (eu, uk, ....)")]
+    [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch")]
     [string]$tenant
 )
 function Invoke-EPMRestMethod  {
