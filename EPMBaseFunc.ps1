@@ -34,8 +34,75 @@ param (
 
     [Parameter(Mandatory = $true, HelpMessage="Please enter valid EPM tenant (eu, uk, ....)")]
     [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch")]
-    [string]$tenant
+    [string]$tenant,
+
+    [Parameter(HelpMessage = "Enable logging to file and console")]
+    [switch]$log,
+
+    [Parameter(HelpMessage = "Specify the log file path")]
+    [string]$logFolder 
 )
+
+# Function to log messages to console and file
+function Write-Log {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$message,
+        
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("INFO", "WARN", "ERROR")]
+        [string]$severity,
+
+        [ValidateSet("Black", "DarkBlue", "DarkGreen", "DarkCyan", "DarkRed", "DarkMagenta", "DarkYellow", "Gray", "DarkGray", "Blue", "Green", "Cyan", "Red", "Magenta", "Yellow", "White")]
+        [string]$ForegroundColor
+    )
+    
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logMessage = "$timestamp [$severity] - $message"
+
+    switch ($severity) {
+        "INFO" {
+            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
+                $ForegroundColor = "Green"
+            }
+            Write-Host $logMessage -ForegroundColor $ForegroundColor
+        }
+        "WARN" {
+            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
+                $ForegroundColor = "Yellow"
+            }
+            Write-Host $logMessage -ForegroundColor $ForegroundColor
+        }
+        "ERROR" {
+            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
+                $ForegroundColor = "Red"
+            }
+            Write-Host $logMessage -ForegroundColor $ForegroundColor
+        }
+    }
+
+    if ($log) {
+        Add-Content -Path $logFilePath -Value $logMessage
+    }
+}
+
+function Write-Box {
+    param (
+        [string]$title
+    )
+    
+    # Calculate the length of the title
+    $titleLength = $title.Length
+
+    # Create the top and bottom lines
+    $line = "-" * $titleLength
+
+    # Print the box
+    Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
+    Write-Log "| $title |" -severity INFO -ForegroundColor Cyan
+    Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
+}
+
 function Invoke-EPMRestMethod  {
 <#
 .SYNOPSIS
@@ -84,8 +151,8 @@ function Invoke-EPMRestMethod  {
 
             # Error: EPM00000AE - Too many calls per 2 minute(s). The limit is 10
             if ( $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
-                Write-Host $ErrorDetailsMessage.ErrorMessage
-                Write-Host "Retrying in $apiDelaySeconds seconds..."
+                Write-Log $ErrorDetailsMessage.ErrorMessage ERROR
+                Write-Log "Retrying in $apiDelaySeconds seconds..." WARN
                 Start-Sleep -Seconds $apiDelaySeconds
                 $retryCount++
             }
@@ -179,10 +246,10 @@ function Get-EPMSetID {
         # Repeat until a valid set number is entered
         do {
             # List the available sets with numbers
-            Write-Host "Available Sets:"
+            Write-Box "Available Sets:" INFO
             $numberSets = 0
             foreach ($set in $sets.Sets) {
-                Write-Host "$($numberSets + 1). $($set.Name)"
+                Write-Log "$($numberSets + 1). $($set.Name)" INFO DarkCyan
                 $numberSets++
             }
         
@@ -194,7 +261,7 @@ function Get-EPMSetID {
                 $chosenSetNumber = [int]$chosenSetNumber
         
                 if ($chosenSetNumber -lt 1 -or $chosenSetNumber -gt $numberSets) {
-                    Write-Error "Invalid set number. Please enter a number between 1 and $numberSets."
+                    Write-Log "Invalid set number. Please enter a number between 1 and $numberSets." ERROR
                 } else {
                     # Set chosenSet based on the user's selection
                     $chosenSet = $sets.Sets[$chosenSetNumber - 1]
@@ -202,7 +269,7 @@ function Get-EPMSetID {
                     $setName = $chosenSet.Name
                 }
             } catch {
-                Write-Error "Invalid input. Please enter a valid number."
+                Write-Log "Invalid input. Please enter a valid number." ERROR
             }
         } until ($setId)
     }
@@ -217,7 +284,7 @@ function Get-EPMSetID {
             }
         }
         if ([string]::IsNullOrEmpty($setId)) {
-            Write-Error "$SetName : Invalid Set"
+            Write-Log "$SetName : Invalid Set" ERROR
             return
         }
     }
@@ -230,6 +297,34 @@ function Get-EPMSetID {
 }
 
 ### Begin Script ###
+
+## Prepare log folder and file
+# Set default log folder if not provided
+if (-not $PSBoundParameters.ContainsKey('logFolder')) {
+    $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $logFolder = Join-Path $scriptDirectory "log"
+}
+
+# Ensure the log folder exists
+if (-not (Test-Path $logFolder)) {
+    New-Item -Path $logFolder -ItemType Directory -Force
+}
+
+# Create log file name based on timestamp and script name
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
+$logFileName = "$timestamp`_$scriptName.log"
+$logFilePath = Join-Path $logFolder $logFileName
+##
+
+## Script Title
+# Get the full path and file name of the current script
+#$scriptFullPath = $PSCommandPath
+# Extract just the file name
+#$scriptName = [System.IO.Path]::GetFileName($scriptFullPath)
+
+Write-Box "$scriptName"
+##
 
 # Request EPM Credentials
 $credential = Get-Credential -UserName $username -Message "Enter password for $username"
@@ -245,17 +340,23 @@ $sessionHeader = @{
 # Get SetId
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
-Write-Host $login.managerURL
-Write-Host $set.SetName
-Write-Host $set.SetId
+Write-Log $login.managerURL INFO
+Write-Log $set.SetName INFO
+Write-Log $set.SetId INFO
+
 
 #Example Request 
 
-# All computers
-$getComputerList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers" -Method 'GET' -Headers $sessionHeader
-$getComputerList | ConvertTo-Json
+$retryCount = 0
+do {
+    # All computers
+    $getComputerList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers" -Method 'GET' -Headers $sessionHeader
+    #$getComputerList | ConvertTo-Json
+    Write-Log $getComputerList INFO
+    $retryCount++
+} while ($retryCount -lt 20)
 
 # Disconnected Computers
-$URLquery = "?`$filter=Status eq 'Disconnected'"
-$getDisconnectedComputerList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers$URLQuery" -Method 'GET' -Headers $sessionHeader
-$getDisconnectedComputerList | ConvertTo-Json
+#$URLquery = "?`$filter=Status eq 'Disconnected'"
+#$getDisconnectedComputerList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers$URLQuery" -Method 'GET' -Headers $sessionHeader
+#$getDisconnectedComputerList | ConvertTo-Json

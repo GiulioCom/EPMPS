@@ -81,8 +81,10 @@ param (
     [string]$name,
 
     [Parameter(HelpMessage = "set slow mode")]
-    [switch]$pause
+    [switch]$pause,
 
+    [Parameter(HelpMessage = "Output only for not compliant definitions")]
+    [switch]$notCompliant
 
 )
 function Invoke-EPMRestMethod  {
@@ -340,6 +342,14 @@ function Evaluate-Patterns {
         value = ""
     }
 
+    $compareAsMapping = @{
+        0 = "exact"
+        1 = "prefix"
+        2 = "contains"
+        3 = "wildcards"
+        4 = "regExp"
+    }
+
     # Manage use case
     if (!$Application.patterns.$PatternName.isEmpty) {
         
@@ -389,48 +399,48 @@ function Process-Application{
     )
 
     $AppTypeMapping = @{
-        2 = "Group"
-        3 = "EXE"
-        4 = "Script"
-        5 = "MSI"
-        6 = "MSU"
-        7 = "WebApp"
-        8 = "WinAdminTask"
-        9 = "ActiveX"
-        13 = "FileSystemNode"
-        14 = "Registry Key"
-        15 = "COM"
-        17 = "WinService"
-        18 = "USB Device"
-        19 = "Optical Disc2"
-        20 = "WinApp"
-        21 = "DLL"
-        28 = "Linux command"
+        2 = "Group"             # Patterns: None
+        3 = "EXE"               # Patterns: File name, Arguments, Location, Location Type, Owner, Publisher, Product name, File description, Company name, Original file name, File version, Product version, File origin (Source), Parent, Service name (must be empty)
+        4 = "Script"            # Patterns: File name, Arguments, Location, Location Type, Owner, Publisher, File origin (Source), Parent
+        5 = "MSI"               # Patterns: File name, Arguments, Location, Location Type, Owner, Publisher, Product name, Company name, Product code, Upgrade code, Product version, File origin (Source), Parent
+        6 = "MSU"               # Patterns: File name, Arguments, Location, Location Type, Owner, Publisher, File origin (Source), Parent
+        7 = "WebApp"            # Patterns: URL
+        8 = "WinAdminTask"      # Patterns: Admin task ID
+        9 = "ActiveX"           # Patterns: File name, Publisher, Code URL, Mime type, CLSID, Version
+        13 = "FileSystemNode"   # Patterns: File name or Location
+        14 = "Registry Key"     # Patterns: Registry key
+        15 = "COM"              # Patterns: File name, Arguments, Location, Location Type, Owner, Publisher, CLSID
+        17 = "WinService"       # Patterns: Service name
+        18 = "USB Device"       # Patterns: Vendor Id, Vendor Name, Product Id, Product Name, Instance Id
+        19 = "Optical Disc2"    # Patterns: Instance Id
+        20 = "WinApp"           # Patterns: Publisher, App package name, App package version, Capabilities
+        21 = "DLL"              # Patterns: File name, Arguments, Location, Location Type, Owner, Publisher, Product name, File description, Company name, Original file name, File version, Product version, File origin (Source), Parent
+        22 = "macPKG"           # Patterns: File name, Location, Publisher, Mac DMG image
+        23 = "MacSysPref"       # Patterns: Admin task ID
+        24 = "MacApplication"   # Patterns: File name, Location, Publisher, Bundle ID, Bundle version
+        26 = "MacDMG"           # Patterns: File name, Location, Publisher
+        28 = "Linux command"    # Patterns: File name, Arguments, Location, Linux link name, Linux script interpreter, Linux run as user
+        104 = "MacSUDO"         # Patterns: File name, Arguments, Publisher
     }
    
-    $compareAsMapping = @{
-        0 = "exact"
-        1 = "prefix"
-        2 = "contains"
-        3 = "wildcards"
-        4 = "regExp"
-    }
-
+    # Define the priority weight
     $priority1 = 30
     $priority2 = 20
     $priority3 = 10
 
     # Set the threshold, the value can change based on policy type or policy action
-    # Policy action allow or deny
-    # Policy type Linux
     $threshold = 0
     
-    if ($action -eq 2 -or $action -eq 1) {
-        $threshold = 30
-    } elseif ($PolicyType -eq 12) {
+    # Policy type Linux or MacOS 60, Widows = 90
+    if ($PolicyType -eq 12 -or $PolicyType -eq 13) {
         $threshold = 60
     } else {
         $threshold = 90
+    }
+    
+    # Policy action allow or deny
+    if ($action -eq 2 -or $action -eq 1) {
+        $threshold = 30
     }
     
     $unspportedAppType = $false    
@@ -454,30 +464,6 @@ function Process-Application{
             $matchedConditions += Evaluate-Patterns $Application "COMPANY_NAME" $priority2
             $matchedConditions += Evaluate-Patterns $Application "ORIGINAL_FILE_NAME" $priority1
             $matchedConditions += Evaluate-Patterns $Application "PARENT_PROCESS" $priority3
-<#             if ($Application.patterns.FILE_NAME.hash) {
-                $matchedConditions += [PSCustomObject]@{
-                    PatternName = "HASH"
-                    Weight = "90"
-                    value = $Application.patterns.FILE_NAME.hash
-                }
-            }
-            # Sum the total weight
-            foreach ($condition in $matchedConditions) {
-                $totalWeight += $condition.Weight
-            }
-            # If child process is enabled divide the total            
-            if ($Application.childProcess -eq $true) {
-                $totalWeight = $totalWeight / 2
-                $matchedConditions += [PSCustomObject]@{
-                    PatternName = "WIN_CHILD_PROCESS"
-                    Weight = "Enabled"
-                } 
-            } else {
-                $matchedConditions += [PSCustomObject]@{
-                    PatternName = "WIN_CHILD_PROCESS"
-                    Weight = "Disabled"
-                }
-            } #>
         }
         'Script' {
             $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
@@ -487,29 +473,6 @@ function Process-Application{
             $matchedConditions += Evaluate-Patterns $Application "OWNER" $priority3
             $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
             $matchedConditions += Evaluate-Patterns $Application "PARENT_PROCESS" $priority3
-<#             if ($Application.patterns.FILE_NAME.hash) {
-                $matchedConditions += [PSCustomObject]@{
-                    PatternName = "HASH"
-                    Weight = "90"
-                }
-            }
-            # Sum the total weight
-            foreach ($condition in $matchedConditions) {
-                $totalWeight += $condition.Weight
-            }
-            # If child process is enabled divide the total            
-            if ($Application.childProcess -eq $true) {
-                $totalWeight = $totalWeight / 2
-                $matchedConditions += [PSCustomObject]@{
-                    PatternName = "WIN_CHILD_PROCESS"
-                    Weight = "Enabled"
-                } 
-            } else {
-                $matchedConditions += [PSCustomObject]@{
-                    PatternName = "WIN_CHILD_PROCESS"
-                    Weight = "Disabled"
-                }
-            } #>
         }
         'MSI' {
             $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
@@ -521,16 +484,6 @@ function Process-Application{
             $matchedConditions += Evaluate-Patterns $Application "PRODUCT_NAME" $priority3
             $matchedConditions += Evaluate-Patterns $Application "COMPANY_NAME" $priority2
             $matchedConditions += Evaluate-Patterns $Application "PARENT_PROCESS" $priority3
-<#             if ($Application.patterns.FILE_NAME.hash) {
-                $matchedConditions += [PSCustomObject]@{
-                    PatternName = "HASH"
-                    Weight = "90"
-                }
-            }
-            # Sum the total weight
-            foreach ($condition in $matchedConditions) {
-                $totalWeight += $condition.Weight
-            } #>
         }
         'MSU' {
             $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
@@ -540,23 +493,11 @@ function Process-Application{
             $matchedConditions += Evaluate-Patterns $Application "OWNER" $priority3
             $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
             $matchedConditions += Evaluate-Patterns $Application "PARENT_PROCESS" $priority3
-<#             if ($Application.patterns.FILE_NAME.hash) {
-                $matchedConditions += [PSCustomObject]@{
-                    PatternName = "HASH"
-                    Weight = "90"
-                }
-            }
-            # Sum the total weight
-            foreach ($condition in $matchedConditions) {
-                $totalWeight += $condition.Weight
-            } #>
         }
         'ActiveX' {
+            $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
             $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
-<#             # Sum the total weight
-            foreach ($condition in $matchedConditions) {
-                $totalWeight += $condition.Weight
-            } #>
+            $matchedConditions += Evaluate-Patterns $Application "CLSID" $priority3
         }
         'COM' {
             $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
@@ -566,23 +507,9 @@ function Process-Application{
             $matchedConditions += Evaluate-Patterns $Application "OWNER" $priority3
             $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
             $matchedConditions += Evaluate-Patterns $Application "CLSID" $priority3
-<#             if ($Application.patterns.FILE_NAME.hash) {
-                $matchedConditions += [PSCustomObject]@{
-                    PatternName = "HASH"
-                    Weight = "90"
-                }
-            }
-            # Sum the total weight
-            foreach ($condition in $matchedConditions) {
-                $totalWeight += $condition.Weight
-            } #>
         }
         'WinApp' {
             $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
-<#             # Sum the total weight
-            foreach ($condition in $matchedConditions) {
-                $totalWeight += $condition.Weight
-            } #>
         }
         'DLL' {
             $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
@@ -596,29 +523,26 @@ function Process-Application{
             $matchedConditions += Evaluate-Patterns $Application "COMPANY_NAME" $priority2
             $matchedConditions += Evaluate-Patterns $Application "ORIGINAL_FILE_NAME" $priority1
             $matchedConditions += Evaluate-Patterns $Application "PARENT_PROCESS" $priority3
-<#             if ($Application.patterns.FILE_NAME.hash) {
-                $matchedConditions += [PSCustomObject]@{
-                    PatternName = "HASH"
-                    Weight = "90"
-                }
-            }
-            # Sum the total weight
-            foreach ($condition in $matchedConditions) {
-                $totalWeight += $condition.Weight
-            }
-            # If child process is enabled divide the total            
-            if ($Application.childProcess -eq $true) {
-                $totalWeight = $totalWeight / 2
-                $matchedConditions += [PSCustomObject]@{
-                    PatternName = "WIN_CHILD_PROCESS"
-                    Weight = "Enabled"
-                } 
-            } else {
-                $matchedConditions += [PSCustomObject]@{
-                    PatternName = "WIN_CHILD_PROCESS"
-                    Weight = "Disabled"
-                }
-            } #>
+        }
+        'macPKG' {
+            $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
+            $matchedConditions += Evaluate-Patterns $Application "LOCATION" $priority1
+            $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
+        }
+        'MacApplication' {
+            $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
+            $matchedConditions += Evaluate-Patterns $Application "LOCATION" $priority1
+            $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
+        }
+        'MacDMG' {
+            $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
+            $matchedConditions += Evaluate-Patterns $Application "LOCATION" $priority1
+            $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
+        }
+        'MacSUDO' {
+            $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
+            $matchedConditions += Evaluate-Patterns $Application "ARGUMENTS" $priority1
+            $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
         }
         'Linux command' {
             $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
@@ -626,55 +550,9 @@ function Process-Application{
             $matchedConditions += Evaluate-Patterns $Application "ARGUMENTS" $priority1
             $matchedConditions += Evaluate-Patterns $Application "LINUX_LINK_NAME" $priority3
             $matchedConditions += Evaluate-Patterns $Application "LINUX_SCRIPT_INTERPRETER" $priority2
-<#             # Checksum can't be managed by external funtion
-            if ($Application.patterns.FILE_NAME.hash) {
-                $matchedConditions += [PSCustomObject]@{
-                    PatternName = "HASH"
-                    Weight = "90"
-                    value = $Application.patterns.FILE_NAME.hash
-                }
-            }
-            # Sum the total weight
-            foreach ($condition in $matchedConditions) {
-                $totalWeight += $condition.Weight
-            }
-
-            # Linux  Child Process   
-            $linuxChildProcessMapping = @{
-                0 = "Deny"
-                1 = "Allow"
-                2 = "Allow and Restrict"
-            }
-
-            switch ($Application.LinuxChildProcess) {
-                0 { $totalWeight = $totalWeight }
-                1 { $totalWeight = $totalWeight / 2 }
-                2 { $totalWeight = $totalWeight / 2 }
-            }
-            $linuxChildProcessName = $linuxChildProcessMapping[$Application.LinuxChildProcess]
-            $matchedConditions += [PSCustomObject]@{
-                PatternName = "LIN_CHILD_PROCESS"
-                Weight = "$linuxChildProcessName"
-            }
-        
-            # Linux Sudo no password
-            if ($Application.linuxSudoNoPassword -eq $true) {
-                $totalWeight = $totalWeight / 2
-                $matchedConditions += [PSCustomObject]@{
-                    PatternName = "LIN_SUDO_NO_PASSWORD"
-                    Weight = "Enabled"
-                }
-            } else {
-                $matchedConditions += [PSCustomObject]@{
-                    PatternName = "LIN_SUDO_NO_PASSWORD"
-                    Weight = "Disabled"
-                }
-            } #>
-            
         }
         default {
             # Default action if none of the conditions match
-            # Write-Host "Application Type $appTypeName not supported"
             Write-Log "Application Type '$appTypeName' not supported." -severity WARN -ForegroundColor Yellow
             $unspportedAppType = $true
         }
@@ -683,7 +561,8 @@ function Process-Application{
     if (!$unspportedAppType) {
         # Evaluate common patter, such as HASH
         switch ($appTypeName) {
-            { ($_ -eq "EXE") -or ($_ -eq "Script") -or ($_ -eq "MSI") -or ($_ -eq "MSU") -or ($_ -eq "COM") -or ($_ -eq "DLL") -or ($_ -eq "Linux command") } {
+            { ($_ -eq "EXE") -or ($_ -eq "Script") -or ($_ -eq "MSI") -or ($_ -eq "MSU") -or ($_ -eq "COM") -or ($_ -eq "DLL") -or 
+              ($_ -eq "Linux command") -or ($_ -eq "macPKG") -or ($_ -eq "MacApplication") -or ($_ -eq "MacDMG") -or ($_ -eq "MacSUDO")} {
                 if ($Application.patterns.FILE_NAME.hash) {
                     $matchedConditions += [PSCustomObject]@{
                         PatternName = "HASH"
@@ -699,7 +578,7 @@ function Process-Application{
             $totalWeight += $condition.Weight
         }
     
-        # Evaluate global pattern such as child process and recalculate
+        # Evaluate global pattern, such as child process
         switch ($appTypeName) {
             { ($_ -eq "EXE") -or ($_ -eq "Script") -or ($_ -eq "DLL") } {
             # If child process is enabled divide the total            
@@ -756,7 +635,7 @@ function Process-Application{
             }
         }
         
-        # Define the application name for a better output
+        # Define the application name for better output
         $applicationName = $null
         foreach ($condition in $matchedConditions) {
             if ($condition.Weight -ge 15) {
@@ -786,20 +665,19 @@ function Process-Application{
         }          
         
         If ($totalWeight -ge $threshold) {
-            # Write-Host "$applicationName - $totalWeight - Compliant to Policy Standards" -ForegroundColor Green
-            Write-Log "> $applicationName - $totalWeight - Compliant to Policy Standards" -severity INFO -ForegroundColor Green
-            Write-Log "|-> Application Type: $appTypeName" -severity INFO -ForegroundColor Gray
-            Write-Log "|-> Application Description: $($Application.description)" -severity INFO -ForegroundColor Gray
-            # Iterate through $matchedConditions
-            foreach ($condition in $matchedConditions) {
-                # Print PatternName if Weight is greater than 0
-                if ($condition.Weight -ne 0) {
-                    # Write-Host "PatternName: $($condition.PatternName) = $($condition.Weight)"
-                    Write-Log "|-> $($condition.PatternName): $($condition.value) = $($condition.Weight)" -severity INFO -ForegroundColor Gray
+            if (!$notCompliant) {
+                Write-Log "> $applicationName - $totalWeight - Compliant to Policy Standards" -severity INFO -ForegroundColor Green
+                Write-Log "|-> Application Type: $appTypeName" -severity INFO -ForegroundColor Gray
+                Write-Log "|-> Application Description: $($Application.description)" -severity INFO -ForegroundColor Gray
+                # Iterate through each $matchedConditions
+                foreach ($condition in $matchedConditions) {
+                    # Print PatternName when weight is greater than 0
+                    if ($condition.Weight -ne 0) {
+                        Write-Log "|-> $($condition.PatternName): $($condition.value) = $($condition.Weight)" -severity INFO -ForegroundColor Gray
+                    }
                 }
             }
         } else {
-            # Write-Host "$applicationName - $totalWeight - Not Compliant to Policy Standards" -ForegroundColor Red
             Write-Log "> $applicationName - $totalWeight - Not Compliant to Policy Standards" -severity WARN -ForegroundColor Yellow
             Write-Log "|-> Application Type: $appTypeName" -severity WARN -ForegroundColor Gray
             Write-Log "|-> Application Description: $($Application.description)" -severity WARN -ForegroundColor Gray
@@ -807,8 +685,6 @@ function Process-Application{
             foreach ($condition in $matchedConditions) {
                 # Print PatternName if Weight is greater than 0
                 if ($condition.Weight -ne 0) {
-                    # Write-Host "PatternName: $($condition.PatternName) = $($condition.Weight)"
-                    # Write-Log "|-> PatternName: $($condition.PatternName) = $($condition.Weight) - $($condition.value)" -severity WARN -ForegroundColor Gray
                     Write-Log "|-> $($condition.PatternName): $($condition.value) = $($condition.Weight)" -severity WARN -ForegroundColor Gray
                 }
             }
@@ -924,14 +800,21 @@ This command retrieves information about policies associated with the specified 
     $applicationGroupType = @{
         14 = "Application Group Win"
         15 = "Application Group Linux"
+        16 = "Application Group Mac"
+        19 = "Microsoft Windows Programs (Win Files)"
+        21 = "Authorized Applications (Ransomware)"
+        33 = "Trusted Distributor Predefined Definition Win"
+        34 = "Trusted Updater Predefined Definition Win"
+        35 = "Trusted Distributor Predefined Definition Mac"
         43 = "Predefined App Groups Win"
     }
 
-    # Filter by Application Group Win, Predefined App Groups Win, Application Group Linux
-    $allowedApplicationGroupType = @(14, 43, 15)
+    # Define script supported Application Group
+    $allowedApplicationGroupType = @(14, 43, 15, 16)
     $supportedApplicationGroupTypes = $allowedApplicationGroupType | Where-Object { $applicationGroupType.ContainsKey($_) } | ForEach-Object { $applicationGroupType[$_] }
 
-    $allowedPolicyType = @(11, 18, 12)
+    # Define script supported Policy Type
+    $allowedPolicyType = @(11, 18, 12, 13)
     $supportedPolicyTypes = $allowedPolicyType | Where-Object { $policyType.ContainsKey($_) } | ForEach-Object { $policyType[$_] }
     
     
@@ -956,9 +839,6 @@ This command retrieves information about policies associated with the specified 
                             if ($refAppGroups.Id -eq $appGroup.PolicyId) {
                                 $policyTypeName = $policyType[$policy.PolicyType]
                                 $policyAction = $actionMapping[$policy.Action]
-                                # Write-Host "The application group '$($appGroup.PolicyName)' - $($appGroup.Description)" -ForegroundColor Green
-                                # Write-Host "Was found in the '$($policy.PolicyName)' policy - $($policy.Description)" -ForegroundColor Green
-                                # Write-Host "Categorized as '$policyTypeName' with the action set to '$policyAction'" -ForegroundColor Green
                                 Write-Log "The application group '$($appGroup.PolicyName)' - $($appGroup.Description)" -severity INFO -ForegroundColor Green
                                 Write-Log "Was found in the '$($policy.PolicyName)' policy - $($policy.Description)" -severity INFO -ForegroundColor Green
                                 Write-Log "Categorized as '$policyTypeName' with the action set to '$policyAction'" -severity INFO -ForegroundColor Green
@@ -969,14 +849,12 @@ This command retrieves information about policies associated with the specified 
                                         Process-Application -Application $application -PolicyType $($policy.PolicyType) -action $($policy.Action)
                                     }
                                 } else {
-                                    # Write-Host "Policy '$($policy.PolicyName)' not supported. The supported policy types are: $($supportedPolicyTypes -join ', ')" -ForegroundColor Yellow
                                     Write-Log "Policy '$($policy.PolicyName)' not supported. The supported policy types are: $($supportedPolicyTypes -join ', ')" -severity WARN -ForegroundColor Yellow
                                 }
                             }
                         }
                     }
                 } else {
-                    # Write-Host "Application Group '$($appGroup.PolicyName)' not supported. The supported application group type are $($supportedApplicationGroupTypes -join ', ')" -ForegroundColor Yellow
                     Write-Log "Application Group '$($appGroup.PolicyName)' not supported. The supported application group type are $($supportedApplicationGroupTypes -join ', ')" -severity WARN -ForegroundColor Yellow
                 }    
             }
@@ -988,8 +866,6 @@ This command retrieves information about policies associated with the specified 
             if ($policy.PolicyName -eq $policyName) {
                 $policyTypeName = $policyType[$policy.PolicyType]
                 $policyAction = $actionMapping[$policy.Action]
-                # Write-Host "Policy '$policyName' - $($policy.Description) was found"
-                # Write-Host "Categorized as '$policyTypeName' with the action set to '$policyAction'" -ForegroundColor Green
                 Write-Log "Policy '$policyName' - $($policy.Description) was found" -severity INFO -ForegroundColor Green
                 Write-Log "Categorized as '$policyTypeName' with the action set to '$policyAction'" -severity INFO -ForegroundColor Green
 
@@ -1005,7 +881,6 @@ This command retrieves information about policies associated with the specified 
         }
         
         if ($policyFound -eq $false) {
-            # Write-Host "Policy '$PolicyName' not supported. The supported policy types are: $($supportedPolicyTypes -join ', ')" -ForegroundColor Yellow
             Write-Log "Policy '$PolicyName' not supported. The supported policy types are: $($supportedPolicyTypes -join ', ')" -severity WARN -ForegroundColor Yellow
         }
     }
@@ -1063,7 +938,7 @@ $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyComm
 $logFileName = "$timestamp`_$scriptName.log"
 $logFilePath = Join-Path $logFolder $logFileName
 
-#Write-Log "Analayzing Set $($set.setName)" -severity INFO -ForegroundColor Cyan
+Write-Box "$scriptName"
 Write-Box "Analyzing Set $($set.setName)"
 
 # Check if the -ScanPolicies switch is present
@@ -1071,8 +946,6 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
     switch ($ScanPolicies) {
         "all" {
             # Perform actions for scanning all policies
-            #Write-Host "Scanning Policies and Application Groups." -ForegroundColor DarkMagenta
-            # Write-Log "Scanning Policies and Application Groups." -severity INFO -ForegroundColor DarkCyan
             Write-Box "Scanning Policies and Application Groups."
 
             # Get Application Groups
@@ -1087,30 +960,24 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
             }  | ConvertTo-Json    
             $policiesList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search" -Method 'POST' -Headers $sessionHeader -Body $policiesFilter
 
-            #Write-Host "Scanning App Groups..." -ForegroundColor DarkMagenta
             Write-Log "Analzying Application Groups..." -severity INFO -ForegroundColor DarkCyan
-            
             Write-Log "Retrieved $($appGroupList.FilteredCount) Application Groups..." -severity INFO -ForegroundColor DarkCyan
 
             $appGroupsCounter = 1
 
             foreach ($appGroup in $appGroupList.Policies) {
-                # Write-Host "$appGroupsCounter\$($appGroupList.FilteredCount) Application Group - $($appGroup.PolicyName)" -ForegroundColor Green
                 Write-Log "Analyzing $appGroupsCounter of $($appGroupList.FilteredCount) Application Group - $($appGroup.PolicyName)" -severity INFO -ForegroundColor DarkCyan
                 Get-PolicyInfo -managerURL $($login.managerURL) -Headers $sessionHeader -setId $($set.setId) -policyName $($appGroup.PolicyName) -feature "Application Groups" -appGroupList $appGroupList -policiesList $policiesList
                 $appGroupsCounter++
             }
 
             # Get Policyes list
-            #Write-Host "Scanning Policies..." -ForegroundColor DarkMagenta
-            #Write-Log "Scanning Policies..." -severity INFO -ForegroundColor DarkCyan
             Write-Log "Analzying Application Policies..." -severity INFO -ForegroundColor DarkCyan
             Write-Log "Retrieved $($policiesList.FilteredCount) Application Policies..." -severity INFO -ForegroundColor DarkCyan
 
             $policyCounter = 1
             
             foreach ($policy in $policiesList.Policies) {
-                # Write-Host "$policyCounter\$($policiesList.FilteredCount) Policy - $($policy.PolicyName)" -ForegroundColor Green
                 Write-Log "Analyzing $policyCounter of $($policiesList.FilteredCount) Policy - $($policy.PolicyName)" -severity INFO -ForegroundColor DarkCyan
                 Get-PolicyInfo -managerURL $($login.managerURL) -Headers $sessionHeader -setId $($set.setId) -policyName $($policy.PolicyName) -feature "Server" -policiesList $policiesList
                 $policyCounter++
@@ -1120,7 +987,6 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
             # Perform action for scanning by application group
             if ($PSBoundParameters.ContainsKey('name')) {
                 # Perform actions for scanning selected application group
-                #Write-Host "Scanning by application group: $name"
                 Write-Log "Scanning by Application Group: $($name)" -severity INFO -ForegroundColor DarkCyan
 
                 # Get the Application Group
@@ -1135,7 +1001,6 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
                 Get-PolicyInfo -managerURL $($login.managerURL) -Headers $sessionHeader -setId $($set.setId) -policyName $name -feature "Application Groups" -appGroupList $appGroupList -policiesList $policiesList
             } else {
                 # Perform actions for scanning all application groups
-                #Write-Host "Scanning all Application Groups." -ForegroundColor DarkMagenta
                 Write-Log "Analyzing all Application Groups..." -severity INFO -ForegroundColor DarkCyan
 
                 $appGroupsFilter = @{
@@ -1151,7 +1016,6 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
                 $appGroupsCounter = 1
                 # Get Application Groups
                 foreach ($appGroup in $appGroupList.Policies) {
-                    #Write-Host "$appGroupsCounter\$($appGroupList.FilteredCount) Application Group - $($appGroup.PolicyName)" -ForegroundColor Green
                     Write-Log "Analyzing $appGroupsCounter of $($appGroupList.FilteredCount) Application Group - $($appGroup.PolicyName)" -severity INFO -ForegroundColor DarkCyan
                     Get-PolicyInfo -managerURL $($login.managerURL) -Headers $sessionHeader -setId $($set.setId) -policyName $($appGroup.PolicyName) -feature "Application Groups" -appGroupList $appGroupList -policiesList $policiesList
                     $appGroupsCounter++
@@ -1162,7 +1026,6 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
             # Perform action for scanning by policy name
             if ($PSBoundParameters.ContainsKey('name')) {
                 # Perform actions for scanning selected policy name
-                # Write-Host "Scanning by policy name: $name"
                 Write-Log "Scanning by Policy: $name" -severity INFO -ForegroundColor DarkCyan
 
                 # Get the Application Group
@@ -1177,8 +1040,6 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
                 Get-PolicyInfo -managerURL $($login.managerURL) -Headers $sessionHeader -setId $($set.setId) -policyName $name -feature "Server" -appGroupList $appGroupList -policiesList $policiesList
             } else {
                 # Perform actions for scanning all policies
-                #Write-Host "Scanning all Policies." -ForegroundColor DarkMagenta
-                # Write-Log "Scanning all Policies." -severity INFO -ForegroundColor DarkCyan
                 Write-Box "Scanning all Policies."
 
                 # Get Policies list
@@ -1190,7 +1051,6 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
                 $policyCounter = 1
                 
                 foreach ($policy in $policiesList.Policies) {
-                    #Write-Host "$policyCounter\$($policiesList.FilteredCount) Policy - $($policy.PolicyName)" -ForegroundColor Green
                     Write-Log "Analyzing $policyCounter of $($policiesList.FilteredCount) Policy - $($policy.PolicyName)" -severity INFO -ForegroundColor DarkCyan
                     Get-PolicyInfo -managerURL $($login.managerURL) -Headers $sessionHeader -setId $($set.setId) -policyName $($policy.PolicyName) -feature "Server" -policiesList $policiesList
                     $policyCounter++
@@ -1198,7 +1058,6 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
             }
         }
         default {
-            # Write-Host "Invalid value for -ScanPolicies. Accepted values are 'All', 'AppGroup', 'Policies'."
             Write-Log "Invalid value for -ScanPolicies. Accepted values are 'All', 'AppGroup', 'Policies'." -severity ERROR -ForegroundColor Red
             exit
         }
@@ -1220,7 +1079,6 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
             
             # Check if the provided value is valid
             if ([string]::IsNullOrWhiteSpace($destinationFolder)) {
-                # Write-Host "Destination folder is required." -ForegroundColor Red
                 Write-Log "Destination folder is required." -severity ERROR -ForegroundColor Red
             }
         } while ([string]::IsNullOrWhiteSpace($destinationFolder))
@@ -1237,7 +1095,6 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
         New-Item -ItemType Directory -Path $destinationFolder -Force -ErrorAction Stop | Out-Null
     } catch {
         # Handle errors if necessary
-        # Write-Host "Error creating directory: $_"
         Write-Log "Error creating directory: $_." -severity ERROR -ForegroundColor Red
     }
 
@@ -1247,14 +1104,12 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
         
         if (!(Test-Path -Path $lastProcessedEventFile -PathType Leaf)) {
             # If the file does not exist, continue with the rest of the code
-            # Write-Host "The $filename file does not exist in the folder."
             Write-Log "The $filename file does not exist in the folder." -severity WARN -ForegroundColor Yellow
         } else {
             $lastEventTime = Get-Content -Path $lastProcessedEventFile -TotalCount 1
         }
     } catch {
         # Handle errors if necessary
-        # Write-Host "Error loading $filename"
         Write-Log "Error loading $filename." -severity ERROR -ForegroundColor Red
     }
 
@@ -1277,7 +1132,6 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
             if ($setAdminsAudit.Description -match $pattern) {
                 $policyName = $Matches[1]
                 $eventsNumber++
-                # Write-Host "$eventsNumber. $($setAdminsAudit.Feature): $policyName"
                 Write-Log "$eventsNumber. $($setAdminsAudit.Feature): $policyName" -severity INFO -ForegroundColor DarkCyan
                 
                 # Get the Application Group only the first time to reduce the EPM request
@@ -1295,32 +1149,26 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
                 
                 Get-PolicyInfo -managerURL $($login.managerURL) -Headers $sessionHeader -setId $($set.setId) -policyName $policyName -feature $($setAdminsAudit.Feature) -appGroupList $appGroupList -policiesList $policiesList
             } else {
-                # Write-Host "No match found for $($setAdminsAudit.Description)."
                 Write-Log "No match found for $($setAdminsAudit.Description)." -severity WARN -ForegroundColor Yellow
             }
         }
 
         # Update last event time
         $lastEventTime = $setAdminsAudit.EventTime
-        #Write-Host $lastEventTime
     }
 
     # Provide events results
     if ($eventsNumber -eq 0) {
-        # Write-Host "No event processed"
         Write-Log "No event processed" -severity INFO -ForegroundColor Gray
     } else {
-        # Write-Host "Processed $eventsNumber events"
         Write-Log "Processed $eventsNumber events" -severity INFO -ForegroundColor Gray
     }
 
     # Write the value of $lastEventTime to the lastProcessedEvent.txt file
     try {
         $lastEventTime | Set-Content -Path $lastProcessedEventFile -Encoding UTF8 -ErrorAction Stop
-        # Write-Host "Successfully wrote last event time to $lastProcessedEventFile"
         Write-Log "Successfully wrote last event time to $lastProcessedEventFile" -severity INFO -ForegroundColor Gray
     } catch {
-        # Write-Host "Error writing to $lastProcessedEventFile"
         Write-Log "Error writing to $lastProcessedEventFile" -severity ERROR -ForegroundColor Red
     }
 }
