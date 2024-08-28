@@ -1,0 +1,5 @@
+AppGroupName,AppGroupType,FileType,FileName,Publisher,Path
+RestAPITest,Windows,exe,notepad.exe,Microsfot Windows,c:\windows
+RestAPITest,Windows,exe,another.exe,Microsfot Windows,
+RestAPITest2,Windows,exe,another2.exe,Microsoft Windows,
+RestAPITest,Windows,exe,last.exe,Microsfot Windows,c:\programs files
