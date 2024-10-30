@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     1. Retrieve events from EPM that occurred after the last stored timestamp.
-    2. Create JIT policies in EPM based on the retrieved events.
+    2. Create JIT App policies in EPM based on the retrieved events.
     3. Update the log file with the latest event timestamp.
 
 .PARAMETER username
@@ -20,7 +20,7 @@
     File: EPMCreateJITApp.ps1
     Author: Giulio Compagnone
     Company: CyberArk
-    Version: 0.1 - POC
+    Version: 0.5 - POC
     Date: 09/2024
     
 .EXAMPLE
@@ -328,6 +328,8 @@ $sessionHeader = @{
 # Get SetId
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
+Write-Box "$($set.setName)"
+
 # Prereqisites completed
 
 # Set the last events, by default 1 month
@@ -353,12 +355,12 @@ if (Test-Path $logFile -PathType Leaf) {
         $lastEventTimestamp = $matches[0]
 
         # Display the timestamp
-        Write-Host "Searching Manual Request events from $lastEventTimestamp"
+        Write-Log "Searching Manual Request events from $lastEventTimestamp" INFO
     } else {
-        Write-Host "The first line does not match the expected timestamp format. Starting the event search from $lastEventTimestamp"
+        Write-Log "The first line does not match the expected timestamp format. Starting the event search from $lastEventTimestamp" WARN
     }
 } else {
-    Write-Host "The file does not exist. Starting the event search from $lastEventTimestamp"
+    Write-Log "The file does not exist. Starting the event search from $lastEventTimestamp" WARN
 }
 
 # Get Events
@@ -367,24 +369,29 @@ $eventsFilter = @{
 }  | ConvertTo-Json
 
 $events = Invoke-EPMRestMethod -URI "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Events/Search?limit=1000" -Method 'POST' -Headers $sessionHeader -Body $eventsFilter
+$eventsCounter = 1
 
 foreach ($event in $events.events) {
-
+    Write-Log "$eventsCounter of $($events.filteredCount) events" INFO
+    Write-Log "=========" INFO
     Write-Log $event.userName INFO
+    Write-Log $event.userIsAdmin INFO # Write a function
     Write-Log $event.computerName INFO
+    Write-Log $event.justification INFO
     Write-Log $event.fileName INFO
     Write-Log $event.hash INFO
+    Write-Log $event.processCommandLine INFO
     Write-Log $event.operatingSystemType INFO
     Write-Log $event.arrivalTime INFO
-    Write-Log "=====" INFO
+    Write-Log "==========" INFO
 
     do {
-        $userInput = Read-Host "Do you want create JIT policy? Please enter 'yes' (y) or 'no' (n)"
+        $userInput = Read-Host "Do you want create JIT Application policy? Please enter 'yes' (y) or 'no' (n)"
         $userInput = $userInput.ToLower()  # Convert input to lowercase for easy comparison
     } while ($userInput -notin @("yes", "y", "no", "n"))
     
     if ($userInput -in @("yes", "y")) {
-        Write-Host "You selected YES."
+        Write-Log "Creating Application Policy..." INFO
         
         $approveBody = @{
             "SendEmail" = $false
@@ -392,23 +399,28 @@ foreach ($event in $events.events) {
             "Elevation" = 1
         } | ConvertTo-Json
         
-        
-        
         $policy = Invoke-EPMRestMethod -URI "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Elevate" -Method 'POST' -Headers $sessionHeader -Body $approveBody
-        $policy
+        if ($policy.id) {
+            Write-Log "$($policy.Name) created successfully" INFO
+        } else {
+            Write-Log "Error creating the application policy" ERROR
+        }
         
     } else {
-        Write-Host "You selected NO."
+        Write-Log "Delete Event..." WARN
         $rejectBody = @{
             "SendEmail" = $false
             "Filter" = "aggregatedBy EQ ""$($event.hash),32"""
             "Elevation" = 2
         } | ConvertTo-Json
         
-        $rejectBody | ConvertTo-Json
+        $rejectBody
         
+        #$rejectBody | ConvertTo-Json
         
         $policy = Invoke-EPMRestMethod -URI "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Elevate" -Method 'DELETE' -Headers $sessionHeader -Body $rejectBody
-        $policy
+        $policy | ConvertTo-Json
     }
+
+    $eventsCounter++
 }
