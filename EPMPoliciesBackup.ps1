@@ -1,211 +1,317 @@
+<#
+.SYNOPSIS
+    Backup Policies and configuration
+
+.DESCRIPTION
+    Save all policies (Default, Advanced, Application), Application Groups and Advanced Configuration
+    The script is ready to use an inclremental backup mode, uncomment "incremental backup" to enabled  
+    
+.PARAMETER username
+    The EPM username (e.g., user@domain).
+
+.PARAMETER setName
+    The name of the EPM set.
+
+.PARAMETER tenant
+    The EPM tenant name (e.g., eu, uk).
+
+.NOTES
+    File: EPMPoliciesBackup.ps1
+    Author: Giulio Compagnone
+    Company: CyberArk
+    Version: 0.3 - INTERNAL
+    Date: 02/2023
+
+.RELASE
+    11-2024
+    Version 0.3 ' Added support for Default Policy and Other type of policies.
+
+    06-2024
+    Version 0.2 ' Improve output and logging.
+
+    02/2024
+    Version 0.1 ' Initial script creation with basic backup functionality.
+
+.EXAMPLE
+    # Define the Set Name
+    .\EPMPoliciesBackup.ps1 -username "user@domain" -setName "MySet" -tenant "eu" -destinationFolder "c:\EPMbackup"
+    # No Set
+    .\EPMPoliciesBackup.ps1 -username "user@domain" -tenant "eu" -destinationFolder "c:\EPMbackup"
+    # Write output on log
+    .\EPMPoliciesBackup.ps1 -username "user@domain" -tenant "eu" -destinationFolder "c:\EPMbackup"
+#>
 param (
     [Parameter(Mandatory = $true, HelpMessage="Please enter valid EPM username (For example: user@domain)")]
     [string]$username,
 
     [Parameter(HelpMessage="Please enter valid EPM set name")]
-    [string]$Setname,
+    [string]$setName,
 
     [Parameter(Mandatory = $true, HelpMessage="Please enter valid EPM tenant (eu, uk, ....)")]
+    [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch")]
     [string]$tenant,
+
+    [Parameter(HelpMessage = "Enable logging to file and console")]
+    [switch]$log,
+
+    [Parameter(HelpMessage = "Specify the log file path")]
+    [string]$logFolder,
 
     [Parameter(Mandatory = $true)]
     [string]$destinationFolder
-
 )
 
+function Write-Log {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$message,
+        
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("INFO", "WARN", "ERROR")]
+        [string]$severity,
+
+        [ValidateSet("Black", "DarkBlue", "DarkGreen", "DarkCyan", "DarkRed", "DarkMagenta", "DarkYellow", "Gray", "DarkGray", "Blue", "Green", "Cyan", "Red", "Magenta", "Yellow", "White")]
+        [string]$ForegroundColor
+    )
+    
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logMessage = "$timestamp [$severity] - $message"
+
+    switch ($severity) {
+        "INFO" {
+            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
+                $ForegroundColor = "Green"
+            }
+            Write-Host $logMessage -ForegroundColor $ForegroundColor
+        }
+        "WARN" {
+            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
+                $ForegroundColor = "Yellow"
+            }
+            Write-Host $logMessage -ForegroundColor $ForegroundColor
+        }
+        "ERROR" {
+            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
+                $ForegroundColor = "Red"
+            }
+            Write-Host $logMessage -ForegroundColor $ForegroundColor
+        }
+    }
+
+    if ($log) {
+        Add-Content -Path $logFilePath -Value $logMessage
+    }
+}
+
+function Write-Box {
+    param (
+        [string]$title
+    )
+    
+    # Calculate the length of the title
+    $titleLength = $title.Length
+
+    # Create the top and bottom lines
+    $line = "-" * $titleLength
+
+    # Print the box
+    Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
+    Write-Log "| $title |" -severity INFO -ForegroundColor Cyan
+    Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
+}
+
 function Invoke-EPMRestMethod  {
+<#
+.SYNOPSIS
+    Invokes a REST API method with automatic retry logic in case of transient failures.
+
+.DESCRIPTION
+    This function is designed to make REST API calls with automatic retries in case of specific errors, such as rate limiting.
+    It provides a robust way to handle transient failures and ensures that the API call is retried a specified number of times.
+
+.PARAMETER URI
+    The Uniform Resource Identifier (URI) for the REST API endpoint.
+
+.PARAMETER Method
+    The HTTP method (e.g., GET, POST, PUT, DELETE) for the API call.
+
+.PARAMETER Body
+    The request body data to be sent in the API call (can be null for certain methods).
+
+.PARAMETER Headers
+    Headers to include in the API request.
+#>
+    param (
+        [string]$URI,
+        [string]$Method,
+        [object]$Body,
+        [hashtable]$Headers
+    )
+
+    $apiDelaySeconds = 120
+    $maxRetries = 3
+    $retryCount = 0
+
+    while ($retryCount -lt $maxRetries) {
+        try {
+            $response = Invoke-RestMethod -Uri $Uri -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
+            return $response
+        }
+        catch {
+            # Convert Error message to Powershell Object
+            if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+                $ErrorDetailsMessage = $_.ErrorDetails.Message | ConvertFrom-Json
+            }
+            else {
+                throw "API call failed. $_"
+            }
+
+            # Error: EPM00000AE - Too many calls per 2 minute(s). The limit is 10
+            if ( $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
+                Write-Log $ErrorDetailsMessage.ErrorMessage ERROR
+                Write-Log "Retrying in $apiDelaySeconds seconds..." WARN
+                Start-Sleep -Seconds $apiDelaySeconds
+                $retryCount++
+            }
+            else {
+                throw "API call failed. ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
+            }
+        }
+    }
+
+    # If all retries fail, handle accordingly
+    throw "API call failed after $RetryCount retries."
+}
+
+function Connect-EPM {
     <#
     .SYNOPSIS
-        Invokes a REST API method with automatic retry logic in case of transient failures.
-    
+    Connects to the EPM (Enterprise Password Vault) using the provided credentials and tenant information.
+
     .DESCRIPTION
-        This function is designed to make REST API calls with automatic retries in case of specific errors, such as rate limiting.
-        It provides a robust way to handle transient failures and ensures that the API call is retried a specified number of times.
-    
-    .PARAMETER URI
-        The Uniform Resource Identifier (URI) for the REST API endpoint.
-    
-    .PARAMETER Method
-        The HTTP method (e.g., GET, POST, PUT, DELETE) for the API call.
-    
-    .PARAMETER Body
-        The request body data to be sent in the API call (can be null for certain methods).
-    
-    .PARAMETER Headers
-        Headers to include in the API request.
+    This function performs authentication with the EPM API to obtain the manager URL and authentication details.
+
+    .PARAMETER credential
+    The credential object containing the username and password.
+
+    .PARAMETER epmTenant
+    The EPM tenant name.
+
+    .OUTPUTS
+    A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
+
     #>
-        param (
-            [string]$URI,
-            [string]$Method,
-            [object]$Body,
-            [hashtable]$Headers
-        )
-    
-        $apiDelaySeconds = 120
-        $maxRetries = 3
-        $retryCount = 0
-    
-        while ($retryCount -lt $maxRetries) {
-            try {
-                $response = Invoke-RestMethod -Uri $Uri -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
-                return $response
-            }
-            catch {
-                # Convert Error message to Powershell Object
-                if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
-                    $ErrorDetailsMessage = $_.ErrorDetails.Message | ConvertFrom-Json
-                }
-                else {
-                    throw "API call failed. $_"
-                }
-    
-                # Error: EPM00000AE - Too many calls per 2 minute(s). The limit is 10
-                if ( $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
-                    Write-Host $ErrorDetailsMessage.ErrorMessage
-                    Write-Host "Retrying in $apiDelaySeconds seconds..."
-                    Start-Sleep -Seconds $apiDelaySeconds
-                    $retryCount++
-                }
-                else {
-                    throw "API call failed. ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
-                }
-            }
-        }
-    
-        # If all retries fail, handle accordingly
-        throw "API call failed after $RetryCount retries."
+    param (
+        [pscredential]$credential,  # Credential object containing the username and password
+        [string]$epmTenant          # EPM tenant name
+    )
+
+    # Convert credential information to JSON for authentication
+    $authBody = @{
+        Username = $credential.UserName
+        Password = $credential.GetNetworkCredential().Password
+        ApplicationID = "Powershell"
+    } | ConvertTo-Json
+
+    $authHeaders = @{
+        "Content-Type" = "application/json"
     }
-    
-    function Connect-EPM {
-        <#
-        .SYNOPSIS
-        Connects to the EPM (Enterprise Password Vault) using the provided credentials and tenant information.
-    
-        .DESCRIPTION
-        This function performs authentication with the EPM API to obtain the manager URL and authentication details.
-    
-        .PARAMETER credential
-        The credential object containing the username and password.
-    
-        .PARAMETER epmTenant
-        The EPM tenant name.
-    
-        .OUTPUTS
-        A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
-    
-        #>
-        param (
-            [pscredential]$credential,  # Credential object containing the username and password
-            [string]$epmTenant          # EPM tenant name
-        )
-    
-        # Convert credential information to JSON for authentication
-        $authBody = @{
-            Username = $credential.UserName
-            Password = $credential.GetNetworkCredential().Password
-            ApplicationID = "Powershell"
-        } | ConvertTo-Json
-    
-        $authHeaders = @{
-            "Content-Type" = "application/json"
-        }
-    
-        $response = Invoke-EPMRestMethod -URI "https://$epmTenant.epm.cyberark.com/EPM/API/Auth/EPM/Logon" -Method 'POST' -Headers $authHeaders -Body $authBody
-    
-        # Return a custom object with connection information
-        [PSCustomObject]@{
-            managerURL = $($response.ManagerURL)
-            auth       = $($response.EPMAuthenticationResult)
-        }
+
+    $response = Invoke-EPMRestMethod -URI "https://$epmTenant.epm.cyberark.com/EPM/API/Auth/EPM/Logon" -Method 'POST' -Headers $authHeaders -Body $authBody
+
+    # Return a custom object with connection information
+    [PSCustomObject]@{
+        managerURL = $($response.ManagerURL)
+        auth       = $($response.EPMAuthenticationResult)
     }
+}
+
+function Get-EPMSetID {
+    <#
+    .SYNOPSIS
+    Retrieves the ID and name of an EPM set based on the provided parameters.
+
+    .DESCRIPTION
+    This function interacts with the EPM API to retrieve information about sets based on the specified parameters.
+
+    .PARAMETER managerURL
+    The URL of the EPM manager.
+
+    .PARAMETER authToken
+    The authorization token for authentication.
+
+    .PARAMETER setName
+    The name of the EPM set to retrieve.
+
+    .OUTPUTS
+    A custom object with the properties "setId" and "setName" representing the EPM set information.
+
+    #>
+    param (
+        [string]$managerURL,
+        [hashtable]$Headers,
+        [string]$setName
+    )
+
+    $sets = Invoke-EPMRestMethod -URI "$managerURL/EPM/API/Sets" -Method 'GET' -Headers $Headers
     
-    function Get-EPMSetID {
-        <#
-        .SYNOPSIS
-        Retrieves the ID and name of an EPM set based on the provided parameters.
-    
-        .DESCRIPTION
-        This function interacts with the EPM API to retrieve information about sets based on the specified parameters.
-    
-        .PARAMETER managerURL
-        The URL of the EPM manager.
-    
-        .PARAMETER authToken
-        The authorization token for authentication.
-    
-        .PARAMETER setName
-        The name of the EPM set to retrieve.
-    
-        .OUTPUTS
-        A custom object with the properties "setId" and "setName" representing the EPM set information.
-    
-        #>
-        param (
-            [string]$managerURL,
-            [hashtable]$Headers,
-            [string]$setName
-        )
-    
-        $sets = Invoke-EPMRestMethod -URI "$managerURL/EPM/API/Sets" -Method 'GET' -Headers $Headers
-        
-        $setId = $null
-    
-        # Check if $SetName is empty
-        if ([string]::IsNullOrEmpty($setName)) {
-    
-            # Repeat until a valid set number is entered
-            do {
-    
-                # List the available sets with numbers
-                Write-Host "Available Sets:"
-                $numberSets = 0
-                foreach ($set in $sets.Sets) {
-                    Write-Host "$($numberSets + 1). $($set.Name)"
-                    $numberSets++
-                }
-            
-                # Ask the user to choose a set by number
-                $chosenSetNumber = Read-Host "Enter the number of the set you want to choose"
-            
-                # Validate the chosen set number
-                try {
-                    $chosenSetNumber = [int]$chosenSetNumber
-            
-                    if ($chosenSetNumber -lt 1 -or $chosenSetNumber -gt $numberSets) {
-                        Write-Error "Invalid set number. Please enter a number between 1 and $numberSets."
-                    } else {
-                        # Set chosenSet based on the user's selection
-                        $chosenSet = $sets.Sets[$chosenSetNumber - 1]
-                        $setId = $chosenSet.Id
-                        $setName = $chosenSet.Name
-                    }
-                } catch {
-                    Write-Error "Invalid input. Please enter a valid number."
-                }
-            } until ($setId)
-        }
-        
-        else {
-            # List the sets with numbers
+    $setId = $null
+
+    # Check if $SetName is empty
+    if ([string]::IsNullOrEmpty($setName)) {
+
+        # Repeat until a valid set number is entered
+        do {
+            # List the available sets with numbers
+            Write-Box "Available Sets:" INFO
+            $numberSets = 0
             foreach ($set in $sets.Sets) {
-                # Check if setname matches with the configured set
-                if ($set.Name -eq $SetName) {
-                    $setId = $set.Id
-                    break  # Exit the loop once the set is found
-                }
+                Write-Log "$($numberSets + 1). $($set.Name)" INFO DarkCyan
+                $numberSets++
             }
-            if ([string]::IsNullOrEmpty($setId)) {
-                Write-Error "$SetName : Invalid Set"
-                return
+        
+            # Ask the user to choose a set by number
+            $chosenSetNumber = Read-Host "Enter the number of the set you want to choose"
+        
+            # Validate the chosen set number
+            try {
+                $chosenSetNumber = [int]$chosenSetNumber
+        
+                if ($chosenSetNumber -lt 1 -or $chosenSetNumber -gt $numberSets) {
+                    Write-Log "Invalid set number. Please enter a number between 1 and $numberSets." ERROR
+                } else {
+                    # Set chosenSet based on the user's selection
+                    $chosenSet = $sets.Sets[$chosenSetNumber - 1]
+                    $setId = $chosenSet.Id
+                    $setName = $chosenSet.Name
+                }
+            } catch {
+                Write-Log "Invalid input. Please enter a valid number." ERROR
+            }
+        } until ($setId)
+    }
+    
+    else {
+        # List the sets with numbers
+        foreach ($set in $sets.Sets) {
+            # Check if setname matches with the configured set
+            if ($set.Name -eq $SetName) {
+                $setId = $set.Id
+                break  # Exit the loop once the set is found
             }
         }
-    
-        # Return a custom object with set information
-        [PSCustomObject]@{
-            setId   = $setId
-            setName = $setName
+        if ([string]::IsNullOrEmpty($setId)) {
+            Write-Log "$SetName : Invalid Set" ERROR
+            return
         }
     }
+
+    # Return a custom object with set information
+    [PSCustomObject]@{
+        setId   = $setId
+        setName = $setName
+    }
+}
 
 function Remove-InvalidCharacters {
     param (
@@ -223,7 +329,7 @@ function Remove-InvalidCharacters {
     return $inputString
 }
 
-    function Save-PolicyOrAppGroup {
+function Save-PolicyOrAppGroup {
     param (
         [string]$managerURL,
         [string]$setID,
@@ -277,7 +383,7 @@ function Remove-InvalidCharacters {
         41 = "Deploy Script"
         42 = "Execute Script"
         43 = "Predefined App Groups Win"
-        45 = "Agent Configuration"
+        44 = "Agent Configuration"
         46 = "Remove Admin"
         47 = "Deception"
     }
@@ -289,7 +395,7 @@ function Remove-InvalidCharacters {
     $policyFilter = ""
     if ($objectType -eq "Server") {
         $policyFilter = @{
-            "filter" = "PolicyGroupType IN 3,4,5,6,13"
+            "filter" = "PolicyGroupType IN 3,4,5,6,7,13"
         }  | ConvertTo-Json
     }
 
@@ -303,7 +409,7 @@ function Remove-InvalidCharacters {
     # Get Policy List
     $policiesList = Invoke-EPMRestMethod -Uri $policiesURI -Method 'POST' -Headers $sessionHeader -Body $policyFilter
 
-    Write-Host "Retrieved $($policiesList.FilteredCount) Policies" -ForegroundColor Yellow
+    Write-Log "Retrieved $($policiesList.FilteredCount) Policies" WARN
     $policyCounter = 1
     
     foreach ($policy in $policiesList.Policies) {
@@ -313,37 +419,39 @@ function Remove-InvalidCharacters {
         $policyFileName = Remove-InvalidCharacters "$($setName)_$($policyType)_$($policy.PolicyName).json"
         $policyPath = "$($folder)\$($policyFileName)"
 
-        Write-Host "$policyCounter\$($policiesList.FilteredCount) - Processing $($policyType): $($policy.PolicyName)" -ForegroundColor Yellow
+        Write-Log "$policyCounter\$($policiesList.FilteredCount) - Processing $($policyType): $($policy.PolicyName)" INFO
 
+<# Start incremental backup 
         # Check the policy in log hashtable
         if ($changeLog.ContainsKey($policy.PolicyId)) {
             # The key is present in the log
             if ($changeLog[$policy.PolicyId] -ne $policy.ModifiedDate) {
                 # Policy was updated. Retrieve the policy details
-                Write-Host "-> $($policy.PolicyName) has been modified, updating $policyPath..." -ForegroundColor Yellow
+                Write-Log "-> $($policy.PolicyName) has been modified, updating $policyPath..." INFO
                 $getPolicyObj = Invoke-EPMRestMethod -Uri "$policiesDetailsURI$($policy.PolicyID)" -Method 'GET' -Headers $sessionHeader
                 
                 # Store policy in JSON file
                 $getPolicyObj.Policy | ConvertTo-Json -Depth 10 | Set-Content -Path $policyPath -Force
-                Write-Host "-> $($policy.PolicyName) saved to $($policyPath)" -ForegroundColor Green
+                Write-Log "-> $($policy.PolicyName) saved to $($policyPath)" INFO
                 
                 # Update log Hashtable
                 $changeLog[$policy.PolicyId] = $policy.ModifiedDate
             } else {
-                Write-Host "-> $($policy.PolicyName) currently saved in $($policyPath) was not modified." -ForegroundColor Gray
+                Write-Log "-> $($policy.PolicyName) currently saved in $($policyPath) was not modified." INFO
             }
         } else {
+Stop Incremental backup #> 
             # Policy never stored. Retrieve the policy details
-            Write-Host "-> Requesting $($policy.PolicyName) from EPM Console" -ForegroundColor Yellow
+            Write-Log "-> Requesting $($policy.PolicyName) from EPM Console" WARN
             $getPolicyObj = Invoke-EPMRestMethod -Uri "$policiesDetailsURI$($policy.PolicyId)" -Method 'GET' -Headers $sessionHeader
             # Store policy in JSON file
             $getPolicyObj.Policy | ConvertTo-Json -Depth 10 | Set-Content -Path $policyPath -Force 
-            Write-Host "-> $($policy.PolicyName) saved to $($policyPath)" -ForegroundColor Green
-            
+            Write-Log "-> $($policy.PolicyName) saved to $($policyPath)" INFO
+<# Start incremental backup
             # Updatre log Hashtable
             $changeLog[$policy.PolicyId] = $policy.ModifiedDate
         }
-
+Stop Incremental backup #> 
         $policyCounter++
     }
 }
@@ -357,20 +465,42 @@ function Save-AdvAgentConf {
         [string]$folder
     )
 
-    Write-Host "Getting Advanced Agent General Configuration" -ForegroundColor Yellow
-    # Policy never stored. Retrieve the policy details
-    $getPolicyObj = Invoke-EPMRestMethod -Uri "$managerURL/EPM/API/Sets/$setID/Policies/AgentConfiguration/Default" -Method 'GET' -Headers $sessionHeader
+    Write-Log "Getting Advanced Agent General Configuration" WARN
+    $getPolicyObj = Invoke-EPMRestMethod -Uri "$managerURL/EPM/API/Sets/$setID/Policies/AgentConfiguration/$setID" -Method 'GET' -Headers $sessionHeader
 
     # Destination File Name
-    $policyFileName = "$($setName)_$($getPolicyObj.Name).json" -replace "\[|\]|:"
+    $policyType = $policyTypes[$getPolicyObj.Policy]
+    $policyFileName = Remove-InvalidCharacters "$($setName)_$($policyType)_$($getPolicyObj.Policy.Name).json"
     $policyPath = "$($folder)\$($policyFileName)"
 
     # Store policy in JSON file
     $getPolicyObj | ConvertTo-Json -Depth 10 | Set-Content -Path $policyPath -Force
-    Write-Host "$($getPolicyObj.Name) saved to $($policyPath)" -ForegroundColor Green
+    Write-Log "$($getPolicyObj.Name) saved to $($policyPath)" INFO
 }
 
 ### Begin Script ###
+
+## Prepare log folder and file
+# Set default log folder if not provided
+if (-not $PSBoundParameters.ContainsKey('logFolder')) {
+    $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $logFolder = Join-Path $scriptDirectory "log"
+}
+
+# Ensure the log folder exists
+if (-not (Test-Path $logFolder)) {
+    New-Item -Path $logFolder -ItemType Directory -Force
+}
+
+# Create log file name based on timestamp and script name
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+$scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
+$logFileName = "$timestamp`_$scriptName.log"
+$logFilePath = Join-Path $logFolder $logFileName
+##
+
+Write-Box "$scriptName"
+##
 
 # Request EPM Credentials
 $credential = Get-Credential -UserName $username -Message "Enter password for $username"
@@ -381,22 +511,26 @@ $login = Connect-EPM -credential $credential -epmTenant $tenant
 # Create a session header with the authorization token
 $sessionHeader = @{
     "Authorization" = "basic $($login.auth)"
+    "Content-Type" = "application/json"
 }
 
 # Get SetId
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
+Write-Box "$($set.setName)"
+
 # Sanitize FolderName, SET name could contain character not allowed 
 $destinationFolder = "$destinationFolder\$($set.setName)" -replace ('\[|\]', '')
-
-# Log file
-$logFile = "$destinationFolder\EPMPolicyBackup.log"
 
 # Preparing the destination folder based on TimeStamp
 $currentDate = "{0:yyMMddHHmm}" -f (Get-Date)
 $destinationFolder = "$destinationFolder\$($currentDate)"
 New-Item -ItemType Directory -Path $destinationFolder | Out-Null
 Write-Host "Backup folder created in $destinationFolder" -ForegroundColor Yellow
+
+<# Start incremental backup
+# Log file
+$logFile = "$destinationFolder\EPMPolicyBackup.log"
 
 # Preparing the hashatable where to log details
 $changeLog = @{}
@@ -405,12 +539,17 @@ if (Test-Path -Path $logFile) {
         $changeLog[$_.PolicyID] = $_.ModifiedDate
     }
 }
+Stop incremental backup #>
 
 # Export Policies, App Group and Adv Config
+Write-Box "Export Application Policies"
 Save-PolicyOrAppGroup -managerURL $($login.managerURL) -setID $($set.setId) -setName $($set.setName) -objectType "Server" -sessionHeader $sessionHeader -folder $destinationFolder
+Write-Box "Export Application Groups"
 Save-PolicyOrAppGroup -managerURL $($login.managerURL) -setID $($set.setId) -setName $($set.setName) -objectType "ApplicationGroups" -sessionHeader $sessionHeader -folder $destinationFolder
+Write-Box "Export Agent Configuration"
 Save-AdvAgentConf -managerURL $($login.managerURL) -setID $($set.setId) -setName $($set.setName) -sessionHeader $sessionHeader -folder $destinationFolder
 
+<# Start incremental backup
 # Saving Log
 $changeLog.GetEnumerator() | ForEach-Object {
     [PSCustomObject]@{
@@ -418,5 +557,5 @@ $changeLog.GetEnumerator() | ForEach-Object {
         ModifiedDate = $_.Value
     }
 } | Export-Csv -Path $logFile -NoTypeInformation
-
+Stop incremental backup #>
 

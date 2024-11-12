@@ -40,7 +40,7 @@ param (
     [switch]$log,
 
     [Parameter(HelpMessage = "Specify the log file path")]
-    [string]$logFolder, 
+    [string]$logFolder,
 
     [Parameter(HelpMessage = "Specify the csv filename which contain data to import")]
     [string]$csvFile
