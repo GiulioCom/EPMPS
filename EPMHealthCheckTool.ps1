@@ -348,52 +348,6 @@ function Output-PolicyTarget {
 
 ### Mappings
 # Define your mappings
-$FileTypesToScanForApplicationCatalogMappings = @{
-    ExecutableExtensions = @{
-        0 = "EXE"
-        1 = "COM"
-        2 = "SCR"
-    }
-    InstallationPackageExtensions = @{
-        0 = "MSI"
-        1 = "MSP"
-        2 = "MSU"
-    }
-    DLLExtensions = @{
-        0 = "ACM"
-        1 = "AX"
-        2 = "CPL"
-        3 = "DLL"
-        4 = "EFI"
-        5 = "FON"
-        6 = "FOT"
-        7 = "ICL"
-        8 = "IME"
-        9 = "MUI"
-        10 = "OCX"
-        11 = "SHS"
-        12 = "VBX"    
-    }
-    ScriptFileExtensions = @{
-        0 = "BAT"
-        1 = "CMD"
-        2 = "VBS"
-        3 = "VBE"
-        4 = "HTA"
-        5 = "JS"
-        6 = "JSE"
-        7 = "WSF"
-        8 = "WSH"
-        9 = "PS1"
-        10 = "REG"
-        11 = "PDF"
-    }
-    MacInstallationExtensions = @{
-        0 = "DMG"
-        1 = "PKG"
-        2 = "MPKG"
-    }
-}
 
 $supportedOS = @{
     0 = "No OS"
@@ -409,67 +363,8 @@ $supportedOS = @{
 ### Script Functions
 
 # Generic function to add parameters and nested settings to any specified root object
-function Add-Parameter {
-    param (
-        [PSCustomObject]$rootObject,                # Root object to which parameters are added (passed by reference)
-        [string]$parameterTypeName,      # Name of the ParameterType (e.g., "General", "Security")
-        [string]$parameterName,          # Name of the Parameter (e.g., "FileTypesToScan")
-        [string]$settingName,            # Name of the specific setting under the parameter (e.g., "ScanExtensions")
-        [string]$OS,                     # Operating system information (e.g., "Windows", "Linux")
-        [hashtable]$advancedSettings = $null # Optional advanced settings for this setting
-    )
 
-    # Initialize the root object if it hasn't been created
-    if (-not $rootObject.Value) {
-        $rootObject.Value = [PSCustomObject]@{
-            ParameterType = @{}
-        }
-    }
-
-    # Reference to the actual root object from the parameter
-    $root = $rootObject.Value
-
-    # Check if ParameterType dictionary exists and initialize if missing
-    if (-not $root.PSObject.Properties.Match("ParameterType")) {
-        $root | Add-Member -MemberType NoteProperty -Name "ParameterType" -Value @{}
-    }
-
-    # Check if the ParameterType already exists; if not, create it
-    if (-not $root.ParameterType.ContainsKey($parameterTypeName)) {
-        $root.ParameterType[$parameterTypeName] = [PSCustomObject]@{
-            Parameters = @{}
-        }
-    }
-
-    # Get reference to the ParameterType object
-    $parameterType = $root.ParameterType[$parameterTypeName]
-
-    # Check if the Parameter already exists; if not, create it
-    if (-not $parameterType.Parameters.ContainsKey($parameterName)) {
-        $parameterType.Parameters[$parameterName] = [PSCustomObject]@{
-            Settings = @{}
-            OS = $OS  # Assign the OS string here
-        }
-    }
-
-    # Get reference to the Parameter object
-    $parameter = $parameterType.Parameters[$parameterName]
-
-    # Add the setting
-    $parameter.Settings[$settingName] = if ($advancedSettings -ne $null) {
-        # If advanced settings are provided, nest them within the setting
-        [PSCustomObject]@{
-            Value = "Some setting value"  # Replace as needed
-            AdvancedSettings = $advancedSettings
-        }
-    } else {
-        # Basic setting without advanced settings
-        $settingName  # Replace as needed
-    }
-}
-
-
-function Get-PSCustomObjectProperties {
+function Get-AdvancedParameters {
     param (
         [PSCustomObject]$paramObject    # The object to inspect
     )
@@ -491,12 +386,85 @@ function Get-PSCustomObjectProperties {
     return $output
 }
 
+function Get-AdvancedParametersHTML {
+    param (
+        [PSCustomObject]$paramObject    # The object to inspect
+    )
+
+    # Initialize a variable to accumulate the string
+    $output = "<ul>"
+
+    foreach ($param in $paramObject.PSObject.Properties){
+        if ($param.Value -is [PSCustomObject]) {
+            $output += "<li>$($param.Name)"
+            $output += Get-AdvancedParametersHTML -paramObject $param.Value
+            $output += "</li>"
+        } elseif ($param.Value -is [Array]) {
+            $output += "<li>$($param.Name):</li>"
+            $output += "<ul>"
+            $output += ($param.Value | ForEach-Object { "<li>$($_)</li>" }) -join "`n"
+            $output += "</ul>"
+        } else {
+            $output += "<li>$($param.Name): $($param.Value)</li>`n"
+        }
+    } 
+    $output += "</ul>"
+    return $output
+}
+
 # Function to process FileTypesToScanForApplicationCatalog
-function ProcessFileTypesToScanForApplicationCatalog {
+function Get-FileTypesToScanForApplicationCatalog {
     param (
         [string]$ParamName,
         [array]$ParamValue
     )
+
+    $FileTypesToScanForApplicationCatalogMappings = @{
+        ExecutableExtensions = @{
+            0 = "EXE"
+            1 = "COM"
+            2 = "SCR"
+        }
+        InstallationPackageExtensions = @{
+            0 = "MSI"
+            1 = "MSP"
+            2 = "MSU"
+        }
+        DLLExtensions = @{
+            0 = "ACM"
+            1 = "AX"
+            2 = "CPL"
+            3 = "DLL"
+            4 = "EFI"
+            5 = "FON"
+            6 = "FOT"
+            7 = "ICL"
+            8 = "IME"
+            9 = "MUI"
+            10 = "OCX"
+            11 = "SHS"
+            12 = "VBX"    
+        }
+        ScriptFileExtensions = @{
+            0 = "BAT"
+            1 = "CMD"
+            2 = "VBS"
+            3 = "VBE"
+            4 = "HTA"
+            5 = "JS"
+            6 = "JSE"
+            7 = "WSF"
+            8 = "WSH"
+            9 = "PS1"
+            10 = "REG"
+            11 = "PDF"
+        }
+        MacInstallationExtensions = @{
+            0 = "DMG"
+            1 = "PKG"
+            2 = "MPKG"
+        }
+    }
     
     # Check if the parameter is the MacAllExecutableFiles Boolean
     if ($ParamName -eq "MacAllExecutableFiles") {
@@ -881,9 +849,7 @@ foreach ($policy in $policySearch.Policies) {
 Write-Box "Getting Advanced Agent General Configuration"
 $agentConfGeneral = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/AgentConfiguration/$($set.setId)" -Method 'GET' -Headers $sessionHeader
 
-# Agent Configuration
-
-# Start HTML structure
+# HTML structure
 $htmlContent = @"
 <!DOCTYPE html>
 <html lang="en">
@@ -891,19 +857,49 @@ $htmlContent = @"
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Agent Configuration</title>
+    <!-- Include Titillium Web font from Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@300;400;600&display=swap" rel="stylesheet">
     <style>
+        /* Apply the Titillium Web font */
+        body {
+            font-family: 'Titillium Web', sans-serif;
+            line-height: 1.6;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            font-weight: 600;
+        }
         table {
             width: 100%;
             border-collapse: collapse;
             margin-bottom: 20px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
         }
         table, th, td {
-            border: 1px solid black;
-            padding: 8px;
+            border: 1px solid #ddd;
+        }
+        th, td {
+            padding: 10px;
             text-align: left;
         }
+        /* Header color: Turquoise */
         th {
-            background-color: #f2f2f2;
+            background-color: turquoise;
+            color: white;
+            font-weight: 600;
+        }
+        /* Even row color: rgb(199, 221, 236) */
+        tr:nth-child(even) {
+            background-color: rgb(199, 221, 236);
+        }
+        /* Odd row color: rgb(167, 201, 225) */
+        tr:nth-child(odd) {
+            background-color: rgb(167, 201, 225);
+        }
+        /* Add hover effect for rows */
+        tr:hover {
+            background-color: #f1f1f1;
         }
     </style>
 </head>
@@ -915,11 +911,8 @@ $htmlContent = @"
 <th>Parameter</th>
 <th>OS</th>
 <th>Settings</th>
-<th>AdvancedValue</th>
 </tr>
 "@
-
-$AgentConfig = [PSCustomObject]@{}
 
 $validOptions = @(
     "ExtendedProtection",
@@ -937,15 +930,18 @@ foreach ($agentParamType in $agentConfGeneral.Policy.PSObject.Properties) {
     
     if ($validOptions -contains $agentParamType.Name) {
         Write-Log " + $($agentParamType.Name)" INFO
-        #$htmlContent += "<tr><td colspan=""5"">$($agentParamType.Name)</td></tr>"
+        
         foreach ($agentParam in $agentParamType.Value.PSObject.Properties){
+            # Reset the variables
             $setting = ""
             $settingHTML = ""
+            $paramHTML = ""
+            # Define the OS
+            $OS = $($supportedOS[$($agentParam.Value.SupportedOS)])
+
             if ($agentParam.Name -eq "SupportInfoFilePasswordDefault") {
                 continue # Skip this value
             }
-            
-            $OS = $($supportedOS[$($agentParam.Value.SupportedOS)])
             
             if ($agentParam.Value.Value -is [Boolean] -or
                 $agentParam.Value.Value -is [String] -or
@@ -956,8 +952,8 @@ foreach ($agentParamType in $agentConfGeneral.Policy.PSObject.Properties) {
                     $false     { $setting = "OFF" }
                     default    { $setting = $agentParam.Value.Value }
                 }
-                Add-Parameter -rootObject $AgentConfig -parameterTypeName $($agentParamType.Name) -parameterName $($agentParam.Name) -settingName $setting -OS $OS
-                #$settingHTML += "<td>$setting</td><td></td>"
+                #Add-Parameter -rootObject $AgentConfig -parameterTypeName $($agentParamType.Name) -parameterName $($agentParam.Name) -settingName $setting -OS $OS
+                $settingHTML = "$setting"
             } elseif ($agentParam.Value.Value -is [PSCustomObject]) {
                 if ($agentParam.Name -eq "ThreatProtectionExcludedApplications" -or
                     $agentParam.Name -eq "ExcludeNewFilesFromTheApplicationCatalogAndInbox" -or
@@ -966,43 +962,46 @@ foreach ($agentParamType in $agentConfGeneral.Policy.PSObject.Properties) {
                     if ($null -eq $agentParam.Value.Value.Applications -or $agentParam.Value.Value.Applications.Count -eq 0) {
                         # Array is empty
                         $setting = "No Value"
+                        $settingHTML = "$setting"
                     } else {
-                       # Array has data, join display name properties with a comma
+                        # Process Array 
                         $setting = ($agentParam.Value.Value.Applications | ForEach-Object { $_.displayName }) -join ", "
-                        $settingHTML = $setting -replace ", ", "<br>"
+                        $settingHTML = "<ul>" + ($agentParam.Value.Value.Applications | ForEach-Object { "<li>$($_.displayName)</li>" }) -join "`n" + "</ul>"
                     }
-                    $settingHTML += "<td>$settingHTML</td><td></td>"
+                    
                 } elseif ($agentParam.Name -eq "FileTypesToScanForApplicationCatalog" ) {
                     foreach ($property in $agentParam.Value.Value.PSObject.Properties) {
-                        $returnFileType = ProcessFileTypesToScanForApplicationCatalog -ParamName $property.Name -ParamValue $property.Value
+                        $returnFileType = Get-FileTypesToScanForApplicationCatalog -ParamName $property.Name -ParamValue $property.Value
                     
-                        # Output the result
                         $setting += "$($property.Name): $returnFileType - "
-                        $settingHTML = $setting -replace " - ", "<br>"
+                        $paramHTML += "<li>$($property.Name): $returnFileType</li>`n"
                     }
-                    $settingHTML += "<td>$settingHTML</td><td></td>"
+                    $settingHTML = "<ul>$paramHTML</ul>"
                 } else {
-                    $setting = Get-PSCustomObjectProperties -paramObject $agentParam.Value.Value
-                    $settingHTML += "<td>$setting</td>"
+                    $setting = Get-AdvancedParameters -paramObject $agentParam.Value.Value
+                    $settingHTML = Get-AdvancedParametersHTML -paramObject $agentParam.Value.Value
                 }
 
             } elseif ($agentParam.Value.Value -is [array]) {
                 if ($null -eq $agentParam.Value.Value -or $agentParam.Value.Value.Count -eq 0) {
                     # Array is empty
                     $setting = "No Value"
+                    $settingHTML = "$setting"
                 } else {
                     # Array has data, join elements with a comma
                     $setting = $agentParam.Value.Value -join ", "
-                    $settingHTML = $setting -replace ", ", "<br>"
+                    #$settingHTML = $setting -replace ", ", "<br>"
+                    $paramHTML = "<ul>" + ($agentParam.Value.Value | ForEach-Object { "<li>$_</li>" }) -join "`n" + "</ul>"
+                    $settingHTML = "$paramHTML"
                 }
-                $settingHTML += "<td>$settingHTML</td><td></td>"
+                
             } else {
                 $setting = $agentParam.Value.Value.GetType().Name
-                $settingHTML = "<td>$setting</td><td></td>"
+                $settingHTML = "$setting"
             }
             
             Write-Log " + - $($agentParam.Name) - $OS - $setting" INFO
-            $htmlContent += "<tr><td></td><td>$($agentParam.Name)</td><td>$OS</td>$settingHTML</tr>"
+            $htmlContent += "<tr><td>$($agentParamType.Name)</td><td>$($agentParam.Name)</td><td>$OS</td><td>$settingHTML</td></tr>"
         }
     }
 }
@@ -1014,11 +1013,10 @@ $htmlContent += @"
 </html>
 "@
 
-$AgentConfig | Format-List -Force
-
 # Output to HTML file
-#$htmlFilePath = "AgentConfig_Report.html"
-#$htmlContent | Out-File -FilePath $htmlFilePath -Encoding UTF8
+Write-Log "Write HTML" INFO
+$htmlFilePath = "AgentConfig_Report.html"
+$htmlContent | Out-File -FilePath $htmlFilePath -Encoding UTF8
 
 <#
 Write-Log " + Extended Protection" INFO
