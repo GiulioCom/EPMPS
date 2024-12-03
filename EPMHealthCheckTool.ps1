@@ -362,8 +362,6 @@ $supportedOS = @{
 
 ### Script Functions
 
-# Generic function to add parameters and nested settings to any specified root object
-
 function Get-AdvancedParameters {
     param (
         [PSCustomObject]$paramObject    # The object to inspect
@@ -375,7 +373,7 @@ function Get-AdvancedParameters {
     foreach ($param in $paramObject.PSObject.Properties){
         if ($param.Value -is [PSCustomObject]) {
             $output += "$($param.Name):["
-            $output += Get-PSCustomObjectProperties -paramObject $param.Value
+            $output += Get-AdvancedParameters -paramObject $param.Value
             $output = $output.TrimEnd(', ')
             $output += "]"                                            
         } else {
@@ -391,25 +389,46 @@ function Get-AdvancedParametersHTML {
         [PSCustomObject]$paramObject    # The object to inspect
     )
 
+    function Resolve-Advanced {
+        param (
+            [Parameter(Mandatory)]
+            $paramName,
+            $paramValue
+        )
+    
+        $outputAdv = ""
+        if ($paramName -eq "IsActive") {
+            $outputAdv = if ($paramValue) { "ON" } else { "OFF" }
+        } else {
+            $outputAdv = Resolve-DisplayName -OriginalName $paramName
+            if ($paramValue) {
+                $outputAdv += ": $(Resolve-Value -optionName $paramName -optionValue $paramValue)"
+            }
+        }
+    
+        return $outputAdv
+    }
+
     # Initialize a variable to accumulate the string
-    $output = "<ul>"
+    $output = @()
 
     foreach ($param in $paramObject.PSObject.Properties){
         if ($param.Value -is [PSCustomObject]) {
-            $output += "<li>$($param.Name)"
+            $output += "<li>$(Resolve-Advanced -paramName $param.Name)"
             $output += Get-AdvancedParametersHTML -paramObject $param.Value
             $output += "</li>"
         } elseif ($param.Value -is [Array]) {
-            $output += "<li>$($param.Name):</li>"
+            $output += "<li>$(Resolve-Advanced -paramName $param.Name):</li>"
             $output += "<ul>"
             $output += ($param.Value | ForEach-Object { "<li>$($_)</li>" }) -join "`n"
             $output += "</ul>"
         } else {
-            $output += "<li>$($param.Name): $($param.Value)</li>`n"
+            $output += "<li>$(Resolve-Advanced -paramName $param.Name -paramValue $param.Value)</li>`n"
         }
     } 
-    $output += "</ul>"
-    return $output
+    
+    # Combine the output into a single string
+    return "<ul>$($output -join "`n")</ul>"
 }
 
 # Function to process FileTypesToScanForApplicationCatalog
@@ -490,6 +509,167 @@ function Get-FileTypesToScanForApplicationCatalog {
     }
 }
 
+function Resolve-Value {
+    param (
+        [Parameter(Mandatory)]
+        $optionName,
+        [Parameter(Mandatory)]
+        $optionValue
+    )
+
+    $ProtectAdministrativeUserGroupsMap = @{
+        0 = "Off"
+        1 = "Elevate"
+        2 = "All"
+    }
+    
+    $ConfirmElevationElevationTypeMap = @{
+        0 = "Custom"
+        1 = "Administrators"
+    }
+    
+    $IsNetworkSharesFullSupportMap = @{
+        0 = "Limited"
+        1 = "Full"
+    }
+
+    $ElevationTypeMap = @{
+        0 = "Custom"
+        1 = "Administrators"
+    }
+
+    $DisplayValue = $optionValue
+
+    
+    switch ($optionValue) {
+        ""         { $DisplayValue = "No Value" }
+        $true      { $DisplayValue = "ON" }
+        $false     { $DisplayValue = "OFF" }
+    #    default    { $setting = $agentParam.Value.Value }
+    }
+    
+    
+    switch ($optionName) {
+        "ElevationType" { $DisplayValue = $ElevationTypeMap[$optionValue] }
+        "ProtectAdministrativeUserGroups" { $DisplayValue = $ProtectAdministrativeUserGroupsMap[$optionValue] }
+        "ConfirmElevationElevationType" { $DisplayValue = $ConfirmElevationElevationTypeMap[$optionValue] }
+        "IsNetworkSharesFullSupport" { $DisplayValue = $IsNetworkSharesFullSupportMap[$optionValue] }
+  #      Default { $DisplayValue = $optionValue }
+    }
+    
+    return $DisplayValue
+}
+
+function Resolve-DisplayName {
+    param (
+        [Parameter(Mandatory)]
+        [string]$OriginalName   # The original name to resolve
+    )
+
+    $displayNameMap = @{
+        "ExtendedProtection" = "Extended Protection"
+        "AgentSelfDefense" = "Agent self-defense"
+        "SupportInfoFilePassword" = "Support info file password"
+        "ProtectAdministrativeUserGroups" = "Protect administrative user groups"
+        "AntiTamperingProtection" = "Anti-tampering protection"
+        "ProtectElevatedProcessesFromDllHijacking" = "Protect elevated processes from DLL hijacking"
+        "DataCollection" = "Data collection"
+        "CollectPolicyAuditData" = "Collect policy audit data"
+        "ExcludeNewFilesFromTheApplicationCatalogAndInbox" = "Exclude new files from the Application Catalog and Events Management"
+        "FileTypesToScanForApplicationCatalog" = "File types to scan for Application Catalog"
+        "EventQueueFlushPeriod" = "Event queue flush period"
+        "PolicyAuditEventFlushPeriod" = "Policy audit event flush period"
+        "ThreatProtectionEventQueueFlushInterval" = "Threat protection event queue flush period"
+        "CollectEventsInEventLog" = "Collect events in event log"
+        "CollectEventsInWmi" = "Collect events in WMI"
+        "CollectTemporaryFiles" = "Collect temporary files"
+        "CollectEventsTriggeredByServiceAccounts" = "Collect events triggered by service accounts"
+        "CollectChildCommandEvent" = "Collect child command events"
+        "ReportUserGroupsInEvents" = "Report user groups in events"
+        "CollectProtectedAccounts" = "Collect protected accounts"
+        "Policies" = "Policies"
+        "EnablePolicySuspension" = "Enable policy suspension"
+        "ConfirmElevation" = "Confirm elevation"
+        "ThreatProtectionExcludedApplications" = "Threat protection excluded applications"
+        "HeartbeatTimeout" = "Heartbeat timeout"
+        "PolicyConditionTimeout" = "Policy condition timeout"
+        "ScriptTimeout" = "Script timeout"
+        "PolicyUpdateInterval" = "Policy update interval"
+        "RefreshWindowsDesktopPolicyUpdate" = "Refresh Windows desktop after policy update"
+        "PolicyUsageInAgentTrace" = "Trace policy usage on agents"
+        "WellKnownPublishers" = "Well known publishers"
+        "ExcludeServiceAccountsFromAccessRestrictions" = "Exclude service accounts from access restrictions"
+        "ElevateSccmForUserInstallations" = "Elevate SCCM ""for user"" installations"
+        "RestrictCmdSpecialCharacters" = "Restrict CMD special characters" 
+        "AllowedInterpreters" = "Allowed interpreters"
+        "LinuxDefaultEnvVariables" = "Environment variables"
+        "AgentBehavior" = "Agent behavior"
+        "ExcludeFilesFromProtectionWindows" = "Exclude files from policies (Windows)"
+        "ExcludeFilesFromProtectionMacos" = "Exclude files from policies (macOS)"
+        "MonitorSystemProcesses "= "Monitor system processes"
+        "StoreFileInfoInExtendedAttributes" = "Store file info in extended attributes"
+        "EnableDllSupport" = "Enable DLL support"
+        "VerifyDigitalSignatureOnScripts" = "Verify digital signature on scripts"
+        "DiscoverSourceUrl" = "Discover source URL"
+        "DiscoverSourceEmail" = "Discover source email"
+        "IsNetworkSharesFullSupport" = "Support network shares"
+        "BootStartDriver" = "Boot-start driver"
+        "MonitorSipFiles" = "Monitor SIP files"
+        "AllowRootDelegationForRootPrograms" = "Allow root permission for root programs"
+        "SudoGraceValidationPeriod" = "Sudo grace validation period"
+        "ProhibitSudoersFileModification" = "Prevent sudoers file modification"
+        "TraceNewFiles" = "Trace new files"
+        "SudoNoPassword" = "Sudo no password"
+        "SudoSecurePath" = "Sudo secure path"
+        "AllowedPreloaders" = "Allowed preloader"
+        "SudoersAllowsUserSpecificationOverriding" = "Allow sudoers interoperability"
+        "EndpointUi" = "Endpoint UI"
+        "ShowIconInTaskMenuBar" = "Show icon in task/menu bar"
+        "ShowTabInFileProperties" = "Show CyberArk EPM tab in File Properties"
+        "ShowControlPanelOnDesktop" = "Show CyberArk EPM Control Panel on desktop"
+        "HideWindowsRunAsMenuItems" = "Hide Windows ""Run As..."" menu items"
+        "HideAgentFromInstalledPrograms" = "Hide CyberArk EPM agent from installed programs"
+        "ShellElevateMenuText" = "Shell elevate menu text"
+        "EnableTabbedBrowsing" = "Enable tabbed browsing"
+        "StepUpAuthentication" = "IdP settings"
+        "CyberArkIdentity" = "CyberArk Identity "
+        "CustomIdentityProvider" = "Custom identity provider"
+        "CloudEnvironments" = "Cloud environments"
+        "EnableAzureActiveDirectory" = "Enable Azure Active Directory"
+        "OfflinePolicyAuthorizationGenerator" = "Offline policy authorization generator"
+    #= "Enable Offline Policy Authorization Generator" INFO
+    #= "Enable 'Run with Authorization token'" INFO
+        "VideoRecording" = "Audit video configuration"
+        "AllowRun" = "Allow application to run if recording is unavailable"
+        "MaxMovieLengthMinutes" = "Maximum movie length"
+        "VideoAuditRetentionDays" = "Video file retention period"
+        "MovieLocation" = "Video file destination"
+        # FileTypesToScanForApplicationCatalog
+        "ExecutableExtensions" = "Windows - Executable extensions"
+        "InstallationPackageExtensions" = "Windows - Installation package extensions"
+        "DLLExtensions" = "Windows - Dynamic link library (DLL) extensions"
+        "ScriptFileExtensions" = "Windows - Script file extensions"
+        "MacInstallationExtensions" = "macOS - Executables"
+        "MacAllExecutableFiles" = "macOS - Installation"
+        # CollectProtectedAccounts
+        "ProtectedAccountsIntervalHours" = "Protected accounts interval (Number of hours between accounts collection)"
+        # EnablePolicySuspension - ConfirmElevation"
+        "UserGroup" = "Target users and/or groups"
+        "accountType" = "Account Type"
+    }
+
+    # Attempt to resolve the display name from the map
+    $displayName = $DisplayNameMap[$OriginalName]
+
+    # Fallback to the original name if no mapping is found
+    if (-not $displayName) {
+        $displayName = $OriginalName
+    }
+
+    return $displayName
+}
+
+
 ### Begin Script ###
 
 ## Prepare log folder and file
@@ -530,7 +710,7 @@ $sessionHeader = @{
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
 Write-Box "$($set.setName)"
-<#
+
 # Get Default policy
 
 $policiesSearchFilter = @{
@@ -843,7 +1023,7 @@ foreach ($policy in $policySearch.Policies) {
     
 
 }
-#>
+
 # Get Agent Configuration
 
 Write-Box "Getting Advanced Agent General Configuration"
@@ -905,6 +1085,8 @@ $htmlContent = @"
 </head>
 <body>
 <h1>Agent Configuration</h1>
+<h2>Configuraiton Policy: $($agentConfGeneral.Policy.Name)</h2>
+<h3>SET: $($set.setName)</h3>
 <table>
 <tr>
 <th>ParameterType</th>
@@ -914,6 +1096,7 @@ $htmlContent = @"
 </tr>
 "@
 
+# List of options to exatract, the RestApi woudl contains other data not useful
 $validOptions = @(
     "ExtendedProtection",
     "DataCollection",
@@ -942,19 +1125,21 @@ foreach ($agentParamType in $agentConfGeneral.Policy.PSObject.Properties) {
             if ($agentParam.Name -eq "SupportInfoFilePasswordDefault") {
                 continue # Skip this value
             }
-            
+        <#    
             if ($agentParam.Value.Value -is [Boolean] -or
                 $agentParam.Value.Value -is [String] -or
                 $agentParam.Value.Value -is [Int32]) {
-                switch ($agentParam.Value.Value) {
-                    ""         { $setting = "No Value" }
-                    $true      { $setting = "ON" }
-                    $false     { $setting = "OFF" }
-                    default    { $setting = $agentParam.Value.Value }
-                }
-                #Add-Parameter -rootObject $AgentConfig -parameterTypeName $($agentParamType.Name) -parameterName $($agentParam.Name) -settingName $setting -OS $OS
-                $settingHTML = "$setting"
-            } elseif ($agentParam.Value.Value -is [PSCustomObject]) {
+                    $setting = Resolve-Value -optionName $agentParam.Name -optionValue $agentParam.Value.Value
+              #  switch ($agentParam.Value.Value) {
+              #      ""         { $setting = "No Value" }
+              #      $true      { $setting = "ON" }
+              #      $false     { $setting = "OFF" }
+              #      default    { $setting = $agentParam.Value.Value }
+               # }
+                $settingHTML = $setting
+            } else
+        #>
+            if ($agentParam.Value.Value -is [PSCustomObject]) {
                 if ($agentParam.Name -eq "ThreatProtectionExcludedApplications" -or
                     $agentParam.Name -eq "ExcludeNewFilesFromTheApplicationCatalogAndInbox" -or
                     $agentParam.Name -eq "ExcludeFilesFromProtectionMacos" -or
@@ -974,7 +1159,7 @@ foreach ($agentParamType in $agentConfGeneral.Policy.PSObject.Properties) {
                         $returnFileType = Get-FileTypesToScanForApplicationCatalog -ParamName $property.Name -ParamValue $property.Value
                     
                         $setting += "$($property.Name): $returnFileType - "
-                        $paramHTML += "<li>$($property.Name): $returnFileType</li>`n"
+                        $paramHTML += "<li>$(Resolve-DisplayName -OriginalName $property.Name): $returnFileType</li>`n"
                     }
                     $settingHTML = "<ul>$paramHTML</ul>"
                 } else {
@@ -986,22 +1171,26 @@ foreach ($agentParamType in $agentConfGeneral.Policy.PSObject.Properties) {
                 if ($null -eq $agentParam.Value.Value -or $agentParam.Value.Value.Count -eq 0) {
                     # Array is empty
                     $setting = "No Value"
-                    $settingHTML = "$setting"
+                    $settingHTML = $setting
                 } else {
                     # Array has data, join elements with a comma
                     $setting = $agentParam.Value.Value -join ", "
-                    #$settingHTML = $setting -replace ", ", "<br>"
                     $paramHTML = "<ul>" + ($agentParam.Value.Value | ForEach-Object { "<li>$_</li>" }) -join "`n" + "</ul>"
-                    $settingHTML = "$paramHTML"
+                    $settingHTML = $paramHTML
                 }
                 
             } else {
-                $setting = $agentParam.Value.Value.GetType().Name
-                $settingHTML = "$setting"
+                #$setting = $agentParam.Value.Value.GetType().Name
+                #$settingHTML = "$setting"
+                $setting = Resolve-Value -optionName $agentParam.Name -optionValue $agentParam.Value.Value
+                $settingHTML = $setting
             }
             
+            $paramTypeName = Resolve-DisplayName -OriginalName $agentParamType.Name
+            $paramName = Resolve-DisplayName -OriginalName $agentParam.Name
+          
             Write-Log " + - $($agentParam.Name) - $OS - $setting" INFO
-            $htmlContent += "<tr><td>$($agentParamType.Name)</td><td>$($agentParam.Name)</td><td>$OS</td><td>$settingHTML</td></tr>"
+            $htmlContent += "<tr><td>$paramTypeName</td><td>$paramName</td><td>$OS</td><td>$settingHTML</td></tr>"
         }
     }
 }
