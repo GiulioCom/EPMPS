@@ -17,6 +17,10 @@
             color: #333;
             font-weight: 600;
         }
+        h2, h3 {
+            text-align: center;
+            color: #666;
+        }
         table {
             width: 100%;
             border-collapse: collapse;
@@ -52,15 +56,13 @@
 </head>
 <body>
 <h1>Agent Configuration</h1>
-<h2>Configuraiton Policy: General configuration</h2>
+<h2>Configuration Policy: General configuration</h2>
 <h3>SET: [Giulio] Elevate(cyberark_16)</h3>
 <table>
 <tr>
-<th>ParameterType</th>
-<th>Parameter</th>
-<th>OS</th>
-<th>Settings</th>
-</tr><tr><td>Extended Protection</td><td>Agent self-defense</td><td>Windows, macOS, Linux</td><td>ON</td></tr><tr><td>Extended Protection</td><td>Support info file password</td><td>Windows, macOS, Linux</td><td>No Value</td></tr><tr><td>Extended Protection</td><td>Protect elevated processes from DLL hijacking</td><td>Windows</td><td>OFF</td></tr><tr><td>Data collection</td><td>Collect policy audit data</td><td>Windows, macOS, Linux</td><td>ON</td></tr><tr><td>Data collection</td><td>Threat protection excluded applications</td><td>Windows</td><td>No Value</td></tr><tr><td>Data collection</td><td>Exclude new files from the Application Catalog and Events Management</td><td>Windows</td><td><ul><li>Location: '%WINDIR%\Installer'</li> <li>Location: '*\Local Settings\Temporary Internet Files'</li> <li>Location: '*\Local Settings\Temp\Temporary Internet Files'</li> <li>Location: '*\LocalService\Temp\Temporary Internet Files'</li> <li>Location: '*\Microsoft\Windows\Temporary Internet Files'</li> <li>Location: '*\Google\Chrome\User Data'</li> <li>Location: '*\Mozilla\Firefox\Profiles'</li> <li>Location: '*\Local Settings\Application Data\Apple Computer\Safari\'</li> <li>Location: '*\Roaming\AppleComputer\Safari'</li> <li>Location: '*\AppData\Local\Temp'</li> <li>Location: '%WINDIR%\SoftwareDistribution\Download'</li> <li>Location: '%WINDIR%\winsxs'</li> <li>Location: '%WINDIR%\SoftwareDistribution\SelfUpdate\Packages'</li> <li>Location: '*:\RECYCLER'</li> <li>Location: '*:\$Recycle.Bin'</li> <li>Location: '%WINDIR%\assembly'</li> <li>Location: '%SystemDrive%\Config.msi'</li> <li>Location: '*:\System Volume Information'</li> <li>Location: '*\AppData\Local\Microsoft\Windows\INetCache\IE'</li> <li>Location: '*\AppData\Local\Microsoft\Windows\INetCache\Low'</li> <li>Location: '%WINDIR%\System32\spool'</li> <li>Location: '%WINDIR%\Microsoft.NET\assembly'</li> <li>Location: '%SystemDrive%\Windows.old'</li> <li>Location: '%SystemDrive%\$WINDOWS.~BT'</li> <li>Location: '%SystemDrive%\$Windows.~WS'</li> <li>Location: '%ProgramFiles%\WindowsApps'</li> <li>Location: '%WINDIR%\rescache'</li> <li>Location: '%SystemRoot%\Microsoft.NET\Framework\*\Temporary ASP.NET Files'</li> <li>Location: '*\AppData\Local\Temp\Temporary ASP.NET Files'</li> <li>Location: '*\AppData\Local\Packages\Microsoft.MicrosoftEdge_*\AC\*\Cache'</li> <li>File Name: '*.ps1', ... (other parameters)</li> <li>File Name: '*.ps1', ... (other parameters)</li> <li>File Name: '*.ps1', ... (other parameters)</li></td></tr><tr><td>Data collection</td><td>File types to scan for Application Catalog</td><td>Windows, macOS</td><td><ul><li>Windows - Executable extensions: EXE</li>
+<th>ParameterType</th> <th>Parameter</th> <th>OS</th> <th>Settings</th>
+</tr>
+<tr><td>Extended Protection</td><td>Agent self-defense</td><td>Windows, macOS, Linux</td><td>ON</td></tr><tr><td>Extended Protection</td><td>Support info file password</td><td>Windows, macOS, Linux</td><td>No Value</td></tr><tr><td>Extended Protection</td><td>Protect elevated processes from DLL hijacking</td><td>Windows</td><td>OFF</td></tr><tr><td>Data collection</td><td>Collect policy audit data</td><td>Windows, macOS, Linux</td><td>ON</td></tr><tr><td>Data collection</td><td>Threat protection excluded applications</td><td>Windows</td><td>No Value</td></tr><tr><td>Data collection</td><td>Exclude new files from the Application Catalog and Events Management</td><td>Windows</td><td><ul><li>Location: '%WINDIR%\Installer'</li> <li>Location: '*\Local Settings\Temporary Internet Files'</li> <li>Location: '*\Local Settings\Temp\Temporary Internet Files'</li> <li>Location: '*\LocalService\Temp\Temporary Internet Files'</li> <li>Location: '*\Microsoft\Windows\Temporary Internet Files'</li> <li>Location: '*\Google\Chrome\User Data'</li> <li>Location: '*\Mozilla\Firefox\Profiles'</li> <li>Location: '*\Local Settings\Application Data\Apple Computer\Safari\'</li> <li>Location: '*\Roaming\AppleComputer\Safari'</li> <li>Location: '*\AppData\Local\Temp'</li> <li>Location: '%WINDIR%\SoftwareDistribution\Download'</li> <li>Location: '%WINDIR%\winsxs'</li> <li>Location: '%WINDIR%\SoftwareDistribution\SelfUpdate\Packages'</li> <li>Location: '*:\RECYCLER'</li> <li>Location: '*:\$Recycle.Bin'</li> <li>Location: '%WINDIR%\assembly'</li> <li>Location: '%SystemDrive%\Config.msi'</li> <li>Location: '*:\System Volume Information'</li> <li>Location: '*\AppData\Local\Microsoft\Windows\INetCache\IE'</li> <li>Location: '*\AppData\Local\Microsoft\Windows\INetCache\Low'</li> <li>Location: '%WINDIR%\System32\spool'</li> <li>Location: '%WINDIR%\Microsoft.NET\assembly'</li> <li>Location: '%SystemDrive%\Windows.old'</li> <li>Location: '%SystemDrive%\$WINDOWS.~BT'</li> <li>Location: '%SystemDrive%\$Windows.~WS'</li> <li>Location: '%ProgramFiles%\WindowsApps'</li> <li>Location: '%WINDIR%\rescache'</li> <li>Location: '%SystemRoot%\Microsoft.NET\Framework\*\Temporary ASP.NET Files'</li> <li>Location: '*\AppData\Local\Temp\Temporary ASP.NET Files'</li> <li>Location: '*\AppData\Local\Packages\Microsoft.MicrosoftEdge_*\AC\*\Cache'</li> <li>File Name: '*.ps1', ... (other parameters)</li> <li>File Name: '*.ps1', ... (other parameters)</li> <li>File Name: '*.ps1', ... (other parameters)</li></td></tr><tr><td>Data collection</td><td>File types to scan for Application Catalog</td><td>Windows, macOS</td><td><ul><li>Windows - Executable extensions: EXE</li>
 <li>Windows - Installation package extensions: MSI, MSP, MSU</li>
 <li>Windows - Dynamic link library (DLL) extensions: </li>
 <li>Windows - Script file extensions: </li>
@@ -74,20 +76,20 @@
 <li>Target users and/or groups
 <ul><li>name: .\administrator</li>
 
-<li>sid</li>
+<li>sid: No Value</li>
 
 <li>Account Type: UNKNOWN</li>
 </ul>
 </li></ul></td></tr><tr><td>Policies</td><td>Confirm elevation</td><td>Windows, macOS</td><td><ul><li>ElevationType: Administrators</li>
 
 <li>Target users and/or groups
-<ul><li>name</li>
+<ul><li>name: No Value</li>
 
-<li>sid</li>
+<li>sid: No Value</li>
 
 <li>Account Type: UNKNOWN</li>
 </ul>
-</li></ul></td></tr><tr><td>Policies</td><td>Heartbeat timeout</td><td>Windows, macOS</td><td>60</td></tr><tr><td>Policies</td><td>Policy condition timeout</td><td>Windows, macOS</td><td>300</td></tr><tr><td>Policies</td><td>Script timeout</td><td>Windows, macOS</td><td>10</td></tr><tr><td>Policies</td><td>Policy update interval</td><td>Windows</td><td><ul><li>Rate</li>
+</li></ul></td></tr><tr><td>Policies</td><td>Heartbeat timeout</td><td>Windows, macOS</td><td>60</td></tr><tr><td>Policies</td><td>Policy condition timeout</td><td>Windows, macOS</td><td>300</td></tr><tr><td>Policies</td><td>Script timeout</td><td>Windows, macOS</td><td>10</td></tr><tr><td>Policies</td><td>Policy update interval</td><td>Windows</td><td><ul><li>Rate: 0</li>
 
 <li>UpdateTime: 3600</li>
 
@@ -97,7 +99,7 @@
 <li>DefaultDeleteList: IFS, CDPATH, LOCALDOMAIN, RES_OPTIONS, HOSTALIASES, NLSPATH, PATH_LOCALE, LD_LIBRARY_PATH, TERMINFO, TERMINFO_DIRS, TERMPATH, TERMCAP, ENV, BASH_ENV, PS4, GLOBIGNORE, SHELLOPTS, JAVA_TOOL_OPTIONS, PERLIO_DEBUG,PERLLIB, PERL5LIB, PERL5OPT, PERL5DBFPATH, NULLCMD, READNULLCMD, ZDOTDIR, TMPPREFIX, PYTHONHOME, PYTHONPATH, PYTHONINSPECT, RUBYLIB, RUBYOPT</li>
 </ul></td></tr><tr><td>Endpoint UI</td><td>Show icon in task/menu bar</td><td>Windows, macOS</td><td><ul><li>ON</li>
 
-<li>HideGetSupportInfoOption</li>
+<li>HideGetSupportInfoOption: OFF</li>
 
 <li>ShowNotificationBalloons: ON</li>
 
@@ -108,7 +110,7 @@
 
 <li>Name</li>
 
-<li>FileType</li>
+<li>FileType: 0</li>
 </ul>
 </li></ul></td></tr><tr><td>Endpoint UI</td><td>Show CyberArk EPM tab in File Properties</td><td>Windows</td><td>ON</td></tr><tr><td>Endpoint UI</td><td>Show CyberArk EPM Control Panel on desktop</td><td>Windows</td><td><ul><li>ON</li>
 
@@ -119,27 +121,27 @@
 
 <li>Name</li>
 
-<li>FileType</li>
+<li>FileType: 0</li>
 </ul>
-</li></ul></td></tr><tr><td>Endpoint UI</td><td>Hide Windows "Run As..." menu items</td><td>Windows</td><td>OFF</td></tr><tr><td>Endpoint UI</td><td>Hide CyberArk EPM agent from installed programs</td><td>Windows</td><td>OFF</td></tr><tr><td>Endpoint UI</td><td>Shell elevate menu text</td><td>Windows</td><td>Run with Elevated Privileges</td></tr><tr><td>Endpoint UI</td><td>Enable tabbed browsing</td><td>Windows</td><td>OFF</td></tr><tr><td>IdP settings</td><td>CyberArk Identity </td><td>Windows</td><td><ul><li>TenantId</li>
+</li></ul></td></tr><tr><td>Endpoint UI</td><td>Hide Windows "Run As..." menu items</td><td>Windows</td><td>OFF</td></tr><tr><td>Endpoint UI</td><td>Hide CyberArk EPM agent from installed programs</td><td>Windows</td><td>OFF</td></tr><tr><td>Endpoint UI</td><td>Shell elevate menu text</td><td>Windows</td><td>Run with Elevated Privileges</td></tr><tr><td>Endpoint UI</td><td>Enable tabbed browsing</td><td>Windows</td><td>OFF</td></tr><tr><td>IdP settings</td><td>CyberArk Identity </td><td>Windows</td><td><ul><li>TenantId: No Value</li>
 </ul></td></tr><tr><td>IdP settings</td><td>Custom identity provider</td><td>Windows, macOS</td><td><ul><li>OFF</li>
 
-<li>IdentityProviderName</li>
+<li>IdentityProviderName: No Value</li>
 
-<li>ClientId</li>
+<li>ClientId: No Value</li>
 
-<li>UserDomain</li>
+<li>UserDomain: No Value</li>
 
-<li>OpenIdConfigurationURL</li>
+<li>OpenIdConfigurationURL: No Value</li>
 
 <li>RedirectURI: com.cyberark.epm://login</li>
 </ul></td></tr><tr><td>Cloud environments</td><td>Enable Azure Active Directory</td><td>Windows</td><td><ul><li>OFF</li>
 
-<li>TenantId</li>
+<li>TenantId: No Value</li>
 
-<li>ClientId</li>
+<li>ClientId: No Value</li>
 
-<li>ClientSecret</li>
+<li>ClientSecret: No Value</li>
 
 <li>AzureType: 1</li>
 </ul></td></tr><tr><td>Offline policy authorization generator</td><td>PublicCertificate</td><td>No OS</td><td>No Value</td></tr><tr><td>Offline policy authorization generator</td><td>EncryptionPhrase</td><td>No OS</td><td>No Value</td></tr><tr><td>Offline policy authorization generator</td><td>PolicyAuthorizationGenerator</td><td>Windows, macOS</td><td><ul><li>OFF</li>
@@ -150,7 +152,7 @@
 </ul></td></tr><tr><td>Offline policy authorization generator</td><td>RunWithAuthorizationToken</td><td>Windows</td><td><ul><li>OFF</li>
 
 <li>ShellRunAuthorizationTokenMenuText: Run with Authorization Token</li>
-</ul></td></tr><tr><td>Audit video configuration</td><td>Allow application to run if recording is unavailable</td><td>Windows</td><td>ON</td></tr><tr><td>Audit video configuration</td><td>Maximum movie length</td><td>Windows</td><td>10</td></tr><tr><td>Audit video configuration</td><td>Video file retention period</td><td>Windows</td><td>14</td></tr><tr><td>Audit video configuration</td><td>Video file destination</td><td>Windows</td><td><ul><li>MovieLocationType</li>
+</ul></td></tr><tr><td>Audit video configuration</td><td>Allow application to run if recording is unavailable</td><td>Windows</td><td>ON</td></tr><tr><td>Audit video configuration</td><td>Maximum movie length</td><td>Windows</td><td>10</td></tr><tr><td>Audit video configuration</td><td>Video file retention period</td><td>Windows</td><td>14</td></tr><tr><td>Audit video configuration</td><td>Video file destination</td><td>Windows</td><td><ul><li>MovieLocationType: 0</li>
 
 <li>EndUserComputerLocation
 <ul><li>MinFreeDiskSpace: 1024</li>
@@ -161,11 +163,11 @@
 <li>NetworkShareLocation
 <ul><li>MaxMovieSize: 2048</li>
 
-<li>MovieUploadFolder</li>
+<li>MovieUploadFolder: No Value</li>
 
-<li>Username</li>
+<li>Username: No Value</li>
 
-<li>Password</li>
+<li>Password: No Value</li>
 
 <li>BandwidthMB: 10</li>
 </ul>
@@ -185,6 +187,7 @@
 <li>/bin</li>
 <li>/usr/sbin</li>
 <li>/sbin</li>
-</ul></ul></td></tr><tr><td>Agent behavior</td><td>Allowed preloader</td><td>Linux</td><td>No Value</td></tr><tr><td>Agent behavior</td><td>Allow sudoers interoperability</td><td>macOS</td><td>OFF</td></tr></table>
+</ul></ul></td></tr><tr><td>Agent behavior</td><td>Allowed preloader</td><td>Linux</td><td><ul><li>@{Path=/usr/local/lib/AppProtection/libAppProtection.so; Checksum=}</li></td></tr><tr><td>Agent behavior</td><td>Allow sudoers interoperability</td><td>macOS</td><td>OFF</td></tr>
+</table>
 </body>
 </html>

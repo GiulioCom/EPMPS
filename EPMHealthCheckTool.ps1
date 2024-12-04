@@ -295,6 +295,22 @@ function Get-EPMSetID {
     }
 }
 
+function Remove-InvalidCharacters {
+    param (
+        [string]$inputString
+    )
+
+    # Define the list of invalid characters
+    $invalidCharacters = '\', '\\', '/', ':', '*', '?', '"', '<', '>', '|', '[', ']'
+
+    # Replace each invalid character with an empty string
+    foreach ($char in $invalidCharacters) {
+        $inputString = $inputString -replace [regex]::Escape($char), ''
+    }
+
+    return $inputString
+}
+
 function Output-PolicyTarget {
     
     param (
@@ -401,7 +417,7 @@ function Get-AdvancedParametersHTML {
             $outputAdv = if ($paramValue) { "ON" } else { "OFF" }
         } else {
             $outputAdv = Resolve-DisplayName -OriginalName $paramName
-            if ($paramValue) {
+            if ($null -ne $paramValue) {
                 $outputAdv += ": $(Resolve-Value -optionName $paramName -optionValue $paramValue)"
             }
         }
@@ -540,7 +556,7 @@ function Resolve-Value {
 
     $DisplayValue = $optionValue
 
-    
+    # In case the the value is a Boolen    
     switch ($optionValue) {
         ""         { $DisplayValue = "No Value" }
         $true      { $DisplayValue = "ON" }
@@ -549,6 +565,7 @@ function Resolve-Value {
     }
     
     
+    # In case the Name is one to be resolved
     switch ($optionName) {
         "ElevationType" { $DisplayValue = $ElevationTypeMap[$optionValue] }
         "ProtectAdministrativeUserGroups" { $DisplayValue = $ProtectAdministrativeUserGroupsMap[$optionValue] }
@@ -667,6 +684,90 @@ function Resolve-DisplayName {
     }
 
     return $displayName
+} 
+
+function Generate-HTMLReport {
+    param (
+        [string]$ReportTitle = "",
+        [string]$SubTitle = "",
+        [string]$SetName = "",
+        [string]$TableHeader = "",
+        [string]$TableBody = ""
+    )
+
+    # HTML structure
+    $htmlContent = @"
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>$ReportTitle</title>
+    <!-- Include Titillium Web font from Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        /* Apply the Titillium Web font */
+        body {
+            font-family: 'Titillium Web', sans-serif;
+            line-height: 1.6;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            font-weight: 600;
+        }
+        h2, h3 {
+            text-align: center;
+            color: #666;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        table, th, td {
+            border: 1px solid #ddd;
+        }
+        th, td {
+            padding: 10px;
+            text-align: left;
+        }
+        /* Header color: Turquoise */
+        th {
+            background-color: turquoise;
+            color: white;
+            font-weight: 600;
+        }
+        /* Even row color: rgb(199, 221, 236) */
+        tr:nth-child(even) {
+            background-color: rgb(199, 221, 236);
+        }
+        /* Odd row color: rgb(167, 201, 225) */
+        tr:nth-child(odd) {
+            background-color: rgb(167, 201, 225);
+        }
+        /* Add hover effect for rows */
+        tr:hover {
+            background-color: #f1f1f1;
+        }
+    </style>
+</head>
+<body>
+<h1>$ReportTitle</h1>
+<h2>$SubTitle</h2>
+<h3>$SetName</h3>
+<table>
+<tr>
+$($TableHeader -join "`n")
+</tr>
+$TableBody
+</table>
+</body>
+</html>
+"@
+
+    return $htmlContent
 }
 
 
@@ -1029,6 +1130,7 @@ foreach ($policy in $policySearch.Policies) {
 Write-Box "Getting Advanced Agent General Configuration"
 $agentConfGeneral = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/AgentConfiguration/$($set.setId)" -Method 'GET' -Headers $sessionHeader
 
+<#
 # HTML structure
 $htmlContent = @"
 <!DOCTYPE html>
@@ -1085,7 +1187,7 @@ $htmlContent = @"
 </head>
 <body>
 <h1>Agent Configuration</h1>
-<h2>Configuraiton Policy: $($agentConfGeneral.Policy.Name)</h2>
+<h2>Configuration Policy: $($agentConfGeneral.Policy.Name)</h2>
 <h3>SET: $($set.setName)</h3>
 <table>
 <tr>
@@ -1095,6 +1197,9 @@ $htmlContent = @"
 <th>Settings</th>
 </tr>
 "@
+#>
+
+$confAgentTableBody = ""
 
 # List of options to exatract, the RestApi woudl contains other data not useful
 $validOptions = @(
@@ -1125,21 +1230,9 @@ foreach ($agentParamType in $agentConfGeneral.Policy.PSObject.Properties) {
             if ($agentParam.Name -eq "SupportInfoFilePasswordDefault") {
                 continue # Skip this value
             }
-        <#    
-            if ($agentParam.Value.Value -is [Boolean] -or
-                $agentParam.Value.Value -is [String] -or
-                $agentParam.Value.Value -is [Int32]) {
-                    $setting = Resolve-Value -optionName $agentParam.Name -optionValue $agentParam.Value.Value
-              #  switch ($agentParam.Value.Value) {
-              #      ""         { $setting = "No Value" }
-              #      $true      { $setting = "ON" }
-              #      $false     { $setting = "OFF" }
-              #      default    { $setting = $agentParam.Value.Value }
-               # }
-                $settingHTML = $setting
-            } else
-        #>
+
             if ($agentParam.Value.Value -is [PSCustomObject]) {
+                # If the Value is a custom object
                 if ($agentParam.Name -eq "ThreatProtectionExcludedApplications" -or
                     $agentParam.Name -eq "ExcludeNewFilesFromTheApplicationCatalogAndInbox" -or
                     $agentParam.Name -eq "ExcludeFilesFromProtectionMacos" -or
@@ -1168,6 +1261,7 @@ foreach ($agentParamType in $agentConfGeneral.Policy.PSObject.Properties) {
                 }
 
             } elseif ($agentParam.Value.Value -is [array]) {
+                # If the Value is an array
                 if ($null -eq $agentParam.Value.Value -or $agentParam.Value.Value.Count -eq 0) {
                     # Array is empty
                     $setting = "No Value"
@@ -1180,8 +1274,7 @@ foreach ($agentParamType in $agentConfGeneral.Policy.PSObject.Properties) {
                 }
                 
             } else {
-                #$setting = $agentParam.Value.Value.GetType().Name
-                #$settingHTML = "$setting"
+                # If the value are  BOOL, INT, String or others
                 $setting = Resolve-Value -optionName $agentParam.Name -optionValue $agentParam.Value.Value
                 $settingHTML = $setting
             }
@@ -1190,11 +1283,13 @@ foreach ($agentParamType in $agentConfGeneral.Policy.PSObject.Properties) {
             $paramName = Resolve-DisplayName -OriginalName $agentParam.Name
           
             Write-Log " + - $($agentParam.Name) - $OS - $setting" INFO
-            $htmlContent += "<tr><td>$paramTypeName</td><td>$paramName</td><td>$OS</td><td>$settingHTML</td></tr>"
+          #  $htmlContent += "<tr><td>$paramTypeName</td><td>$paramName</td><td>$OS</td><td>$settingHTML</td></tr>"
+            $confAgentTableBody += "<tr><td>$paramTypeName</td><td>$paramName</td><td>$OS</td><td>$settingHTML</td></tr>"
         }
     }
 }
 
+<#
 # End HTML structure
 $htmlContent += @"
 </table>
@@ -1206,86 +1301,19 @@ $htmlContent += @"
 Write-Log "Write HTML" INFO
 $htmlFilePath = "AgentConfig_Report.html"
 $htmlContent | Out-File -FilePath $htmlFilePath -Encoding UTF8
-
-<#
-Write-Log " + Extended Protection" INFO
-Write-Log " + - Agent self-defense - $($supportedOS[$($agentConfGeneral.Policy.ExtendedProtection.AgentSelfDefense.SupportedOS)]) - $($agentConfGeneral.Policy.ExtendedProtection.AgentSelfDefense.value)" INFO
-Write-Log " + - Support info file password - $($supportedOS[$($agentConfGeneral.Policy.ExtendedProtection.SupportInfoFilePassword.SupportedOS)]) - $($agentConfGeneral.Policy.ExtendedProtection.SupportInfoFilePassword.value)" INFO
-Write-Log " + - Protect administrative user groups - " INFO
-Write-Log "Anti-tampering protection" INFO
-Write-Log "Protect elevated processes from DLL hijacking - $($supportedOS[$($agentConfGeneral.Policy.ExtendedProtection.ProtectElevatedProcessesFromDllHijacking.SupportedOS)]) - $($agentConfGeneral.Policy.ExtendedProtection.ProtectElevatedProcessesFromDllHijacking.value)" INFO
-Write-Log " + Data collection" INFO
-Write-Log " + - Collect policy audit data - $($supportedOS[$($agentConfGeneral.Policy.DataCollection.CollectPolicyAuditData.SupportedOS)]) - $($agentConfGeneral.Policy.DataCollection.CollectPolicyAuditData.value)" INFO
-Write-Log "Exclude new files from the Application Catalog and Events Management" INFO
-Write-Log "File types to scan for Application Catalog" INFO
-Write-Log "Event queue flush period" INFO
-Write-Log "Policy audit event flush period" INFO
-Write-Log "Threat protection event queue flush period" INFO
-Write-Log "Collect events in event log" INFO
-Write-Log "Collect events in WMI" INFO
-Write-Log "Collect temporary files" INFO
-Write-Log "Collect events triggered by service accounts" INFO
-Write-Log "Collect child command events" INFO
-Write-Log "Report user groups in events" INFO
-Write-Log "Collect protected accounts" INFO
-Write-Log "Policies" INFO
-Write-Log "Enable policy suspension" INFO
-Write-Log "Confirm elevation" INFO
-Write-Log " + - Threat protection excluded applications - $($supportedOS[$($agentConfGeneral.Policy.DataCollection.ThreatProtectionExcludedApplications.SupportedOS)]) - $($agentConfGeneral.Policy.DataCollection.ThreatProtectionExcludedApplications.value)" INFO
-Write-Log "Heartbeat timeout" INFO
-Write-Log "Policy condition timeout" INFO
-Write-Log "Script timeout" INFO
-Write-Log "Policy update interval" INFO
-Write-Log "Refresh Windows desktop after policy update" INFO
-Write-Log "Trace policy usage on agents" INFO
-Write-Log "Well known publishers" INFO
-Write-Log "Exclude service accounts from access restrictions" INFO
-Write-Log "Elevate SCCM ""for user"" installations" INFO
-Write-Log "Restrict CMD special characters" INFO
-Write-Log "Allowed interpreters" INFO
-Write-Log "Environment variables" INFO
-Write-Log "Agent behavior" INFO
-Write-Log "Exclude files from policies (Windows)" INFO
-Write-Log "Exclude files from policies (macOS)" INFO
-Write-Log "Monitor system processes" INFO
-Write-Log "Store file info in extended attributes" INFO
-Write-Log "Enable DLL support" INFO
-Write-Log "Verify digital signature on scripts" INFO
-Write-Log "Discover source URL" INFO
-Write-Log "Discover source email" INFO
-Write-Log "Support network shares" INFO
-Write-Log "Boot-start driver" INFO
-Write-Log "Monitor SIP files" INFO
-Write-Log "Allow root permission for root programs" INFO
-Write-Log "Sudo grace validation period" INFO
-Write-Log "Prevent sudoers file modification" INFO
-Write-Log "Trace new files" INFO
-Write-Log "Sudo no password" INFO
-Write-Log "Sudo secure path" INFO
-Write-Log "Allowed preloader" INFO
-Write-Log "Allow sudoers interoperability" INFO
-Write-Log "Endpoint UI" INFO
-Write-Log "Show icon in task/menu bar" INFO
-Write-Log "Show CyberArk EPM tab in File Properties" INFO
-Write-Log "Show CyberArk EPM Control Panel on desktop" INFO
-Write-Log "Hide Windows ""Run As..."" menu items" INFO
-Write-Log "Hide CyberArk EPM agent from installed programs" INFO
-Write-Log "Shell elevate menu text" INFO
-Write-Log "Enable tabbed browsing" INFO
-Write-Log "IdP settings" INFO
-Write-Log "CyberArk Identity " INFO
-Write-Log "Custom identity provider" INFO
-Write-Log "Cloud environments" INFO
-Write-Log "Enable Azure Active Directory" INFO
-Write-Log "Offline policy authorization generator" INFO
-Write-Log "Enable Offline Policy Authorization Generator" INFO
-Write-Log "Enable 'Run with Authorization token'" INFO
-Write-Log "Audit video configuration" INFO
-Write-Log "Allow application to run if recording is unavailable" INFO
-Write-Log "Maximum movie length" INFO
-Write-Log "Video file retention period" INFO
-Write-Log "Video file destination" INFO
 #>
+
+
+$agentConfReportReport = Generate-HTMLReport -ReportTitle "Agent Configuration" `
+    -SubTitle "Configuration Policy: $($agentConfGeneral.Policy.Name)" `
+    -SetName "SET: $($set.setName)" `
+    -TableHeader "<th>ParameterType</th>", "<th>Parameter</th>", "<th>OS</th>", "<th>Settings</th>"`
+    -TableBody $confAgentTableBody
+
+# Save to file
+$agentConfReportFileName = Remove-InvalidCharacters "AgentConf_$($agentConfGeneral.Policy.Name)_$($set.setName)_Report.html"
+$agentConfReportReport | Out-File -FilePath $agentConfReportFileName -Encoding UTF8
+
 
 # Destination File Name
 # $policyFileName = "$($setName)_$($getPolicyObj.Name).json" -replace "\[|\]|:"
