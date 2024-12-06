@@ -295,6 +295,7 @@ function Get-EPMSetID {
     }
 }
 
+<#
 function Remove-InvalidCharacters {
     param (
         [string]$inputString
@@ -309,6 +310,65 @@ function Remove-InvalidCharacters {
     }
 
     return $inputString
+}
+#>
+
+function Remove-InvalidCharacters {
+    param (
+        [Parameter(Mandatory)]
+        [string]$InputString
+    )
+
+    # Define invalid characters for file names
+    $invalidCharacters = '[\\/:*?"<>|[\]]'
+
+    # Remove invalid characters
+    $sanitizedString = $InputString -replace $invalidCharacters, ''
+
+    return $sanitizedString
+}
+
+function Save-File {
+    param (
+        [Parameter(Mandatory, ValueFromPipeline)]
+        [object]$Content,          # The content to save (can be JSON, HTML, etc.)
+
+        [Parameter(Mandatory)]
+        [string]$FileName,         # Base name for the file (extension included)
+
+        [Parameter(Mandatory)]
+        [string]$DestFolder        # Destination folder to save the file
+    )
+
+    try {
+        # Ensure the destination folder exists
+        if (-not (Test-Path -Path $DestFolder)) {
+            New-Item -ItemType Directory -Path $DestFolder -Force | Out-Null
+        }
+
+        # Sanitize and construct the full file name
+        $sanitizedFileName = Remove-InvalidCharacters -InputString $FileName
+        $fullPath = Join-Path -Path $DestFolder -ChildPath $sanitizedFileName
+
+        # Determine the file type and save accordingly
+        if ($sanitizedFileName -like "*.json") {
+            $Content | ConvertTo-Json -Depth 10 | Set-Content -Path $fullPath -Force
+        }
+        elseif ($sanitizedFileName -like "*.html") {
+            $Content | Set-Content -Path $fullPath -Force -Encoding UTF8
+        }
+        else {
+            throw "Unsupported file type: $sanitizedFileName"
+        }
+
+        # Log the operation
+        Write-Log "File saved to: $fullPath" INFO
+        return $fullPath
+    }
+    catch {
+        Write-Log "Failed to save file: $_" ERROR
+        throw
+    }
 }
 
 function Output-PolicyTarget {
@@ -686,7 +746,7 @@ function Resolve-DisplayName {
     return $displayName
 } 
 
-function Generate-HTMLReport {
+function Create-HTMLReport {
     param (
         [string]$ReportTitle = "",
         [string]$SubTitle = "",
@@ -819,6 +879,9 @@ $policiesSearchFilter = @{
 } | ConvertTo-Json
 
 $policySearch = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search" -Method 'POST' -Headers $sessionHeader -Body $policiesSearchFilter
+
+# Save policy file
+Save-File -Content $policySearch -FileName "$($set.setName)_DefaultPolicies.json" -DestFolder "$PSScriptRoot\\EPM_HC_Report"
 
 # Analyze Policy result
 
@@ -1121,8 +1184,6 @@ foreach ($policy in $policySearch.Policies) {
 
         #$policyDetails | ConvertTo-Json
     }
-    
-
 }
 
 # Get Agent Configuration
@@ -1130,74 +1191,7 @@ foreach ($policy in $policySearch.Policies) {
 Write-Box "Getting Advanced Agent General Configuration"
 $agentConfGeneral = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/AgentConfiguration/$($set.setId)" -Method 'GET' -Headers $sessionHeader
 
-<#
-# HTML structure
-$htmlContent = @"
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agent Configuration</title>
-    <!-- Include Titillium Web font from Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@300;400;600&display=swap" rel="stylesheet">
-    <style>
-        /* Apply the Titillium Web font */
-        body {
-            font-family: 'Titillium Web', sans-serif;
-            line-height: 1.6;
-        }
-        h1 {
-            text-align: center;
-            color: #333;
-            font-weight: 600;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-        }
-        table, th, td {
-            border: 1px solid #ddd;
-        }
-        th, td {
-            padding: 10px;
-            text-align: left;
-        }
-        /* Header color: Turquoise */
-        th {
-            background-color: turquoise;
-            color: white;
-            font-weight: 600;
-        }
-        /* Even row color: rgb(199, 221, 236) */
-        tr:nth-child(even) {
-            background-color: rgb(199, 221, 236);
-        }
-        /* Odd row color: rgb(167, 201, 225) */
-        tr:nth-child(odd) {
-            background-color: rgb(167, 201, 225);
-        }
-        /* Add hover effect for rows */
-        tr:hover {
-            background-color: #f1f1f1;
-        }
-    </style>
-</head>
-<body>
-<h1>Agent Configuration</h1>
-<h2>Configuration Policy: $($agentConfGeneral.Policy.Name)</h2>
-<h3>SET: $($set.setName)</h3>
-<table>
-<tr>
-<th>ParameterType</th>
-<th>Parameter</th>
-<th>OS</th>
-<th>Settings</th>
-</tr>
-"@
-#>
+Save-File -Content $agentConfGeneral -FileName "$($set.setName)_AgentConf.json" -DestFolder "$PSScriptRoot\\EPM_HC_Report"
 
 $confAgentTableBody = ""
 
@@ -1289,36 +1283,12 @@ foreach ($agentParamType in $agentConfGeneral.Policy.PSObject.Properties) {
     }
 }
 
-<#
-# End HTML structure
-$htmlContent += @"
-</table>
-</body>
-</html>
-"@
-
-# Output to HTML file
-Write-Log "Write HTML" INFO
-$htmlFilePath = "AgentConfig_Report.html"
-$htmlContent | Out-File -FilePath $htmlFilePath -Encoding UTF8
-#>
-
-
-$agentConfReportReport = Generate-HTMLReport -ReportTitle "Agent Configuration" `
+# Generate the HTML report
+$agentConfReport = Create-HTMLReport -ReportTitle "Agent Configuration" `
     -SubTitle "Configuration Policy: $($agentConfGeneral.Policy.Name)" `
     -SetName "SET: $($set.setName)" `
     -TableHeader "<th>ParameterType</th>", "<th>Parameter</th>", "<th>OS</th>", "<th>Settings</th>"`
     -TableBody $confAgentTableBody
 
 # Save to file
-$agentConfReportFileName = Remove-InvalidCharacters "AgentConf_$($agentConfGeneral.Policy.Name)_$($set.setName)_Report.html"
-$agentConfReportReport | Out-File -FilePath $agentConfReportFileName -Encoding UTF8
-
-
-# Destination File Name
-# $policyFileName = "$($setName)_$($getPolicyObj.Name).json" -replace "\[|\]|:"
-# $policyPath = "$($folder)\$($policyFileName)"
-
-# Store policy in JSON file
-# $getPolicyObj | ConvertTo-Json -Depth 10 | Set-Content -Path $policyPath -Force
-# Write-Host "$($getPolicyObj.Name) saved to $($policyPath)" -ForegroundColor Green
+Save-File -Content $agentConfReport -FileName "$($set.setName)_AgentConf.html" -DestFolder "$PSScriptRoot\\EPM_HC_Report"
