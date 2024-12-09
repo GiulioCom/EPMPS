@@ -5,6 +5,13 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "PowerShell: Launch EPMCreateJIT",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "./EPMCreateJIT.ps1",
+            "args": ["-username giulio.compagnone@cyber-ark.com -tenant eu -log -logFolder \"C:\\Users\\giulioc\" -lastEventFolder \"C:\\Users\\giulioc\\Desktop\""]            
+        },
+        {
             "name": "PowerShell: Launch Current File",
             "type": "PowerShell",
             "request": "launch",

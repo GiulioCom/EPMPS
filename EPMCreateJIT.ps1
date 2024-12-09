@@ -22,9 +22,18 @@
     Company: CyberArk
     Version: 0.2 - POC
     Date: 01/2024
-    
+
+.RELEASE NOTES
+    01/2024 - Initial Version
+    12/2024 - Adding Logs
+
 .EXAMPLE
-    .\EPMCreateJIT.ps1 -username "user@domain" -setName "MySet" -tenant "eu"
+    1. .\EPMCreateJIT.ps1 -username "user@domain" -setName "MySet" -tenant "eu"
+        Check events in the set, no log created, lastEventFile stored in the script current folder \lastEvents
+    2. .\EPMCreateJIT.ps1 -username "user@domain" -setName "MySet" -tenant "eu" -log -logFolder "C:\Logs" -lastEventFolder "C:\Events"
+        Check events in the set, create log in the custom folder C:\Logs and last event file in C:\Events\
+    3. .\EPMCreateJIT.ps1 -username "user@domain" -setName "MySet" -tenant "eu" -log -lastEventFolder "C:\Events"
+        Check events in the set, create log in the "current script folder\log" and last event file in "C:\Events"
 #>
 
 param (
@@ -32,78 +41,186 @@ param (
     [string]$username,
 
     [Parameter(HelpMessage="Please enter valid EPM set name")]
-    [string]$setName,
+    [string]$setName = "",
 
     [Parameter(Mandatory = $true, HelpMessage="Please enter valid EPM tenant (eu, uk, ....)")]
-    [string]$tenant
+    [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch")]
+    [string]$tenant,
+
+    [Parameter(HelpMessage = "Enable logging to file and console")]
+    [switch]$log,
+
+    [Parameter(HelpMessage = "Specify the log file path")]
+    [string]$logFolder,
+
+    [Parameter(HelpMessage = "Please provide the folder to store the last event details.")]
+    [string]$lastEventFolder
+
 )
-function Invoke-EPMRestMethod  {
-<#
-.SYNOPSIS
-    Invokes a REST API method with automatic retry logic in case of transient failures.
 
-.DESCRIPTION
-    This function is designed to make REST API calls with automatic retries in case of specific errors, such as rate limiting.
-    It provides a robust way to handle transient failures and ensures that the API call is retried a specified number of times.
-
-.PARAMETER URI
-    The Uniform Resource Identifier (URI) for the REST API endpoint.
-
-.PARAMETER Method
-    The HTTP method (e.g., GET, POST, PUT, DELETE) for the API call.
-
-.PARAMETER Body
-    The request body data to be sent in the API call (can be null for certain methods).
-
-.PARAMETER Headers
-    Headers to include in the API request.
-#>
+function Write-Log {
     param (
-        [string]$URI,
-        [string]$Method,
-        [object]$Body,
-        [hashtable]$Headers
+        [Parameter(Mandatory = $true)]
+        [string]$message,
+        
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("INFO", "WARN", "ERROR")]
+        [string]$severity,
+
+        [ValidateSet("Black", "DarkBlue", "DarkGreen", "DarkCyan", "DarkRed", "DarkMagenta", "DarkYellow", "Gray", "DarkGray", "Blue", "Green", "Cyan", "Red", "Magenta", "Yellow", "White")]
+        [string]$ForegroundColor
     )
+    
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logMessage = "$timestamp [$severity] - $message"
 
-    $apiDelaySeconds = 120  # Too many calls per 2 minute(s). The limit is 10
-    $maxRetries = 3         # Maximum number of retry attempts in case of rate limiting or other transient issues.
-    $retryCount = 0         # Initialize the retry counter.
-
-    while ($retryCount -lt $maxRetries) {
-        try {
-            # Invoke the REST API using the specified parameters
-            $response = Invoke-RestMethod -Uri $Uri -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
-            
-            # If successful, return the API response
-            return $response
+    switch ($severity) {
+        "INFO" {
+            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
+                $ForegroundColor = "Green"
+            }
+            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
-        catch {
-            # Convert Error message to Powershell Object
-            if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
-                $ErrorDetailsMessage = $_.ErrorDetails.Message | ConvertFrom-Json
+        "WARN" {
+            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
+                $ForegroundColor = "Yellow"
             }
-            else {
-                throw "API call failed. $_"
+            Write-Host $logMessage -ForegroundColor $ForegroundColor
+        }
+        "ERROR" {
+            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
+                $ForegroundColor = "Red"
             }
-
-            # # Check for specific rate-limiting error: EPM00000AE - Too many calls per 2 minute(s). The limit is 10
-            if ( $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
-                Write-Host $ErrorDetailsMessage.ErrorMessage
-                Write-Host "Retrying in $apiDelaySeconds seconds..."
-                Start-Sleep -Seconds $apiDelaySeconds
-                $retryCount++
-            }
-            else {
-                # If a different error occurs, re-throw the exception with detailed information.
-                throw "API call failed. ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
-            }
+            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
     }
 
-    # If all retries fail, handle accordingly
-    throw "API call failed after $RetryCount retries."
+    if ($log) {
+        Add-Content -Path $logFilePath -Value $logMessage
+    }
 }
 
+function Write-Box {
+    param (
+        [string]$title
+    )
+    
+    # Calculate the length of the title
+    $titleLength = $title.Length
+
+    # Create the top and bottom lines
+    $line = "-" * $titleLength
+
+    # Print the box
+    Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
+    Write-Log "| $title |" -severity INFO -ForegroundColor Cyan
+    Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
+}
+
+function Resolve-Folder {
+    param (
+        [string]$ProvidedFolder,
+        [string]$DefaultSubFolder
+    )
+
+    # Determine the script directory or fallback to current directory
+    $scriptDirectory = if ($MyInvocation.MyCommand.Path) {
+        Split-Path -Parent $MyInvocation.MyCommand.Path
+    } else {
+        Get-Location
+    }
+
+    # Use the provided folder or create a default subfolder
+    $resolvedFolder = if ($ProvidedFolder) {
+        $ProvidedFolder
+    } else {
+        Join-Path $scriptDirectory $DefaultSubFolder
+    }
+
+    # Ensure the folder exists
+    if (-not (Test-Path $resolvedFolder)) {
+        New-Item -Path $resolvedFolder -ItemType Directory -Force | Out-Null
+    }
+
+    return $resolvedFolder
+}
+function Remove-InvalidCharacters {
+    param (
+        [Parameter(Mandatory)]
+        [string]$InputString
+    )
+
+    # Define invalid characters for file names
+    $invalidCharacters = '[\\/:*?"<>|[\]]'
+
+    # Remove invalid characters
+    $sanitizedString = $InputString -replace $invalidCharacters, ''
+
+    return $sanitizedString
+}
+function Invoke-EPMRestMethod  {
+    <#
+    .SYNOPSIS
+        Invokes a REST API method with automatic retry logic in case of transient failures.
+    
+    .DESCRIPTION
+        This function is designed to make REST API calls with automatic retries in case of specific errors, such as rate limiting.
+        It provides a robust way to handle transient failures and ensures that the API call is retried a specified number of times.
+    
+    .PARAMETER URI
+        The Uniform Resource Identifier (URI) for the REST API endpoint.
+    
+    .PARAMETER Method
+        The HTTP method (e.g., GET, POST, PUT, DELETE) for the API call.
+    
+    .PARAMETER Body
+        The request body data to be sent in the API call (can be null for certain methods).
+    
+    .PARAMETER Headers
+        Headers to include in the API request.
+    #>
+        param (
+            [string]$URI,
+            [string]$Method,
+            [object]$Body,
+            [hashtable]$Headers
+        )
+    
+        $apiDelaySeconds = 120
+        $maxRetries = 3
+        $retryCount = 0
+    
+        while ($retryCount -lt $maxRetries) {
+            try {
+                $response = Invoke-RestMethod -Uri $Uri -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
+                return $response
+            }
+            catch {
+                # Convert Error message to Powershell Object
+                if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+                    $ErrorDetailsMessage = $_.ErrorDetails.Message | ConvertFrom-Json
+                }
+                else {
+                    throw "API call failed. $_"
+                }
+    
+                # Error: EPM00000AE - Too many calls per 2 minute(s). The limit is 10
+                if ( $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
+                    Write-Log $ErrorDetailsMessage.ErrorMessage ERROR
+                    Write-Log "Retrying in $apiDelaySeconds seconds..." WARN
+                    Start-Sleep -Seconds $apiDelaySeconds
+                    $retryCount++
+                }
+                else {
+                    throw "API call failed. ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
+                }
+            }
+        }
+    
+        # If all retries fail, handle accordingly
+        throw "API call failed after $RetryCount retries."
+    }
+    
 function Connect-EPM {
     <#
     .SYNOPSIS
@@ -146,7 +263,7 @@ function Connect-EPM {
         auth       = $($response.EPMAuthenticationResult)
     }
 }
-
+    
 function Get-EPMSetID {
     <#
     .SYNOPSIS
@@ -183,12 +300,11 @@ function Get-EPMSetID {
 
         # Repeat until a valid set number is entered
         do {
-
             # List the available sets with numbers
-            Write-Host "Available Sets:"
+            Write-Box "Available Sets:" INFO
             $numberSets = 0
             foreach ($set in $sets.Sets) {
-                Write-Host "$($numberSets + 1). $($set.Name)"
+                Write-Log "$($numberSets + 1). $($set.Name)" INFO DarkCyan
                 $numberSets++
             }
         
@@ -200,7 +316,7 @@ function Get-EPMSetID {
                 $chosenSetNumber = [int]$chosenSetNumber
         
                 if ($chosenSetNumber -lt 1 -or $chosenSetNumber -gt $numberSets) {
-                    Write-Error "Invalid set number. Please enter a number between 1 and $numberSets."
+                    Write-Log "Invalid set number. Please enter a number between 1 and $numberSets." ERROR
                 } else {
                     # Set chosenSet based on the user's selection
                     $chosenSet = $sets.Sets[$chosenSetNumber - 1]
@@ -208,7 +324,7 @@ function Get-EPMSetID {
                     $setName = $chosenSet.Name
                 }
             } catch {
-                Write-Error "Invalid input. Please enter a valid number."
+                Write-Log "Invalid input. Please enter a valid number." ERROR
             }
         } until ($setId)
     }
@@ -223,7 +339,7 @@ function Get-EPMSetID {
             }
         }
         if ([string]::IsNullOrEmpty($setId)) {
-            Write-Error "$SetName : Invalid Set"
+            Write-Log "$SetName : Invalid Set" ERROR
             return
         }
     }
@@ -234,6 +350,22 @@ function Get-EPMSetID {
         setName = $setName
     }
 }
+
+# Logging setup
+if ($log) {
+    $resolvedLogFolder = Resolve-Folder -ProvidedFolder $logFolder -DefaultSubFolder "log"
+
+    # Create log file
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
+    $logFileName = "$timestamp`_$scriptName.log"
+    $logFilePath = Join-Path $resolvedLogFolder $logFileName
+
+    Write-Log "Logging enabled. Log file: $logFilePath" INFO
+}
+## Log file done
+
+Write-Box "$scriptName"
 
 # Request EPM Credentials
 $credential = Get-Credential -UserName $username -Message "Enter password for $username"
@@ -249,19 +381,19 @@ $sessionHeader = @{
 # Get SetId
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
+# Last event tracking setup
+$resolvedLastEventFolder = Resolve-Folder -ProvidedFolder $lastEventFolder -DefaultSubFolder "EPMJIT_lastEvents"
+# Create or update last event file
+$lastEventFile = Join-Path $resolvedLastEventFolder "lastEvents.txt"
+
 # Set the last events, by default 1 month
 $lastEventTimestamp = (Get-Date).AddMonths(-1).ToString('yyyy-MM-ddTHH:mm:ss.ffZ')
 
-# Get the directory where the script is located
-$scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Definition
-
-# Combine the script directory with the filename
-$logFile = Join-Path $scriptDirectory "lastEvents.txt"
-
 # Check if the file exists
-if (Test-Path $logFile -PathType Leaf) {
+if (Test-Path $lastEventFile -PathType Leaf) {
+    Write-Log "Found events log file : $lastEventFile" INFO
     # Read the first line from the file
-    $firstLine = Get-Content $logFile -First 1
+    $firstLine = Get-Content $lastEventFile -First 1
 
     # Define a regex pattern for the timestamp format "2024-01-12T16:51:32.303Z"
     $timestampPattern = '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$'
@@ -272,14 +404,12 @@ if (Test-Path $logFile -PathType Leaf) {
         $lastEventTimestamp = $matches[0]
 
         # Display the timestamp
-        Write-Host "Searching Manual Request events from $lastEventTimestamp"
+        Write-Log "Searching Manual Request events from $lastEventTimestamp" INFO
+    } else {
+        Write-Log "The first line does not match the expected timestamp format. Starting the event search from $lastEventTimestamp" WARN
     }
-    else {
-        Write-Host "The first line does not match the expected timestamp format. Starting the event search from $lastEventTimestamp"
-    }
-} 
-else {
-    Write-Host "The file does not exist. Starting the event search from $lastEventTimestamp"
+} else {
+    Write-Log "$($lastEventFile): The file does not exist. Starting the event search from $lastEventTimestamp" WARN
 }
 
 # Get Events
@@ -292,7 +422,7 @@ $events = Invoke-EPMRestMethod -URI "$($login.managerURL)/EPM/API/Sets/$($set.se
 foreach ($event in $events.events) {
 
     # Create JIT policy
-    Write-Host "Create JIT policy for $($event.userName) on $($event.computerName)"
+    Write-Log "Create JIT policy for $($event.userName) on $($event.computerName)" INFO
     
     $policyDetails = @{
         "Name" = "JIT $($event.userName) on $($event.computerName)"
@@ -330,6 +460,6 @@ foreach ($event in $events.events) {
 
 
     # Update last event timestamp in the log file
-    $event.arrivalTime | Set-Content -Path $logFile -Force
+    $event.arrivalTime | Set-Content -Path $lastEventFile -Force
 
 }

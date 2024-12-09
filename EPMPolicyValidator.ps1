@@ -931,7 +931,6 @@ if (-not (Test-Path $logFolder)) {
     New-Item -Path $logFolder -ItemType Directory -Force
 }
 
-
 # Create log file name based on timestamp and script name
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)

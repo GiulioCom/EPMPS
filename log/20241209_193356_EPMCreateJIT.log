@@ -1,0 +1,17 @@
+2024-12-09 19:33:56 [INFO] - Logging enabled. Log file: C:\Users\giulioc\OneDrive - CyberArk Ltd\Documents\Script\EPM\EPMScript\EPMScript\log\20241209_193356_EPMCreateJIT.log
+2024-12-09 19:34:13 [INFO] - + --------------- +
+2024-12-09 19:34:13 [INFO] - | Available Sets: |
+2024-12-09 19:34:13 [INFO] - + --------------- +
+2024-12-09 19:34:13 [INFO] - 1. [Giulio] Elevate(cyberark_16)
+2024-12-09 19:34:13 [INFO] - 2. [Giulio] Monitor(cyberark_16)
+2024-12-09 19:34:13 [INFO] - 3. MXC_NG (cyberark_16)
+2024-12-09 19:34:13 [INFO] - 4. MXC_22.6 (cyberark_16)
+2024-12-09 19:34:13 [INFO] - 5. [Giulio] Block(cyberark_16)
+2024-12-09 19:34:13 [INFO] - 6. [Giulio] Server(cyberark_16)
+2024-12-09 19:34:13 [INFO] - 7. ITALGAS (cyberark_16)
+2024-12-09 19:34:13 [INFO] - 8. [Giulio] Ferrovial(cyberark_16)
+2024-12-09 19:34:13 [INFO] - 9. ITALGAS AdmNonAdm(cyberark_16)
+2024-12-09 19:34:13 [INFO] - 10. MacOS - Test Giuglio(cyberark_16)
+2024-12-09 19:34:13 [INFO] - 11. [Giulio] QuickStart(cyberark_16)
+2024-12-09 19:34:13 [INFO] - 12. FINCANTIERI(cyberark_16)
+2024-12-09 19:34:49 [WARN] - The file does not exist. Starting the event search from 2024-11-09T19:34:49.15Z

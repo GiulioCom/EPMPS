@@ -295,23 +295,6 @@ function Get-EPMSetID {
     }
 }
 
-<#
-function Remove-InvalidCharacters {
-    param (
-        [string]$inputString
-    )
-
-    # Define the list of invalid characters
-    $invalidCharacters = '\', '\\', '/', ':', '*', '?', '"', '<', '>', '|', '[', ']'
-
-    # Replace each invalid character with an empty string
-    foreach ($char in $invalidCharacters) {
-        $inputString = $inputString -replace [regex]::Escape($char), ''
-    }
-
-    return $inputString
-}
-#>
 
 function Remove-InvalidCharacters {
     param (
