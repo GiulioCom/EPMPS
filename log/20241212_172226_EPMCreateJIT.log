@@ -1,0 +1,27 @@
+2024-12-12 17:22:26 [INFO] - Logging enabled. Log file: C:\Users\giulioc\OneDrive - CyberArk Ltd\Documents\Script\EPM\EPMScript\EPMScript\log\20241212_172226_EPMCreateJIT.log
+2024-12-12 17:22:26 [INFO] - + ------------ +
+2024-12-12 17:22:26 [INFO] - | EPMCreateJIT |
+2024-12-12 17:22:26 [INFO] - + ------------ +
+2024-12-12 17:22:34 [INFO] - + --------------- +
+2024-12-12 17:22:34 [INFO] - | Available Sets: |
+2024-12-12 17:22:34 [INFO] - + --------------- +
+2024-12-12 17:22:34 [INFO] - 1. [Giulio] Elevate(cyberark_16)
+2024-12-12 17:22:34 [INFO] - 2. [Giulio] Monitor(cyberark_16)
+2024-12-12 17:22:34 [INFO] - 3. MXC_NG (cyberark_16)
+2024-12-12 17:22:34 [INFO] - 4. MXC_22.6 (cyberark_16)
+2024-12-12 17:22:34 [INFO] - 5. [Giulio] Block(cyberark_16)
+2024-12-12 17:22:34 [INFO] - 6. [Giulio] Server(cyberark_16)
+2024-12-12 17:22:34 [INFO] - 7. ITALGAS (cyberark_16)
+2024-12-12 17:22:34 [INFO] - 8. [Giulio] Ferrovial(cyberark_16)
+2024-12-12 17:22:34 [INFO] - 9. ITALGAS AdmNonAdm(cyberark_16)
+2024-12-12 17:22:34 [INFO] - 10. MacOS - Test Giuglio(cyberark_16)
+2024-12-12 17:22:34 [INFO] - 11. [Giulio] QuickStart(cyberark_16)
+2024-12-12 17:22:34 [INFO] - 12. FINCANTIERI(cyberark_16)
+2024-12-12 17:22:36 [INFO] - Found last events file: C:\Users\giulioc\OneDrive - CyberArk Ltd\Documents\Script\EPM\EPMScript\EPMScript\EPMJIT_lastEvents\lastEvents.txt
+2024-12-12 17:22:36 [INFO] - Searching Manual Request events from 2024-12-09T19:39:48.343Z
+2024-12-12 17:22:40 [INFO] - Found 2 Manual Request from 2024-12-09T19:39:48.343Z
+2024-12-12 17:22:40 [INFO] - Processing 1 of 2 Manual Request for GIULIO\user1 on WIN10X64-1
+2024-12-12 17:22:49 [INFO] - JIT GIULIO\user1 on WIN10X64-1 (10) policy created
+2024-12-12 17:22:49 [INFO] - Processing 2 of 2 Manual Request for GIULIO\user1 on WIN10X64-1
+2024-12-12 17:22:57 [INFO] - JIT GIULIO\user1 on WIN10X64-1 (11) policy created
+2024-12-12 17:22:57 [INFO] - Store last event date 2024-12-12T15:42:30.916Z in C:\Users\giulioc\OneDrive - CyberArk Ltd\Documents\Script\EPM\EPMScript\EPMScript\EPMJIT_lastEvents\lastEvents.txt

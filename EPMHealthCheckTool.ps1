@@ -295,7 +295,6 @@ function Get-EPMSetID {
     }
 }
 
-
 function Remove-InvalidCharacters {
     param (
         [Parameter(Mandatory)]
@@ -354,6 +353,95 @@ function Save-File {
     }
 }
 
+function Write-Log-HTML {
+    param (
+        [Parameter(Mandatory)]
+        [object]$Text,          # The content to save (can be JSON, HTML, etc.)
+
+        [Parameter(Mandatory)]
+        [string]$ErrorLevel,    # Accroding to WriteLog function
+
+        [int]$Column,         # The column in the table
+
+        [string]$rowSpan         # The rowspan if needed
+
+    ) 
+
+    $row = ""
+
+    if ($rowspan) {
+        $row = "<td rowspan=$rowspan>$Text</td>"
+        Write-Log " - $Text" -severity $ErrorLevel
+    } else {
+        
+        $row = "<td>$Text</td>"
+        switch ($column) {
+            1 { 
+                $row += "<td></td><td></td>"
+                Write-Log " - $Text" -severity $ErrorLevel
+            }
+            2 { 
+                $row += "<td></td>"
+                Write-Log " -- $Text" -severity $ErrorLevel
+            }
+            3 {
+                Write-Log " --- $Text" -severity $ErrorLevel
+            }
+            Default {}
+        }
+    }
+
+    return "$row"
+}
+
+function Write-RowDefPolType {
+    param (
+        [Parameter(Mandatory)]
+        [int]$param,         # The content in cell
+        [int]$rowspan
+    ) 
+
+    $returnValue = "$($policyTypes[$param]): $(Resolve-DefPolValue -value $($policyDetails.Policy.IsActive))"
+    Write-Log "$returnValue" INFO -ForegroundColor DarkMagenta
+    return "<tr><td rowspan=$rowspan>$returnValue</td></tr>"
+}
+
+function Write-RowSingleData {
+    param (
+        [Parameter(Mandatory)]
+        [string]$param,
+
+        [string]$serverParam
+    ) 
+    
+    # Check if $serverParam is null or an empty string
+    if ([string]::IsNullOrWhiteSpace($serverParam)) {
+        # Fallback to $param if $serverParam is not provided
+        $serverParam = $param
+    }
+
+    $returnValue = "$($DefPolPropMap[$param]): $(Resolve-DefPolValue -value $($policyDetails.Policy.$serverParam))"
+    Write-Log "- $returnValue" INFO
+    return "<tr><td>$returnValue</td><td></td></tr>"
+}
+
+#######
+
+### Mappings
+# Define your mappings
+
+$supportedOS = @{
+    0 = "No OS"
+    1 = "Windows"
+    2 = "macOS"
+    3 = "Windows, macOS"
+    4 = "Linux"
+    6 = "macOS, Linux"
+    7 = "Windows, macOS, Linux"
+}
+##########
+
+### Script Functions
 function Output-PolicyTarget {
     
     param (
@@ -379,9 +467,11 @@ function Output-PolicyTarget {
     }
 
     if ($policy.Executors.Count -gt 0) {
-        Write-Log " - Policy applied to the following EPM Computers or EPM Groups:" INFO
+        $defaultPolicyTableBody += Write-Log-HTML "Policy applied to the following EPM Computers or EPM Groups" -ErrorLevel INFO -span $policy.Executors.Count+1
+        #Write-Log " - Policy applied to the following EPM Computers or EPM Groups:" INFO
         $policyDetails.Policy.Executors | ForEach-Object {
-            Write-Log " -- $($ExecutorType[($_.ExecutorType)]): $($_.Name)" INFO
+            #Write-Log " -- $($ExecutorType[($_.ExecutorType)]): $($_.Name)" INFO
+            $defaultPolicyTableBody += Write-Log-HTML "$($ExecutorType[($_.ExecutorType)]): $($_.Name)" -ErrorLevel INFO -column 3
         }
     }
     if ($policy.Accounts.Count -gt 0) {
@@ -403,23 +493,44 @@ function Output-PolicyTarget {
         }
     }
 }
-#######
 
-### Mappings
-# Define your mappings
+function Resolve-DefPolValue {
+    param (
+        $name,
+        [Parameter(Mandatory)]
+        $value
+    )
 
-$supportedOS = @{
-    0 = "No OS"
-    1 = "Windows"
-    2 = "macOS"
-    3 = "Windows, macOS"
-    4 = "Linux"
-    6 = "macOS, Linux"
-    7 = "Windows, macOS, Linux"
+    $PMDetectNotification = @{
+        0 = "Suppress OS Native Notification"
+        1 = "Allow OS Notification"
+        2 = "Use EPM Notification"
+    }
+
+    $resolvedValue = ""
+
+    if ($name) {
+        # In case the Name is one to be resolved
+        switch ($name) {
+            "PMDetectStdNotificationMode" { $resolvedValue = $PMDetectNotification[$value] }
+            "DetectUserActionsOnly" {
+                if ($value -eq $true) {
+                    $resolvedValue = "Manually launched applications only (default)"
+                } else {
+                    $resolvedValue = "Automatically and manually launched applications"
+                }
+            }
+        #      Default { $DisplayValue = $optionValue }
+        }
+    } else {
+        switch ($value) {
+            $true      { $resolvedValue = "ON" }
+            $false     { $resolvedValue = "OFF" }
+        }
+    }
+
+    return $resolvedValue
 }
-##########
-
-### Script Functions
 
 function Get-AdvancedParameters {
     param (
@@ -740,74 +851,75 @@ function Create-HTMLReport {
 
     # HTML structure
     $htmlContent = @"
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>$ReportTitle</title>
-    <!-- Include Titillium Web font from Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@300;400;600&display=swap" rel="stylesheet">
-    <style>
-        /* Apply the Titillium Web font */
-        body {
-            font-family: 'Titillium Web', sans-serif;
-            line-height: 1.6;
-        }
-        h1 {
-            text-align: center;
-            color: #333;
-            font-weight: 600;
-        }
-        h2, h3 {
-            text-align: center;
-            color: #666;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-        }
-        table, th, td {
-            border: 1px solid #ddd;
-        }
-        th, td {
-            padding: 10px;
-            text-align: left;
-        }
-        /* Header color: Turquoise */
-        th {
-            background-color: turquoise;
-            color: white;
-            font-weight: 600;
-        }
-        /* Even row color: rgb(199, 221, 236) */
-        tr:nth-child(even) {
-            background-color: rgb(199, 221, 236);
-        }
-        /* Odd row color: rgb(167, 201, 225) */
-        tr:nth-child(odd) {
-            background-color: rgb(167, 201, 225);
-        }
-        /* Add hover effect for rows */
-        tr:hover {
-            background-color: #f1f1f1;
-        }
-    </style>
-</head>
-<body>
-<h1>$ReportTitle</h1>
-<h2>$SubTitle</h2>
-<h3>$SetName</h3>
-<table>
-<tr>
-$($TableHeader -join "`n")
-</tr>
-$TableBody
-</table>
-</body>
-</html>
+    <!DOCTYPE html>
+    <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>$ReportTitle - $SetName</title>
+            <!-- Include Titillium Web font from Google Fonts -->
+            <link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@300;400;600&display=swap" rel="stylesheet">
+            <style>
+                /* Apply the Titillium Web font */
+                body {
+                    font-family: 'Titillium Web', sans-serif;
+                    line-height: 1.6;
+                }
+                h1 {
+                    text-align: center;
+                    color: #333;
+                    font-weight: 600;
+                }
+                h2, h3 {
+                    text-align: center;
+                    color: #666;
+                }
+                table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-bottom: 20px;
+                    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+                }
+                table, th, td {
+                    border: 1px solid #ddd;
+                }
+                th, td {
+                    padding: 10px;
+                    text-align: left;
+                }
+                /* Header color: Turquoise */
+                th {
+                    background-color: turquoise;
+                    color: white;
+                    font-weight: 600;
+                }
+                tr {
+                    background-color: rgb(167, 201, 225);
+                }
+                /* Even row color: rgb(199, 221, 236) */
+                //tr:nth-child(even) {
+                //    background-color: rgb(199, 221, 236);
+                //}
+                /* Odd row color: rgb(167, 201, 225) */
+                //tr:nth-child(odd) {
+                //    background-color: rgb(167, 201, 225);
+                //}
+                /* Add hover effect for rows */
+                tr:hover {
+                    background-color: #f1f1f1;
+                }
+            </style>
+        </head>
+        <body>
+            <h1>$ReportTitle</h1>
+            <h2>$SubTitle</h2>
+            <h3>$SetName</h3>
+            <table>
+                <tr>$($TableHeader -join "`n")</tr>
+                $TableBody
+            </table>
+        </body>
+    </html>
 "@
 
     return $htmlContent
@@ -856,6 +968,8 @@ $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -se
 Write-Box "$($set.setName)"
 
 # Get Default policy
+
+Write-Box "Collecting Default Policy"
 
 $policiesSearchFilter = @{
     "filter" = "policyGroupType EQ 7"
@@ -917,11 +1031,48 @@ $policyTypes = @{
     47 = "Deception"
 }
 
-$PMDetectNotification = @{
-    0 = "Suppress OS Native Notification"
-    1 = "Allow OS Notification"
-    2 = "Use EPM Notification"
+$DefPolPropMap = @{
+    "DetectUserActionsOnly" = "Detection mode (Windows only)"
+    "DetectEvents4StdUsers" = "Standard end users: Detect unhandled applications when administrative privileges are required"
+    "PMDetectStdNotificationMode" = "Prompt end users when an unhandled application requires administrative privileges"
+    "DetectEvents4AdmUsers" = "Administrative end users: Detect unhandled applications when administrative privileges are required"
+    "PMDetectAdmNotificationMode" = "Notify end users when an unhandled application requires administrative privileges"
+    "DetectHeuristics" = "Detect unsuccessful application launches using heuristics (Windows only)"
+    "PMDetectHeuristicsNotification" = "Prompt users when an application is elevated manually"
+    "ManualRequests" = "Allow end users to submit elevation requests (Windows, macOS)"
+    "PMDetectManualNotification" = "Prompt users when an application is elevated manually"
+    "DetectLaunches" = "Detect launch of unhandled applications"
+    "ACLaunchWinNotification" = "Notify end users when an unhandled application is launched (Windows only)"
+    "DetectInstallations" = "Detect installation of unhandled applications (Windows only)"
+    "DetectAccess" = "Detect access to sensitive resources by unhandled applications"
+    "Apply2OldApps" = "Include applications installed before the EPM agent"
+    "RestrictAccessInternet" = "Restriction - Internet"
+    "RestrictAccessIntranet" = "Restriction - Intranet"
+    "RestrictAccessShares" = "Restriction - Network shares"
+    "RestrictAccessRAM" = "Restriction - Memory of other processes"
+    "ACRestrictAccessWinNotification" = "Notify end users when an unauthorized access attempt occurs (Windows)"
+    "ACRestrictAccessMacNotification" = "Notify end users when an unauthorized access attempt occurs (macOS)"
+    "IntDetectLaunches" = "Detect launch of unhandled applications downloaded from the internet"
+    "IntLaunchWinNotification" = "Notify end users when an unhandled application is launched"
+    "IntDetectInstallations" = "Detect installation of unhandled applications downloaded from the internet"
+    "IntDetectAccess" = "Detect access to the sensitive resources by unhandled applications downloaded from the internet"
+    "IntRestrictAccessWinNotification" = "Notify end users when an unauthorized access attempt occurs"
+    "IntSendBlockEvent" = "Detect attempts to launch unhandled applications downloaded from the internet"
+    "IntBlockWinNotification" = "Notify end user when unhandled application downloaded from the internet is blocked (Windows only)"
+    "Elevate4StdUsers" = "Standard end users: Elevate unhandled applications when privileges are required"
+    "PMElevateWinNotification" = "Prompt users when elevation is necessary - Windows"
+    "PMElevateMacNotification" = "Prompt users when elevation is necessary - macOS"
+    "PMElevateLinuxNotification" = "Prompt users when elevation is necessary - Linux"
+    "Elevate4AdmUsers" = "Administrative end users: Elevate unhandled applications when privileges are required"
+    "ElevateManualRequests" = "Add elevation option to Windows Explorer context menu for unhandled applications"
+    "PMElevateManualNotification" = "Prompt users when an application is elevated manually"
+    "SendBlockEvent" = "Detect attempts to launch unhandled applications"
+    "ACBlockWinNotification" = "Notify users when an unhandled application is blocked (Windows)"
+    "ACBlockMacNotification" = "Notify users when an unhandled application is blocked (macOS)"
+    "Apply2WindowsPrograms" = "Include controlled Windows OS programs (Windows Only)"
 }
+
+$defaultPolicyTableBody = ""
 
 foreach ($policy in $policySearch.Policies) {
     if ($policy.isActive -eq $true) {
@@ -929,235 +1080,368 @@ foreach ($policy in $policySearch.Policies) {
         switch ($policy.PolicyType) {
             # [PM Detect]
             1 { 
-                Write-Box "$($policyTypes[$($policyDetails.Policy.PolicyType)])" INFO
-                Write-Log " - Detection mode (Windows only): $($policyDetails.Policy.DetectUserActionsOnly)" INFO
-                Write-Log " - Standard end users:" INFO
-                Write-Log " -- Detect unhandled applications when administrative privileges are required: $($policyDetails.Policy.DetectEvents4StdUsers)" INFO
-                Write-Log " -- Prompt end users when an unhandled application requires administrative privileges: $($PMDetectNotification[$($policyDetails.Policy.PMDetectStdNotificationMode)])" INFO
-                if ($policyDetails.Policy.PMDetectStdNotificationMode -eq 2) {
-                    Write-Log " --- Windows Dialog: $($policyDetails.Policy.PMDetectStdWinNotification.AllowedDialogType)" INFO
-                    Write-Log " --- macOS Dialog: $($policyDetails.Policy.PMDetectStdMacNotification.AllowedDialogType)" INFO
-                    Write-Log " --- Linux Dialog: $($policyDetails.Policy.PMDetectStdLinuxNotification.AllowedDialogType)" INFO
+                $defaultPolicyTableBody += Write-RowDefPolType -param $($policyDetails.Policy.PolicyType) -rowspan 7
+
+                $defaultPolicyTableBody += Write-RowSingleData -param "DetectUserActionsOnly"
+            
+                $DetectEvents4StdUsers = "$($DefPolPropMap["DetectEvents4StdUsers"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectEvents4StdUsers))"
+                Write-Log "-- $DetectEvents4StdUsers" INFO
+                if ($policyDetails.Policy.DetectEvents4StdUsers) {
+                    $PMDetectStdNotificationMode = "$($DefPolPropMap["PMDetectStdNotificationMode"]): $(Resolve-DefPolValue -name "PMDetectStdNotificationMode" -value $($policyDetails.Policy.PMDetectStdNotificationMode))"
+                    Write-Log "--- $DetectEvents4StdUsers" INFO
                 }
-                Write-Log " - Administrative end users:" INFO
-                Write-Log " -- Detect unhandled applications when administrative privileges are required: $($policyDetails.Policy.DetectEvents4AdmUsers)" INFO
-                Write-Log " -- Notify end users when an unhandled application requires administrative privileges: $($PMDetectNotification[$($policyDetails.Policy.PMDetectAdmNotificationMode)])" INFO
-                if ($policyDetails.Policy.PMDetectStdNotificationMode -eq 2) {
-                    Write-Log " --- Windows Dialog: $($policyDetails.Policy.PMDetectAdmWinNotification.AllowedDialogType)" INFO
-                    Write-Log " --- macOS Dialog: $($policyDetails.Policy.PMDetectAdmMacNotification.AllowedDialogType)" INFO
-                    Write-Log " --- Linux Dialog: $($policyDetails.Policy.PMDetectAdmLinuxNotification.AllowedDialogType)" INFO
+                $defaultPolicyTableBody += "<tr><td>$DetectEvents4StdUsers</td><td>$PMDetectStdNotificationMode</td></tr>"
+
+                $DetectEvents4AdmUsers = "$($DefPolPropMap["DetectEvents4AdmUsers"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectEvents4AdmUsers))"
+                Write-Log "-- $DetectEvents4AdmUsers" INFO
+                if ($policyDetails.Policy.DetectEvents4AdmUsers) {
+                    $PMDetectAdmNotificationMode = "$($DefPolPropMap["PMDetectAdmNotificationMode"]): $(Resolve-DefPolValue -name "PMDetectAdmNotificationMode" -value $($policyDetails.Policy.PMDetectStdNotificationMode))"
+                    Write-Log "--- $DetectEvents4StdUsers" INFO
                 }
-                Write-Log " - Detect unsuccessful application launches using heuristics (Windows only): $($policyDetails.Policy.DetectHeuristics)" INFO
-                if ($policyDetails.Policy.DetectHeuristics -eq $true) {
-                    Write-Log " -- Prompt users when an application is elevated manually: $($policyDetails.Policy.PMDetectHeuristicsNotification.AllowedDialogType)" INFO
+                $defaultPolicyTableBody += "<tr><td>$DetectEvents4AdmUsers</td><td>$PMDetectAdmNotificationMode</td></tr>"
+                
+                $DetectHeuristics = "$($DefPolPropMap["DetectHeuristics"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectHeuristics))"
+                Write-Log "-- $DetectHeuristics" INFO
+                if ($policyDetails.Policy.DetectHeuristics -and $policyDetails.Policy.PMDetectStdNotificationMode.Id -ne "00000000-0000-0000-0000-000000000000") {
+                    $PMDetectHeuristicsNotification = "$($DefPolPropMap["PMDetectHeuristicsNotification"]): Baloon or Dialog"
+                    Write-Log "--- $PMDetectHeuristicsNotification" INFO
                 }
-                Write-Log " - Allow end users to submit elevation requests (Windows, macOS): $($policyDetails.Policy.ManualRequests)" INFO
-                if ($policyDetails.Policy.ManualRequests -eq $true) {
-                    Write-Log " -- Prompt users when an application is elevated manually: $($policyDetails.Policy.PMDetectManualNotification.AllowedDialogType)" INFO
+                $defaultPolicyTableBody += "<tr><td>$DetectHeuristics</td><td>$PMDetectHeuristicsNotification</td></tr>"
+
+                $ManualRequests = "$($DefPolPropMap["ManualRequests"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.ManualRequests))"
+                Write-Log "-- $ManualRequests" INFO
+                if ($policyDetails.Policy.ManualRequests -and $policyDetails.Policy.PMDetectManualNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
+                    $PMDetectManualNotification = "$($DefPolPropMap["PMDetectManualNotification"]): Baloon or Dialog"
+                    Write-Log "--- $PMDetectManualNotification" INFO
                 }
+                $defaultPolicyTableBody += "<tr><td>$ManualRequests</td><td>$PMDetectManualNotification</td></tr>"
+               
                 if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
-                    Write-Log " - Policy Applied to all Computers" INFO
+                    $IsAppliedToAllComputers = "Policy Applied to all Computers"
+                    Write-Log "-- $IsAppliedToAllComputers" INFO
+                    $defaultPolicyTableBody += "<tr><td>$IsAppliedToAllComputers</td><td></td></tr>"
                 } else {
-                    Output-PolicyTarget $policyDetails.policy                }
+                    Output-PolicyTarget $policyDetails.policy
                 }
+            }
             # [AC Detect]
             2 {
-                Write-Box "$($policyTypes[$($policyDetails.Policy.PolicyType)])" INFO
-                Write-Log " - Detect launch of unhandled applications: $($policyDetails.policy.DetectLaunches)" INFO
-                if ($policyDetails.Policy.DetectLaunches.Id -ne "00000000-0000-0000-0000-000000000000"){
-                    Write-Log " --- Notify end users when an unhandled application is launched (Windows only): $($policyDetails.Policy.ACLaunchWinNotification.AllowedDialogType)" INFO
-                } else {
-                    Write-Log " --- Notify end users when an unhandled application is launched (Windows only): OFF" INFO
+                $defaultPolicyTableBody += Write-RowDefPolType -param $($policyDetails.Policy.PolicyType) -rowspan 7
+                
+                $DetectLaunches = "$($DefPolPropMap["DetectLaunches"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectLaunches))"
+                Write-Log "- $DetectLaunches" INFO
+                if ($policyDetails.Policy.DetectLaunches -and $policyDetails.Policy.ACLaunchWinNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
+                    $ACLaunchWinNotification = "$($DefPolPropMap["ACLaunchWinNotification"]): Baloon or Dialog"
+                    Write-Log "-- $ACLaunchWinNotification" INFO
                 }
-                Write-Log " - Detect installation of unhandled applications (Windows only): $($policyDetails.policy.DetectInstallations)" INFO
-                Write-Log " - Detect access to sensitive resources by unhandled applications: $($policyDetails.policy.DetectAccess)" INFO
-                Write-Log " - Include applications installed before the EPM agent: $($policyDetails.policy.Apply2OldApps)" INFO
+                $defaultPolicyTableBody += "<tr><td>$DetectLaunches</td><td>$ACLaunchWinNotification</td></tr>"
+
+                $defaultPolicyTableBody += Write-RowSingleData -param "DetectInstallations"
+
+                $defaultPolicyTableBody += Write-RowSingleData -param "DetectAccess"
+                
+                $defaultPolicyTableBody += Write-RowSingleData -param "Apply2OldApps"
+
                 if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
-                    Write-Log " - Policy Applied to all Computers" INFO
+                    $IsAppliedToAllComputers = "Policy Applied to all Computers"
+                    Write-Log "- $IsAppliedToAllComputers" INFO
+                    $defaultPolicyTableBody += "<tr><td>$IsAppliedToAllComputers</td><td></td></tr>"
                 } else {
                     Output-PolicyTarget $policyDetails.policy
                 }
             }
             # [AC Restrict]
             3 {
-                Write-Box "$($policyTypes[$($policyDetails.Policy.PolicyType)]) (Windows and macOS)" INFO
-                Write-Log " - Detect launch of unhandled applications: $($policyDetails.policy.DetectLaunches)" INFO
-                if ($policyDetails.Policy.IntLaunchWinNotification.Id -ne "00000000-0000-0000-0000-000000000000"){
-                    Write-Log " -- Notify end users when an unhandled application is launched: $($policyDetails.Policy.ACLaunchWinNotification.AllowedDialogType)" INFO
-                } else {
-                    Write-Log " -- Notify end users when an unhandled application is launched: OFF" INFO
+                $defaultPolicyTableBody += Write-RowDefPolType -param $($policyDetails.Policy.PolicyType) -rowspan 9
+
+                $DetectLaunches = "$($DefPolPropMap["DetectLaunches"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectLaunches))"
+                Write-Log "- $DetectLaunches" INFO
+                if ($policyDetails.Policy.DetectLaunches -and $policyDetails.Policy.ACLaunchWinNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
+                    $ACLaunchWinNotification = "$($DefPolPropMap["ACLaunchWinNotification"]): Baloon or Dialog"
+                    Write-Log "-- $ACLaunchWinNotification" INFO
                 }
-                Write-Log " - Detect installations of unhandled applications: $($policyDetails.policy.DetectInstallations)" INFO
-                Write-Log " - Restriction" INFO
-                Write-Log " -- Restriction - Internet: $($policyDetails.policy.RestrictAccessInternet)" INFO
-                Write-Log " -- Restriction - Intranet: $($policyDetails.policy.RestrictAccessIntranet)" INFO
-                Write-Log " -- Restriction - Network shares: $($policyDetails.policy.RestrictAccessShares)" INFO
-                Write-Log " -- Restriction - Memory of other processes: $($policyDetails.policy.RestrictAccessRAM)" INFO
+                $defaultPolicyTableBody += "<tr><td>$DetectLaunches</td><td>$ACLaunchWinNotification</td></tr>"
+
+                $defaultPolicyTableBody += Write-RowSingleData -param "DetectInstallations"
+
+                $RestrictAccessInternet = "$($DefPolPropMap["RestrictAccessInternet"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.RestrictAccessInternet))"
+                Write-Log "- $RestrictAccessInternet" INFO
+
+                $RestrictAccessIntranet = "$($DefPolPropMap["RestrictAccessIntranet"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.RestrictAccessIntranet))"
+                Write-Log "- $RestrictAccessIntranet" INFO
+
+                $RestrictAccessShares = "$($DefPolPropMap["RestrictAccessShares"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.RestrictAccessShares))"
+                Write-Log "- $RestrictAccessShares" INFO
+
+                $RestrictAccessRAM = "$($DefPolPropMap["RestrictAccessRAM"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.RestrictAccessRAM))"
+                Write-Log "- $RestrictAccessRAM" INFO
+
                 if ($policyDetails.Policy.ACRestrictAccessWinNotification.Id -ne "00000000-0000-0000-0000-000000000000"){
-                    Write-Log " --- Notify end users when an unauthorized access attempt occurs (Windows): $($policyDetails.Policy.ACRestrictAccessWinNotification.AllowedDialogType)" INFO
+                    $ACRestrictAccessWinNotification = "Dialog or Baloon"
                 } else {
-                    Write-Log " --- Notify end users when an unauthorized access attempt occurs (Windows): OFF" INFO
+                    $ACRestrictAccessWinNotification = "OFF"
                 }
+
                 if ($policyDetails.Policy.ACRestrictAccessMacNotification.Id -ne "00000000-0000-0000-0000-000000000000"){
-                    Write-Log " --- Notify end users when an unauthorized access attempt occurs (macOS): $($policyDetails.Policy.ACRestrictAccessMacNotification.AllowedDialogType)" INFO
+                    $ACRestrictAccessWinNotification = "Dialog"
                 } else {
-                    Write-Log " --- Notify end users when an unauthorized access attempt occurs (macOS): OFF" INFO
-                }              
-                Write-Log " - Include applications installed before the EPM agent: $($policyDetails.policy.Apply2OldApps)" INFO
+                    $ACRestrictAccessWinNotification = "OFF"
+                }
+
+                Write-Log "-- $($DefPolPropMap["ACRestrictAccessWinNotification"]): $ACRestrictAccessWinNotification" INFO
+                Write-Log "-- $($DefPolPropMap["ACRestrictAccessMacNotification"]): $ACRestrictAccessMacNotification" INFO
+
+                $defaultPolicyTableBody += "<tr><td>$RestrictAccessInternet</td><td rowspan=2>$($DefPolPropMap["ACRestrictAccessWinNotification"]): $ACRestrictAccessWinNotification</td></tr>"
+                $defaultPolicyTableBody += "<tr><td>$RestrictAccessIntranet</td></tr>"
+                $defaultPolicyTableBody += "<tr><td>$RestrictAccessShares</td><td rowspan=2>$($DefPolPropMap["ACRestrictAccessMacNotification"]): $ACRestrictAccessMacNotification</td></tr>"
+                $defaultPolicyTableBody += "<tr><td>$RestrictAccessRAM</td></tr>"
+
+                $defaultPolicyTableBody += Write-RowSingleData -param "Apply2OldApps"
+
                 if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
-                    Write-Log " - Policy Applied to all Computers" INFO
+                    $IsAppliedToAllComputers = "Policy Applied to all Computers"
+                    Write-Log "- $IsAppliedToAllComputers" INFO
+                    $defaultPolicyTableBody += "<tr><td>$IsAppliedToAllComputers</td><td></td></tr>"
                 } else {
-                    Output-PolicyTarget $policyDetails.policy
+                    #Output-PolicyTarget $policyDetails.policy
                 }
             }
-            # [RP Detect]
-            4 {
-                Write-Box "$($policyTypes[$($policyDetails.Policy.PolicyType)])" INFO
-                if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
-                    Write-Log " - Policy Applied to all Computers" INFO
-                } else {
-                    Output-PolicyTarget $policyDetails.policy
+            # [RP Detect] and [RP Restrict]
+            {$_ -eq 4 -or $_ -eq 5} {
+                $defaultPolicyTableBody += Write-RowDefPolType -param $($policyDetails.Policy.PolicyType) -rowspan 3
+                
+                $RestrictRulesPathList = ""
+                foreach ($RestrictRulesPath in $policyDetails.Policy.RPRestrictRulesPaths) {
+                    $pattern = ""
+                    if ($RestrictRulesPath.IsFile) {
+                        $pattern = "Filename"
+                    } else {
+                        $pattern = "Location"
+                    }
+                    $RestrictRulesPathList += "<li>$($pattern): $($RestrictRulesPath.Path)</li>"
                 }
-            }
-            # [RP Restrict]
-            5 {
-                Write-Box "$($policyTypes[$($policyDetails.Policy.PolicyType)])" INFO
+                $defaultPolicyTableBody += "<tr><td><ul>$RestrictRulesPathList</ul></td><td></td></tr>"
+
                 if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
-                    Write-Log " - Policy Applied to all Computers" INFO
+                    $IsAppliedToAllComputers = "Policy Applied to all Computers"
+                    Write-Log "- $IsAppliedToAllComputers" INFO
+                    $defaultPolicyTableBody += "<tr><td>$IsAppliedToAllComputers</td><td></td></tr>"
                 } else {
                     Output-PolicyTarget $policyDetails.policy
                 }
             }
             # [Internet Detect]
             6 {
-                Write-Box "$($policyTypes[$($policyDetails.Policy.PolicyType)]) (Windows only)" INFO
-                Write-Log " - Detect launch of unhandled applications downloaded from the internet: $($policyDetails.policy.DetectLaunches)" INFO
-                if ($policyDetails.Policy.IntLaunchWinNotification.Id -ne "00000000-0000-0000-0000-000000000000"){
-                    Write-Log " --- Notify end users when an unhandled application is launched: $($policyDetails.Policy.IntLaunchWinNotification.AllowedDialogType)" INFO
-                } else {
-                    Write-Log " --- Notify end users when an unhandled application is launched: OFF" INFO
+                $defaultPolicyTableBody += Write-RowDefPolType -param $($policyDetails.Policy.PolicyType) -rowspan 6
+                
+                $IntDetectLaunches = "$($DefPolPropMap["IntDetectLaunches"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectLaunches))"
+                Write-Log "- $IntDetectLaunches" INFO
+                if ($policyDetails.Policy.DetectLaunches) {
+                    if ($policyDetails.Policy.IntLaunchWinNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
+                        $IntLaunchWinNotification = "$($DefPolPropMap["IntLaunchWinNotification"]): Baloon or Dialog"
+                    } else {
+                        $IntLaunchWinNotification = "$($DefPolPropMap["IntLaunchWinNotification"]): OFF"
+                    }
                 }
-                Write-Log " - Detect installation of unhandled applications downloaded from the internet: $($policyDetails.policy.DetectInstallations)" INFO
-                Write-Log " - Detect access to the sensitive resources by unhandled applications downloaded from the internet: $($policyDetails.policy.DetectAccess)" INFO
-                Write-Log " - Include applications installed before the EPM agent: $($policyDetails.policy.Apply2OldApps)" INFO
+                Write-Log "-- $IntLaunchWinNotification" INFO
+                
+                $defaultPolicyTableBody += "<tr><td>$IntDetectLaunches</td><td>$IntLaunchWinNotification</td></tr>"
+
+                $defaultPolicyTableBody += Write-RowSingleData -param "IntDetectInstallations" -serverParam "DetectInstallations"
+                $defaultPolicyTableBody += Write-RowSingleData -param "IntDetectAccess" -serverParam "DetectAccess"
+
                 if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
-                    Write-Log " - Policy Applied to all Computers" INFO
+                    $IsAppliedToAllComputers = "Policy Applied to all Computers"
+                    Write-Log "-- $IsAppliedToAllComputers" INFO
+                    $defaultPolicyTableBody += "<tr><td>$IsAppliedToAllComputers</td><td></td></tr>"
                 } else {
                     Output-PolicyTarget $policyDetails.policy
                 }
             }             
             # [Internet Restrict]
             7 {
-                Write-Box "$($policyTypes[$($policyDetails.Policy.PolicyType)]) (Windows only)" INFO
-                Write-Log " - Detect launch of unhandled applications downloaded from the internet: $($policyDetails.policy.DetectLaunches)" INFO
-                if ($policyDetails.Policy.IntLaunchWinNotification.Id -ne "00000000-0000-0000-0000-000000000000"){
-                    Write-Log " --- Notify end users when an unhandled application is launched: $($policyDetails.Policy.ACLaunchWinNotification.AllowedDialogType)" INFO
-                } else {
-                    Write-Log " --- Notify end users when an unhandled application is launched: OFF" INFO
+                $defaultPolicyTableBody += Write-RowDefPolType -param $($policyDetails.Policy.PolicyType) -rowspan 9
+
+                $IntDetectLaunches = "$($DefPolPropMap["IntDetectLaunches"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectLaunches))"
+                Write-Log "- $IntDetectLaunches" INFO
+                
+                if ($policyDetails.Policy.DetectLaunches) {
+                    if ($policyDetails.Policy.IntLaunchWinNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
+                        $IntLaunchWinNotification = "$($DefPolPropMap["IntLaunchWinNotification"]): Baloon or Dialog"
+                    } else {
+                        $IntLaunchWinNotification = "$($DefPolPropMap["IntLaunchWinNotification"]): OFF"
+                    }
                 }
-                Write-Log " - Detect installations of unhandled applications downloaded from the internet: $($policyDetails.policy.DetectInstallations)" INFO
-                Write-Log " - Restriction" INFO
-                Write-Log " -- Restriction - Internet: $($policyDetails.policy.RestrictAccessInternet)" INFO
-                Write-Log " -- Restriction - Intranet: $($policyDetails.policy.RestrictAccessIntranet)" INFO
-                Write-Log " -- Restriction - Network shares: $($policyDetails.policy.RestrictAccessShares)" INFO
-                Write-Log " -- Restriction - Memory of other processes: $($policyDetails.policy.RestrictAccessRAM)" INFO
+                Write-Log "-- $IntLaunchWinNotification" INFO
+
+                $defaultPolicyTableBody += "<tr><td>$IntDetectLaunches</td><td>$IntLaunchWinNotification</td></tr>"
+
+                $defaultPolicyTableBody += Write-RowSingleData -param "IntDetectInstallations" -serverParam "DetectInstallations"
+
+                $IntRestrictAccessInternet = "$($DefPolPropMap["RestrictAccessInternet"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.RestrictAccessInternet))"
+                Write-Log "-- $IntRestrictAccessInternet" INFO
+
+                $IntRestrictAccessIntranet = "$($DefPolPropMap["RestrictAccessIntranet"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.RestrictAccessIntranet))"
+                Write-Log "-- $IntRestrictAccessIntranet" INFO
+
+                $IntRestrictAccessShares = "$($DefPolPropMap["RestrictAccessShares"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.RestrictAccessShares))"
+                Write-Log "-- $IntRestrictAccessShares" INFO
+
+                $IntRestrictAccessRAM = "$($DefPolPropMap["RestrictAccessRAM"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.RestrictAccessRAM))"
+                Write-Log "-- $IntRestrictAccessRAM" INFO
+
                 if ($policyDetails.Policy.IntRestrictAccessWinNotification.Id -ne "00000000-0000-0000-0000-000000000000"){
-                    Write-Log " --- Notify end users when an unauthorized access attempt occurs: $($policyDetails.Policy.IntRestrictAccessWinNotification.AllowedDialogType)" INFO
+                    $IntRestrictAccessWinNotification = "Dialog or Baloon"
                 } else {
-                    Write-Log " --- Notify end users when an unauthorized access attempt occurs: OFF" INFO
-                }                
+                    $IntRestrictAccessWinNotification = "OFF"
+                }
+
+                Write-Log "--- $($DefPolPropMap["IntRestrictAccessWinNotification"]): $IntRestrictAccessWinNotification" INFO
+
+                $defaultPolicyTableBody += "<tr><td>$IntRestrictAccessInternet</td><td rowspan=4>$($DefPolPropMap["IntRestrictAccessWinNotification"]): $IntRestrictAccessWinNotification</td></tr>"
+                $defaultPolicyTableBody += "<tr><td>$IntRestrictAccessIntranet</td></tr>"
+                $defaultPolicyTableBody += "<tr><td>$IntRestrictAccessShares</td></tr>"
+                $defaultPolicyTableBody += "<tr><td>$IntRestrictAccessRAM</td></tr>"
+
                 if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
-                    Write-Log " - Policy Applied to all Computers" INFO
+                    $IsAppliedToAllComputers = "Policy Applied to all Computers"
+                    Write-Log "-- $IsAppliedToAllComputers" INFO
+                    $defaultPolicyTableBody += "<tr><td>$IsAppliedToAllComputers</td><td></td></tr>"
                 } else {
                     Output-PolicyTarget $policyDetails.policy
                 }
             }
             # [Internet Block]
             8 {
-                Write-Box "$($policyTypes[$($policyDetails.Policy.PolicyType)])" INFO
-                Write-Log " -- Detect attempts to launch unhandled applications downloaded from the internet: $($policyDetails.policy.SendBlockEvent)" INFO
-                if ($policyDetails.Policy.IntBlockWinNotification.Id -ne "00000000-0000-0000-0000-000000000000"){
-                    Write-Log " --- Notify end user when unhandled application downloaded from the internet is blocked (Windows only): $($policyDetails.Policy.IntBlockWinNotification.AllowedDialogType)" INFO
-                } else {
-                    Write-Log " --- Notify end user when unhandled application downloaded from the internet is blocked (Windows only): OFF" INFO
+                $defaultPolicyTableBody += Write-RowDefPolType -param $($policyDetails.Policy.PolicyType) -rowspan 3
+                
+                $IntSendBlockEvent = "$($DefPolPropMap["IntSendBlockEvent"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.SendBlockEvent))"
+                Write-Log "- $IntSendBlockEvent" INFO
+                if ($policyDetails.Policy.SendBlockEvent) {
+                    if ($policyDetails.Policy.IntBlockWinNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
+                        $IntBlockWinNotification = "$($DefPolPropMap["IntBlockWinNotification"]): Baloon or Dialog"
+                    } else {
+                        $IntBlockWinNotification = "$($DefPolPropMap["IntBlockWinNotification"]): OFF"
+                    }
                 }
+                Write-Log "-- $IntBlockWinNotification" INFO
+
+                $defaultPolicyTableBody += "<tr><td>$IntSendBlockEvent</td><td>$IntBlockWinNotification</td></tr>"
+
                 if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
-                    Write-Log " - Policy Applied to all Computers" INFO
+                    $IsAppliedToAllComputers = "Policy Applied to all Computers"
+                    Write-Log "-- $IsAppliedToAllComputers" INFO
+                    $defaultPolicyTableBody += "<tr><td>$IsAppliedToAllComputers</td><td></td></tr>"
                 } else {
                     Output-PolicyTarget $policyDetails.policy
-                }                
+                }
             }
             # [PM Elevate]
             9 { 
-                Write-Box "$($policyTypes[$($policyDetails.Policy.PolicyType)])" INFO
-                Write-Log " - Standard end users:" INFO
-                Write-Log " -- Elevate unhandled applications when privileges are required: $($policyDetails.Policy.Elevate4StdUsers)" INFO
-                if ($policyDetails.Policy.PMElevateStdWinNotification.Id -ne "00000000-0000-0000-0000-000000000000"){
-                    Write-Log " --- Windows Dialog: $($policyDetails.Policy.PMElevateStdWinNotification.AllowedDialogType)" INFO
-                } else {
-                    Write-Log " --- Windows Dialog: OFF" INFO
-                }
-                if ($policyDetails.Policy.PMElevateStdMacNotification.Id -ne "00000000-0000-0000-0000-000000000000"){
-                    Write-Log " --- macOS Dialog: $($policyDetails.Policy.PMElevateStdMacNotification.AllowedDialogType)" INFO
-                } else {
-                    Write-Log " --- macOS Dialog: OFF" INFO
-                }
-                if ($policyDetails.Policy.PMElevateStdLinuxNotification.Id -ne "00000000-0000-0000-0000-000000000000"){
-                    Write-Log " --- Linux Dialog: $($policyDetails.Policy.PMElevateStdLinuxNotification.AllowedDialogType)" INFO
-                } else {
-                    Write-Log " --- Linux Dialog: OFF" INFO
-                }
-                
-                Write-Log " - Administrative end users:" INFO
-                Write-Log " -- Detect unhandled applications when administrative privileges are required: $($policyDetails.Policy.Elevate4AdmUsers)" INFO
-                if ($policyDetails.Policy.PMElevateAdmWinNotification.Id -ne "00000000-0000-0000-0000-000000000000"){
-                    Write-Log " --- Windows Dialog: $($policyDetails.Policy.PMElevateAdmWinNotification.AllowedDialogType)" INFO
-                } else {
-                    Write-Log " --- Windows Dialog: OFF" INFO
-                }
-                if ($policyDetails.Policy.PMElevateAdmMacNotification.Id -ne "00000000-0000-0000-0000-000000000000"){
-                    Write-Log " --- macOS Dialog: $($policyDetails.Policy.PMElevateAdmMacNotification.AllowedDialogType)" INFO
-                } else {
-                    Write-Log " --- macOS Dialog: OFF" INFO
-                }
-                if ($policyDetails.Policy.PMElevateAdmLinuxNotification.Id -ne "00000000-0000-0000-0000-000000000000"){
-                    Write-Log " --- Linux Dialog: $($policyDetails.Policy.PMElevateAdmLinuxNotification.AllowedDialogType)" INFO
-                } else {
-                    Write-Log " --- Linux Dialog: OFF" INFO
-                }
+                $defaultPolicyTableBody += Write-RowDefPolType -param $($policyDetails.Policy.PolicyType) -rowspan 5
 
-                Write-Log " - Detect unsuccessful application launches using heuristics (Windows only): $($policyDetails.Policy.DetectHeuristics)" INFO
-                Write-Log " - Allow end users to submit elevation requests (Windows, macOS): $($policyDetails.Policy.ManualRequests)" INFO
-                if ($policyDetails.Policy.ManualRequests -eq $true) {
-                    if ($policyDetails.Policy.PMElevateManualNotification.Id -ne "00000000-0000-0000-0000-000000000000"){
-                        Write-Log " --- Prompt users when an application is elevated manually: $($policyDetails.Policy.PMElevateManualNotification.AllowedDialogType)" INFO
+                $Elevate4StdUsers = "$($DefPolPropMap["Elevate4StdUsers"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.Elevate4StdUsers))"
+                Write-Log "- $Elevate4StdUsers" INFO
+                if ($policyDetails.Policy.Elevate4StdUsers) {
+                    if ($policyDetails.Policy.PMElevateStdWinNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
+                        $PMElevateStdWinNotification = "$($DefPolPropMap["PMElevateWinNotification"]): Baloon or Dialog"
                     } else {
-                        Write-Log " --- Prompt users when an application is elevated manually: OFF" INFO
-                    }                    
+                        $PMElevateStdWinNotification = "$($DefPolPropMap["PMElevateWinNotification"]): OFF"
+                    }
+                    Write-Log "-- $PMElevateStdWinNotification" INFO
+
+                    if ($policyDetails.Policy.PMElevateStdMacNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
+                        $PMElevateStdMacNotification = "$($DefPolPropMap["PMElevateMacNotification"]): Dialog"
+                    } else {
+                        $PMElevateStdMacNotification = "$($DefPolPropMap["PMElevateMacNotification"]): OFF"
+                    }
+                    Write-Log "-- $PMElevateStdMacNotification" INFO
+
+                    if ($policyDetails.Policy.PMElevateStdLinuxNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
+                        $PMElevateStdLinuxNotification = "$($DefPolPropMap["PMElevateLinuxNotification"]): Dialog"
+                    } else {
+                        $PMElevateStdLinuxNotification = "$($DefPolPropMap["PMElevateLinuxNotification"]): OFF"
+                    }
+                    Write-Log "-- $PMElevateStdLinuxNotification" INFO
                 }
-                if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
-                    Write-Log " - Policy Applied to all Computers" INFO
+                $defaultPolicyTableBody += "<tr><td>$Elevate4StdUsers</td><td>$PMElevateStdWinNotification<br>$PMElevateStdMacNotification<br>$PMElevateStdLinuxNotification</tr>"
+
+                $Elevate4AdmUsers = "$($DefPolPropMap["Elevate4AdmUsers"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.Elevate4AdmUsers))"
+                Write-Log "- $Elevate4AdmUsers" INFO
+                if ($policyDetails.Policy.Elevate4AdmUsers) {
+                    if ($policyDetails.Policy.PMElevateAdmWinNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
+                        $PMElevateAdmWinNotification = "$($DefPolPropMap["PMElevateWinNotification"]): Baloon or Dialog"
+                    } else {
+                        $PMElevateAdmWinNotification = "$($DefPolPropMap["PMElevateWinNotification"]): OFF"
+                    }
+                    Write-Log "-- $PMElevateAdmWinNotification" INFO
+
+                    if ($policyDetails.Policy.PMElevateStdMacNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
+                        $PMElevateAdmMacNotification = "$($DefPolPropMap["PMElevateMacNotification"]): Dialog"
+                    } else {
+                        $PMElevateAdmMacNotification = "$($DefPolPropMap["PMElevateMacNotification"]): OFF"
+                    }
+                    Write-Log "-- $PMElevateAdmMacNotification" INFO
+
+                    if ($policyDetails.Policy.PMElevateAdmLinuxNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
+                        $PMElevateAdmLinuxNotification = "$($DefPolPropMap["PMElevateLinuxNotification"]): Dialog"
+                    } else {
+                        $PMElevateAdmLinuxNotification = "$($DefPolPropMap["PMElevateLinuxNotification"]): OFF"
+                    }
+                    Write-Log "-- $PMElevateAdmLinuxNotification" INFO
+                }
+                $defaultPolicyTableBody += "<tr><td>$Elevate4AdmUsers</td><td>$PMElevateAdmWinNotification<br>$PMElevateAdmMacNotification<br>$PMElevateAdmLinuxNotification</tr>"
+
+                $ManualRequests = "$($DefPolPropMap["ElevateManualRequests"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.ManualRequests))"
+                Write-Log "- $ManualRequests" INFO
+                if ($policyDetails.Policy.ManualRequests -and $policyDetails.Policy.PMElevateManualNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
+                    $PMElevateManualNotification = "$($DefPolPropMap["PMDetectManualNotification"]): Baloon or Dialog"
                 } else {
-                    Output-PolicyTarget $policyDetails.policy                }
+                    $PMElevateManualNotification = "$($DefPolPropMap["PMDetectManualNotification"]): OFF"
+                }
+                Write-Log "-- $PMElevateManualNotification" INFO
+
+                $defaultPolicyTableBody += "<tr><td>$ManualRequests</td><td>$PMElevateManualNotification</td></tr>"
+               
+                if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
+                    $IsAppliedToAllComputers = "Policy Applied to all Computers"
+                    Write-Log "- $IsAppliedToAllComputers" INFO
+                    $defaultPolicyTableBody += "<tr><td>$IsAppliedToAllComputers</td><td></td></tr>"
+                } else {
+                    Output-PolicyTarget $policyDetails.policy
+                }
             }
             # [AC Block]
             10 {
-                Write-Box "$($policyTypes[$($policyDetails.Policy.PolicyType)]) (Windows and macOS)" INFO
-                Write-Log " - Detect attempts to launch unhandled applications: $($policyDetails.policy.SendBlockEvent)" INFO
-                if ($policyDetails.Policy.ACBlockWinNotification.Id -ne "00000000-0000-0000-0000-000000000000"){
-                    Write-Log " -- Notify users when an unhandled application is blocked (Windows): $($policyDetails.Policy.ACBlockWinNotification.AllowedDialogType)" INFO
-                } else {
-                    Write-Log " -- Notify users when an unhandled application is blocked (Windows): OFF" INFO
+                $defaultPolicyTableBody += Write-RowDefPolType -param $($policyDetails.Policy.PolicyType) -rowspan 5
+                
+                $SendBlockEvent = "$($DefPolPropMap["SendBlockEvent"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.SendBlockEvent))"
+                Write-Log "- $SendBlockEvent" INFO
+                if ($policyDetails.Policy.SendBlockEvent) {
+                    if ($policyDetails.Policy.BlockWinNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
+                        $ACBlockWinNotification = "$($DefPolPropMap["ACBlockWinNotification"]): Baloon or Dialog"
+                    } else {
+                        $ACBlockWinNotification = "$($DefPolPropMap["ACBlockWinNotification"]): NO"
+                    }
+                    Write-Log "-- $ACBlockWinNotification" INFO
+
+                    if ($policyDetails.Policy.ACBlockMacNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
+                        $ACBlockMacNotification = "$($DefPolPropMap["ACBlockMacNotification"]): Baloon or Dialog"
+                    } else {
+                        $ACBlockMacNotification = "$($DefPolPropMap["ACBlockMacNotification"]): NO"
+                    }
+                    Write-Log "-- $ACBlockMacNotification" INFO
                 }
-                if ($policyDetails.Policy.ACBlockMacNotification.Id -ne "00000000-0000-0000-0000-000000000000"){
-                    Write-Log " -- Notify users when an unhandled application is blocked (macOS): $($policyDetails.Policy.ACBlockMacNotification.AllowedDialogType)" INFO
-                } else {
-                    Write-Log " -- Notify users when an unhandled application is blocked (macOS): OFF" INFO
-                }
-                Write-Log " - Include applications installed before the EPM agent: $($policyDetails.policy.Apply2OldApps)" INFO
-                Write-Log " - Include controlled Windows OS programs (Windows Only): $($policyDetails.policy.Apply2WindowsPrograms)" INFO
+
+                $defaultPolicyTableBody += "<tr><td>$SendBlockEvent</td><td>$ACBlockWinNotification<br>$ACBlockMacNotification</td></tr>"
+
+                $defaultPolicyTableBody += Write-RowSingleData -param "Apply2OldApps"
+                $defaultPolicyTableBody += Write-RowSingleData -param "Apply2WindowsPrograms"
+
                 if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
-                    Write-Log " - Policy Applied to all Computers" INFO
+                    $IsAppliedToAllComputers = "Policy Applied to all Computers"
+                    Write-Log "- $IsAppliedToAllComputers" INFO
+                    $defaultPolicyTableBody += "<tr><td>$IsAppliedToAllComputers</td><td></td></tr>"
                 } else {
                     Output-PolicyTarget $policyDetails.policy
                 }
@@ -1275,3 +1559,12 @@ $agentConfReport = Create-HTMLReport -ReportTitle "Agent Configuration" `
 
 # Save to file
 Save-File -Content $agentConfReport -FileName "$($set.setName)_AgentConf.html" -DestFolder "$PSScriptRoot\\EPM_HC_Report"
+
+$defaultPolicyReport = Create-HTMLReport -ReportTitle "Default Policy" `
+    -SubTitle "" `
+    -SetName "SET: $($set.setName)" `
+    -TableHeader "<th>Policy Type</th>", "<th>Main Settings</th>", "<th>Extended Settings</th>"`
+    -TableBody $defaultPolicyTableBody
+
+# Save to file
+Save-File -Content $defaultPolicyReport -FileName "$($set.setName)_DefaultPolicy.html" -DestFolder "$PSScriptRoot\\EPM_HC_Report"

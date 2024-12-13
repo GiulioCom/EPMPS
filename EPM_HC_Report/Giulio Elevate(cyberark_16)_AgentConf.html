@@ -1,68 +1,69 @@
-﻿<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agent Configuration</title>
-    <!-- Include Titillium Web font from Google Fonts -->
-    <link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@300;400;600&display=swap" rel="stylesheet">
-    <style>
-        /* Apply the Titillium Web font */
-        body {
-            font-family: 'Titillium Web', sans-serif;
-            line-height: 1.6;
-        }
-        h1 {
-            text-align: center;
-            color: #333;
-            font-weight: 600;
-        }
-        h2, h3 {
-            text-align: center;
-            color: #666;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-        }
-        table, th, td {
-            border: 1px solid #ddd;
-        }
-        th, td {
-            padding: 10px;
-            text-align: left;
-        }
-        /* Header color: Turquoise */
-        th {
-            background-color: turquoise;
-            color: white;
-            font-weight: 600;
-        }
-        /* Even row color: rgb(199, 221, 236) */
-        tr:nth-child(even) {
-            background-color: rgb(199, 221, 236);
-        }
-        /* Odd row color: rgb(167, 201, 225) */
-        tr:nth-child(odd) {
-            background-color: rgb(167, 201, 225);
-        }
-        /* Add hover effect for rows */
-        tr:hover {
-            background-color: #f1f1f1;
-        }
-    </style>
-</head>
-<body>
-<h1>Agent Configuration</h1>
-<h2>Configuration Policy: General configuration</h2>
-<h3>SET: [Giulio] Elevate(cyberark_16)</h3>
-<table>
-<tr>
-<th>ParameterType</th> <th>Parameter</th> <th>OS</th> <th>Settings</th>
-</tr>
-<tr><td>Extended Protection</td><td>Agent self-defense</td><td>Windows, macOS, Linux</td><td>ON</td></tr><tr><td>Extended Protection</td><td>Support info file password</td><td>Windows, macOS, Linux</td><td>No Value</td></tr><tr><td>Extended Protection</td><td>Protect elevated processes from DLL hijacking</td><td>Windows</td><td>OFF</td></tr><tr><td>Data collection</td><td>Collect policy audit data</td><td>Windows, macOS, Linux</td><td>ON</td></tr><tr><td>Data collection</td><td>Threat protection excluded applications</td><td>Windows</td><td>No Value</td></tr><tr><td>Data collection</td><td>Exclude new files from the Application Catalog and Events Management</td><td>Windows</td><td><ul><li>Location: '%WINDIR%\Installer'</li> <li>Location: '*\Local Settings\Temporary Internet Files'</li> <li>Location: '*\Local Settings\Temp\Temporary Internet Files'</li> <li>Location: '*\LocalService\Temp\Temporary Internet Files'</li> <li>Location: '*\Microsoft\Windows\Temporary Internet Files'</li> <li>Location: '*\Google\Chrome\User Data'</li> <li>Location: '*\Mozilla\Firefox\Profiles'</li> <li>Location: '*\Local Settings\Application Data\Apple Computer\Safari\'</li> <li>Location: '*\Roaming\AppleComputer\Safari'</li> <li>Location: '*\AppData\Local\Temp'</li> <li>Location: '%WINDIR%\SoftwareDistribution\Download'</li> <li>Location: '%WINDIR%\winsxs'</li> <li>Location: '%WINDIR%\SoftwareDistribution\SelfUpdate\Packages'</li> <li>Location: '*:\RECYCLER'</li> <li>Location: '*:\$Recycle.Bin'</li> <li>Location: '%WINDIR%\assembly'</li> <li>Location: '%SystemDrive%\Config.msi'</li> <li>Location: '*:\System Volume Information'</li> <li>Location: '*\AppData\Local\Microsoft\Windows\INetCache\IE'</li> <li>Location: '*\AppData\Local\Microsoft\Windows\INetCache\Low'</li> <li>Location: '%WINDIR%\System32\spool'</li> <li>Location: '%WINDIR%\Microsoft.NET\assembly'</li> <li>Location: '%SystemDrive%\Windows.old'</li> <li>Location: '%SystemDrive%\$WINDOWS.~BT'</li> <li>Location: '%SystemDrive%\$Windows.~WS'</li> <li>Location: '%ProgramFiles%\WindowsApps'</li> <li>Location: '%WINDIR%\rescache'</li> <li>Location: '%SystemRoot%\Microsoft.NET\Framework\*\Temporary ASP.NET Files'</li> <li>Location: '*\AppData\Local\Temp\Temporary ASP.NET Files'</li> <li>Location: '*\AppData\Local\Packages\Microsoft.MicrosoftEdge_*\AC\*\Cache'</li> <li>File Name: '*.ps1', ... (other parameters)</li> <li>File Name: '*.ps1', ... (other parameters)</li> <li>File Name: '*.ps1', ... (other parameters)</li></td></tr><tr><td>Data collection</td><td>File types to scan for Application Catalog</td><td>Windows, macOS</td><td><ul><li>Windows - Executable extensions: EXE</li>
+﻿    <!DOCTYPE html>
+    <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Agent Configuration - SET: [Giulio] Elevate(cyberark_16)</title>
+            <!-- Include Titillium Web font from Google Fonts -->
+            <link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@300;400;600&display=swap" rel="stylesheet">
+            <style>
+                /* Apply the Titillium Web font */
+                body {
+                    font-family: 'Titillium Web', sans-serif;
+                    line-height: 1.6;
+                }
+                h1 {
+                    text-align: center;
+                    color: #333;
+                    font-weight: 600;
+                }
+                h2, h3 {
+                    text-align: center;
+                    color: #666;
+                }
+                table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-bottom: 20px;
+                    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+                }
+                table, th, td {
+                    border: 1px solid #ddd;
+                }
+                th, td {
+                    padding: 10px;
+                    text-align: left;
+                }
+                /* Header color: Turquoise */
+                th {
+                    background-color: turquoise;
+                    color: white;
+                    font-weight: 600;
+                }
+                tr {
+                    background-color: rgb(167, 201, 225);
+                }
+                /* Even row color: rgb(199, 221, 236) */
+                //tr:nth-child(even) {
+                //    background-color: rgb(199, 221, 236);
+                //}
+                /* Odd row color: rgb(167, 201, 225) */
+                //tr:nth-child(odd) {
+                //    background-color: rgb(167, 201, 225);
+                //}
+                /* Add hover effect for rows */
+                tr:hover {
+                    background-color: #f1f1f1;
+                }
+            </style>
+        </head>
+        <body>
+            <h1>Agent Configuration</h1>
+            <h2>Configuration Policy: General configuration</h2>
+            <h3>SET: [Giulio] Elevate(cyberark_16)</h3>
+            <table>
+                <tr><th>ParameterType</th> <th>Parameter</th> <th>OS</th> <th>Settings</th></tr>
+                <tr><td>Extended Protection</td><td>Agent self-defense</td><td>Windows, macOS, Linux</td><td>ON</td></tr><tr><td>Extended Protection</td><td>Support info file password</td><td>Windows, macOS, Linux</td><td>No Value</td></tr><tr><td>Extended Protection</td><td>Protect elevated processes from DLL hijacking</td><td>Windows</td><td>OFF</td></tr><tr><td>Data collection</td><td>Collect policy audit data</td><td>Windows, macOS, Linux</td><td>ON</td></tr><tr><td>Data collection</td><td>Threat protection excluded applications</td><td>Windows</td><td>No Value</td></tr><tr><td>Data collection</td><td>Exclude new files from the Application Catalog and Events Management</td><td>Windows</td><td><ul><li>Location: '%WINDIR%\Installer'</li> <li>Location: '*\Local Settings\Temporary Internet Files'</li> <li>Location: '*\Local Settings\Temp\Temporary Internet Files'</li> <li>Location: '*\LocalService\Temp\Temporary Internet Files'</li> <li>Location: '*\Microsoft\Windows\Temporary Internet Files'</li> <li>Location: '*\Google\Chrome\User Data'</li> <li>Location: '*\Mozilla\Firefox\Profiles'</li> <li>Location: '*\Local Settings\Application Data\Apple Computer\Safari\'</li> <li>Location: '*\Roaming\AppleComputer\Safari'</li> <li>Location: '*\AppData\Local\Temp'</li> <li>Location: '%WINDIR%\SoftwareDistribution\Download'</li> <li>Location: '%WINDIR%\winsxs'</li> <li>Location: '%WINDIR%\SoftwareDistribution\SelfUpdate\Packages'</li> <li>Location: '*:\RECYCLER'</li> <li>Location: '*:\$Recycle.Bin'</li> <li>Location: '%WINDIR%\assembly'</li> <li>Location: '%SystemDrive%\Config.msi'</li> <li>Location: '*:\System Volume Information'</li> <li>Location: '*\AppData\Local\Microsoft\Windows\INetCache\IE'</li> <li>Location: '*\AppData\Local\Microsoft\Windows\INetCache\Low'</li> <li>Location: '%WINDIR%\System32\spool'</li> <li>Location: '%WINDIR%\Microsoft.NET\assembly'</li> <li>Location: '%SystemDrive%\Windows.old'</li> <li>Location: '%SystemDrive%\$WINDOWS.~BT'</li> <li>Location: '%SystemDrive%\$Windows.~WS'</li> <li>Location: '%ProgramFiles%\WindowsApps'</li> <li>Location: '%WINDIR%\rescache'</li> <li>Location: '%SystemRoot%\Microsoft.NET\Framework\*\Temporary ASP.NET Files'</li> <li>Location: '*\AppData\Local\Temp\Temporary ASP.NET Files'</li> <li>Location: '*\AppData\Local\Packages\Microsoft.MicrosoftEdge_*\AC\*\Cache'</li> <li>File Name: '*.ps1', ... (other parameters)</li> <li>File Name: '*.ps1', ... (other parameters)</li> <li>File Name: '*.ps1', ... (other parameters)</li></td></tr><tr><td>Data collection</td><td>File types to scan for Application Catalog</td><td>Windows, macOS</td><td><ul><li>Windows - Executable extensions: EXE</li>
 <li>Windows - Installation package extensions: MSI, MSP, MSU</li>
 <li>Windows - Dynamic link library (DLL) extensions: </li>
 <li>Windows - Script file extensions: </li>
@@ -123,7 +124,7 @@
 
 <li>FileType: 0</li>
 </ul>
-</li></ul></td></tr><tr><td>Endpoint UI</td><td>Hide Windows "Run As..." menu items</td><td>Windows</td><td>OFF</td></tr><tr><td>Endpoint UI</td><td>Hide CyberArk EPM agent from installed programs</td><td>Windows</td><td>OFF</td></tr><tr><td>Endpoint UI</td><td>Shell elevate menu text</td><td>Windows</td><td>Run with Elevated Privileges</td></tr><tr><td>Endpoint UI</td><td>Enable tabbed browsing</td><td>Windows</td><td>OFF</td></tr><tr><td>IdP settings</td><td>CyberArk Identity </td><td>Windows</td><td><ul><li>TenantId: No Value</li>
+</li></ul></td></tr><tr><td>Endpoint UI</td><td>Hide Windows "Run As..." menu items</td><td>Windows</td><td>OFF</td></tr><tr><td>Endpoint UI</td><td>Hide CyberArk EPM agent from installed programs</td><td>Windows</td><td>OFF</td></tr><tr><td>Endpoint UI</td><td>Shell elevate menu text</td><td>Windows</td><td>Run with Elevated Privileges</td></tr><tr><td>Endpoint UI</td><td>Enable tabbed browsing</td><td>Windows</td><td>OFF</td></tr><tr><td>IdP settings</td><td>CyberArk Identity </td><td></td><td><ul><li>TenantId: No Value</li>
 </ul></td></tr><tr><td>IdP settings</td><td>Custom identity provider</td><td>Windows, macOS</td><td><ul><li>OFF</li>
 
 <li>IdentityProviderName: No Value</li>
@@ -187,7 +188,7 @@
 <li>/bin</li>
 <li>/usr/sbin</li>
 <li>/sbin</li>
-</ul></ul></td></tr><tr><td>Agent behavior</td><td>Allowed preloader</td><td>Linux</td><td><ul><li>@{Path=/usr/local/lib/AppProtection/libAppProtection.so; Checksum=}</li></td></tr><tr><td>Agent behavior</td><td>Allow sudoers interoperability</td><td>macOS</td><td>OFF</td></tr>
-</table>
-</body>
-</html>
+</ul></ul></td></tr><tr><td>Agent behavior</td><td>Allowed preloader</td><td>Linux</td><td><ul><li>@{Path=/lib/x86_64-linux-gnu/libreadline.so.8; Checksum=}</li></td></tr><tr><td>Agent behavior</td><td>Allow sudoers interoperability</td><td>macOS</td><td>OFF</td></tr>
+            </table>
+        </body>
+    </html>

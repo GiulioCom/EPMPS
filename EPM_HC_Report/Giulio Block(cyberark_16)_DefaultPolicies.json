@@ -1,119 +1,39 @@
 {
     "Policies":  [
                      {
-                         "PolicyId":  "f913caec-4248-446f-aa41-ca5dc7a5e5f5",
-                         "PolicyName":  "[RP Detect]",
-                         "Action":  0,
-                         "IsActive":  true,
-                         "PolicyType":  4,
-                         "Order":  0,
-                         "IsAppliedToAllComputers":  true,
-                         "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.7352618",
-                         "ModifiedDate":  "2024-12-13T17:16:26.557375",
-                         "ReferencedApplicationGroups":  [
-
-                                                         ],
-                         "UserPolicyPermissions":  -1
-                     },
-                     {
-                         "PolicyId":  "45ef943b-e088-4fb2-acba-b4c6d28a3819",
-                         "PolicyName":  "[RP Restrict]",
-                         "Action":  0,
-                         "IsActive":  false,
-                         "PolicyType":  5,
-                         "Order":  0,
-                         "IsAppliedToAllComputers":  true,
-                         "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.7352618",
-                         "ModifiedDate":  "2024-12-13T17:16:24.4771845",
-                         "ReferencedApplicationGroups":  [
-
-                                                         ],
-                         "UserPolicyPermissions":  -1
-                     },
-                     {
-                         "PolicyId":  "2db38cf4-233c-46d4-bcc4-8cdc1f9f767f",
+                         "PolicyId":  "fb489589-60d9-46e9-8e1d-f577a4f492e6",
                          "PolicyName":  "[PM Detect]",
                          "Action":  0,
-                         "IsActive":  true,
+                         "IsActive":  false,
                          "PolicyType":  1,
                          "Order":  0,
                          "IsAppliedToAllComputers":  true,
                          "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.7352618",
-                         "ModifiedDate":  "2024-12-13T16:31:07.1348109",
+                         "CreatedDate":  "2022-10-27T14:26:21.2286976",
+                         "ModifiedDate":  "2024-10-21T17:23:37.0489353",
                          "ReferencedApplicationGroups":  [
 
                                                          ],
                          "UserPolicyPermissions":  -1
                      },
                      {
-                         "PolicyId":  "d7099885-995d-493a-8e47-b09664e89970",
-                         "PolicyName":  "[Internet Detect]",
+                         "PolicyId":  "d64aa840-a2cc-4cad-b407-6b39858a61c8",
+                         "PolicyName":  "[AC Block]",
                          "Action":  0,
                          "IsActive":  true,
-                         "PolicyType":  6,
+                         "PolicyType":  10,
                          "Order":  0,
                          "IsAppliedToAllComputers":  true,
                          "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.7508886",
-                         "ModifiedDate":  "2024-11-18T10:42:29.4311213",
+                         "CreatedDate":  "2022-10-27T14:26:33.6085935",
+                         "ModifiedDate":  "2024-09-16T07:59:26.3618212",
                          "ReferencedApplicationGroups":  [
 
                                                          ],
                          "UserPolicyPermissions":  -1
                      },
                      {
-                         "PolicyId":  "5f60807d-4fca-4595-8cd0-d895eef397b8",
-                         "PolicyName":  "[Internet Restrict]",
-                         "Action":  0,
-                         "IsActive":  false,
-                         "PolicyType":  7,
-                         "Order":  0,
-                         "IsAppliedToAllComputers":  true,
-                         "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.766503",
-                         "ModifiedDate":  "2024-11-18T10:42:28.1355398",
-                         "ReferencedApplicationGroups":  [
-
-                                                         ],
-                         "UserPolicyPermissions":  -1
-                     },
-                     {
-                         "PolicyId":  "aec17c18-7b8a-460b-9f40-66becd3f58f6",
-                         "PolicyName":  "[Internet Block]",
-                         "Action":  0,
-                         "IsActive":  false,
-                         "PolicyType":  8,
-                         "Order":  0,
-                         "IsAppliedToAllComputers":  true,
-                         "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.766503",
-                         "ModifiedDate":  "2024-10-24T08:03:32.4338067",
-                         "ReferencedApplicationGroups":  [
-
-                                                         ],
-                         "UserPolicyPermissions":  -1
-                     },
-                     {
-                         "PolicyId":  "4f1fbab9-31fc-44fc-8e57-6111b0ab4b18",
-                         "PolicyName":  "[PM Elevate]",
-                         "Action":  0,
-                         "IsActive":  false,
-                         "PolicyType":  9,
-                         "Order":  0,
-                         "IsAppliedToAllComputers":  true,
-                         "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.766503",
-                         "ModifiedDate":  "2024-10-23T08:55:19.6061105",
-                         "ReferencedApplicationGroups":  [
-
-                                                         ],
-                         "UserPolicyPermissions":  -1
-                     },
-                     {
-                         "PolicyId":  "1054bd63-cab3-4786-bc8f-364133a2271d",
+                         "PolicyId":  "7deda248-3049-42f3-aaf9-dcae374c5b09",
                          "PolicyName":  "[AC Detect]",
                          "Action":  0,
                          "IsActive":  true,
@@ -121,15 +41,111 @@
                          "Order":  0,
                          "IsAppliedToAllComputers":  true,
                          "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.7508886",
-                         "ModifiedDate":  "2024-10-21T16:22:00.0296015",
+                         "CreatedDate":  "2022-10-27T14:26:22.9341645",
+                         "ModifiedDate":  "2023-05-16T11:56:52.0487971",
                          "ReferencedApplicationGroups":  [
 
                                                          ],
                          "UserPolicyPermissions":  -1
                      },
                      {
-                         "PolicyId":  "5c6d445d-ba6f-499e-9c67-9e1a82cc4db9",
+                         "PolicyId":  "2b2a9d11-b465-4bc2-8522-52993f5e9274",
+                         "PolicyName":  "[PM Elevate]",
+                         "Action":  0,
+                         "IsActive":  false,
+                         "PolicyType":  9,
+                         "Order":  0,
+                         "IsAppliedToAllComputers":  true,
+                         "OsType":  0,
+                         "CreatedDate":  "2022-10-27T14:26:31.8021244",
+                         "ModifiedDate":  "2022-10-27T14:26:31.8021244",
+                         "ReferencedApplicationGroups":  [
+
+                                                         ],
+                         "UserPolicyPermissions":  -1
+                     },
+                     {
+                         "PolicyId":  "4ce13977-691e-445a-9b2b-4b6b529ee2c9",
+                         "PolicyName":  "[Internet Block]",
+                         "Action":  0,
+                         "IsActive":  false,
+                         "PolicyType":  8,
+                         "Order":  0,
+                         "IsAppliedToAllComputers":  true,
+                         "OsType":  0,
+                         "CreatedDate":  "2022-10-27T14:26:30.6101143",
+                         "ModifiedDate":  "2022-10-27T14:26:30.6101143",
+                         "ReferencedApplicationGroups":  [
+
+                                                         ],
+                         "UserPolicyPermissions":  -1
+                     },
+                     {
+                         "PolicyId":  "d021114a-cba7-4376-b3fb-d0792e5c0e06",
+                         "PolicyName":  "[Internet Restrict]",
+                         "Action":  0,
+                         "IsActive":  false,
+                         "PolicyType":  7,
+                         "Order":  0,
+                         "IsAppliedToAllComputers":  true,
+                         "OsType":  0,
+                         "CreatedDate":  "2022-10-27T14:26:28.9891259",
+                         "ModifiedDate":  "2022-10-27T14:26:28.9891259",
+                         "ReferencedApplicationGroups":  [
+
+                                                         ],
+                         "UserPolicyPermissions":  -1
+                     },
+                     {
+                         "PolicyId":  "a3cabc9a-654c-4eb9-81fe-763912a4b8a2",
+                         "PolicyName":  "[Internet Detect]",
+                         "Action":  0,
+                         "IsActive":  false,
+                         "PolicyType":  6,
+                         "Order":  0,
+                         "IsAppliedToAllComputers":  true,
+                         "OsType":  0,
+                         "CreatedDate":  "2022-10-27T14:26:28.44813",
+                         "ModifiedDate":  "2022-10-27T14:26:28.44813",
+                         "ReferencedApplicationGroups":  [
+
+                                                         ],
+                         "UserPolicyPermissions":  -1
+                     },
+                     {
+                         "PolicyId":  "b1970bbf-f088-4403-b832-4e619e4307a3",
+                         "PolicyName":  "[RP Restrict]",
+                         "Action":  0,
+                         "IsActive":  false,
+                         "PolicyType":  5,
+                         "Order":  0,
+                         "IsAppliedToAllComputers":  true,
+                         "OsType":  0,
+                         "CreatedDate":  "2022-10-27T14:26:27.5481242",
+                         "ModifiedDate":  "2022-10-27T14:26:27.5481242",
+                         "ReferencedApplicationGroups":  [
+
+                                                         ],
+                         "UserPolicyPermissions":  -1
+                     },
+                     {
+                         "PolicyId":  "5a014c06-4b09-4828-87f7-20639bf79d28",
+                         "PolicyName":  "[RP Detect]",
+                         "Action":  0,
+                         "IsActive":  false,
+                         "PolicyType":  4,
+                         "Order":  0,
+                         "IsAppliedToAllComputers":  true,
+                         "OsType":  0,
+                         "CreatedDate":  "2022-10-27T14:26:25.9021436",
+                         "ModifiedDate":  "2022-10-27T14:26:25.9021436",
+                         "ReferencedApplicationGroups":  [
+
+                                                         ],
+                         "UserPolicyPermissions":  -1
+                     },
+                     {
+                         "PolicyId":  "bb8bba3b-d526-4e70-983d-0876a12499be",
                          "PolicyName":  "[AC Restrict]",
                          "Action":  0,
                          "IsActive":  false,
@@ -137,31 +153,15 @@
                          "Order":  0,
                          "IsAppliedToAllComputers":  true,
                          "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.7508886",
-                         "ModifiedDate":  "2024-10-21T16:21:59.8264862",
-                         "ReferencedApplicationGroups":  [
-
-                                                         ],
-                         "UserPolicyPermissions":  -1
-                     },
-                     {
-                         "PolicyId":  "d3523f6e-d298-4b92-abb3-7daf5d568336",
-                         "PolicyName":  "[AC Block]",
-                         "Action":  0,
-                         "IsActive":  false,
-                         "PolicyType":  10,
-                         "Order":  0,
-                         "IsAppliedToAllComputers":  true,
-                         "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.7821297",
-                         "ModifiedDate":  "2021-10-03T13:18:26.7821297",
+                         "CreatedDate":  "2022-10-27T14:26:24.3871344",
+                         "ModifiedDate":  "2022-10-27T14:26:24.3871344",
                          "ReferencedApplicationGroups":  [
 
                                                          ],
                          "UserPolicyPermissions":  -1
                      }
                  ],
-    "ActiveCount":  87,
-    "TotalCount":  214,
+    "ActiveCount":  26,
+    "TotalCount":  106,
     "FilteredCount":  10
 }

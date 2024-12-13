@@ -26,6 +26,7 @@
 .RELEASE NOTES
     01/2024 - Initial Version
     12/2024 - Adding Logs
+    12/2024 - Improve last date management
 
 .EXAMPLE
     1. .\EPMCreateJIT.ps1 -username "user@domain" -setName "MySet" -tenant "eu"
@@ -53,7 +54,7 @@ param (
     [Parameter(HelpMessage = "Specify the log file path")]
     [string]$logFolder,
 
-    [Parameter(HelpMessage = "Please provide the folder to store the last event details.")]
+    [Parameter(HelpMessage = "Please provide the folder to store the last event date detail.")]
     [string]$lastEventFolder
 
 )
@@ -144,6 +145,7 @@ function Resolve-Folder {
 
     return $resolvedFolder
 }
+
 function Remove-InvalidCharacters {
     param (
         [Parameter(Mandatory)]
@@ -158,6 +160,7 @@ function Remove-InvalidCharacters {
 
     return $sanitizedString
 }
+
 function Invoke-EPMRestMethod  {
     <#
     .SYNOPSIS
@@ -351,13 +354,37 @@ function Get-EPMSetID {
     }
 }
 
+function Add-msToTimestamp {
+    param (
+        [string]$timestamp
+    )
+
+    # Use a regex to parse and modify the timestamp
+    if ($timestamp -match '^(?<Date>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.)(?<Milliseconds>\d+)(?<Zone>Z)$') {
+        # Extract components
+        $datePart = $Matches['Date']
+        $milliseconds = $Matches['Milliseconds']
+        $zone = $Matches['Zone']
+
+        # Add '001' to the millisecond part, ensuring 3 digits
+        $newMilliseconds = $milliseconds.PadRight(3, '0')
+        $newMilliseconds = [int]$newMilliseconds + 1
+        $newMilliseconds = $newMilliseconds.ToString().PadLeft(3, '0')
+
+        # Construct the new timestamp
+        return "$datePart$newMilliseconds$zone"
+    } else {
+        throw "Invalid timestamp format: $timestamp"
+    }
+}
+
 # Logging setup
+$scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
 if ($log) {
     $resolvedLogFolder = Resolve-Folder -ProvidedFolder $logFolder -DefaultSubFolder "log"
 
     # Create log file
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
     $logFileName = "$timestamp`_$scriptName.log"
     $logFilePath = Join-Path $resolvedLogFolder $logFileName
 
@@ -391,12 +418,12 @@ $lastEventTimestamp = (Get-Date).AddMonths(-1).ToString('yyyy-MM-ddTHH:mm:ss.ffZ
 
 # Check if the file exists
 if (Test-Path $lastEventFile -PathType Leaf) {
-    Write-Log "Found events log file : $lastEventFile" INFO
+    Write-Log "Found last events file: $lastEventFile" INFO
     # Read the first line from the file
     $firstLine = Get-Content $lastEventFile -First 1
 
     # Define a regex pattern for the timestamp format "2024-01-12T16:51:32.303Z"
-    $timestampPattern = '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$'
+    $timestampPattern = '^(?<Date>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.)(?<Milliseconds>\d+)(?<Zone>Z)$'
 
     # Check if the first line matches the timestamp pattern
     if ($firstLine -match $timestampPattern) {
@@ -406,7 +433,7 @@ if (Test-Path $lastEventFile -PathType Leaf) {
         # Display the timestamp
         Write-Log "Searching Manual Request events from $lastEventTimestamp" INFO
     } else {
-        Write-Log "The first line does not match the expected timestamp format. Starting the event search from $lastEventTimestamp" WARN
+        Write-Log "$firstLine does not match the expected timestamp format. Starting the event search from $lastEventTimestamp" WARN
     }
 } else {
     Write-Log "$($lastEventFile): The file does not exist. Starting the event search from $lastEventTimestamp" WARN
@@ -417,49 +444,69 @@ $eventsFilter = @{
     "filter" = "eventDate GE $lastEventTimestamp AND eventType IN ManualRequest"
 }  | ConvertTo-Json
 
-$events = Invoke-EPMRestMethod -URI "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Events/Search?limit=1000" -Method 'POST' -Headers $sessionHeader -Body $eventsFilter
+$events = Invoke-EPMRestMethod -URI "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Events/Search?limit=1000&sortDir=asc" -Method 'POST' -Headers $sessionHeader -Body $eventsFilter
 
-foreach ($event in $events.events) {
+if ($events.filteredCount -gt 0) {
+    Write-Log "Found $($events.filteredCount) Manual Request from $lastEventTimestamp" INFO
 
-    # Create JIT policy
-    Write-Log "Create JIT policy for $($event.userName) on $($event.computerName)" INFO
-    
-    $policyDetails = @{
-        "Name" = "JIT $($event.userName) on $($event.computerName)"
-        "IsActive" = $true
-        "IsAppliedToAllComputers" = $false
-        "PolicyType" = 40
-        "Action" = 20
-        "Duration" = "1"
-        "KillRunningApps" = $true
-        "Audit" = $true
-        "Executors" = @(
-            @{
-                "Id" = "$($event.agentId)"
-                "Name" = "$($event.computerName)"
-                "ExecutorType" = 1
-            }
-        )
-        "Accounts" = @(
-            @{
-                "SamName" = "$($event.userName)"
-                "DisplayName" = "$($event.userName)"
-                "AccountType" = 1
-            }
-        )
-        "IncludeADComputerGroups" = @()
-        "TargetLocalGroups" = @(
-            @{
-                "AccountType" = 0
-                "DisplayName" = "Administrators"
-            }
-        )
-    }  | ConvertTo-Json
+    $count = 1
 
-    Invoke-EPMRestMethod -URI "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server" -Method 'POST' -Headers $sessionHeader -Body $policyDetails
+    foreach ($event in $events.events) {
 
+        # Create JIT policy
+        Write-Log "Processing $count of $($events.filteredCount) Manual Request for $($event.userName) on $($event.computerName)" INFO
+        
+        $policyDetails = @{
+            "Name" = "JIT $($event.userName) on $($event.computerName)"
+            "IsActive" = $true
+            "IsAppliedToAllComputers" = $false
+            "PolicyType" = 40
+            "Action" = 20
+            "Duration" = "1"
+            "KillRunningApps" = $true
+            "Audit" = $true
+            "Executors" = @(
+                @{
+                    "Id" = "$($event.agentId)"
+                    "Name" = "$($event.computerName)"
+                    "ExecutorType" = 1
+                }
+            )
+            "Accounts" = @(
+                @{
+                    "SamName" = "$($event.userName)"
+                    "DisplayName" = "$($event.userName)"
+                    "AccountType" = 1
+                }
+            )
+            "IncludeADComputerGroups" = @()
+            "TargetLocalGroups" = @(
+                @{
+                    "AccountType" = 0
+                    "DisplayName" = "Administrators"
+                }
+            )
+        }  | ConvertTo-Json
 
-    # Update last event timestamp in the log file
-    $event.arrivalTime | Set-Content -Path $lastEventFile -Force
+        $createJIT = Invoke-EPMRestMethod -URI "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server" -Method 'POST' -Headers $sessionHeader -Body $policyDetails
+        if ($createJIT.id) {
+            Write-Log "$($createJIT.Name) policy created" INFO
+        } else {
+            Write-Log "Error creating policy for $($event.userName) on $($event.computerName)" ERROR
+        }
+        
+        if ($count -eq $events.filteredCount) {
+            # Add ms to firstEventDate to improve the next search
+            $newfirstEventDate = Add-msToTimestamp -timestamp $event.firstEventDate
+            # Update last event timestamp in the log file
+            
+            Write-Log "Store last event date $newfirstEventDate in $lastEventFile" INFO
+            $newfirstEventDate | Set-Content -Path $lastEventFile -Force
+        }
 
+        $count++
+    }
+
+} else {
+    Write-Log "No new Manual Request from $lastEventTimestamp" INFO
 }

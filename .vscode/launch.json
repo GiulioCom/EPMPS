@@ -9,8 +9,22 @@
             "type": "PowerShell",
             "request": "launch",
             "script": "./EPMCreateJIT.ps1",
-            "args": ["-username giulio.compagnone@cyber-ark.com -tenant eu -log -logFolder \"C:\\Users\\giulioc\" -lastEventFolder \"C:\\Users\\giulioc\\Desktop\""]            
+            "args": ["-username giulio.compagnone@cyber-ark.com -tenant eu -log"]            
         },
+        {
+            "name": "PowerShell: Launch EPMHealthCheckTool",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "./EPMHealthCheckTool.ps1",
+            "args": ["-username giulio.compagnone@cyber-ark.com -tenant eu -set \"[Giulio] Block(cyberark_16)\""]
+        },
+        {
+            "name": "PowerShell: Launch EPMApplicationUpdateExample",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "./EPMApplicationUpdateExample.ps1",
+            "args": ["-username giulio.compagnone@cyber-ark.com -tenant eu -set \"[Giulio] Monitor(cyberark_16)\" -log"]
+        },        
         {
             "name": "PowerShell: Launch Current File",
             "type": "PowerShell",

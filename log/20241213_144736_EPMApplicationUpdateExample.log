@@ -1,0 +1,21 @@
+2024-12-13 14:47:36 [INFO] - Logging enabled. Log file: C:\Users\giulioc\OneDrive - CyberArk Ltd\Documents\Script\EPM\EPMScript\EPMScript\log\20241213_144736_EPMApplicationUpdateExample.log
+2024-12-13 14:47:36 [INFO] - + --------------------------- +
+2024-12-13 14:47:36 [INFO] - | EPMApplicationUpdateExample |
+2024-12-13 14:47:36 [INFO] - + --------------------------- +
+2024-12-13 14:47:39 [INFO] - + ----------------------------- +
+2024-12-13 14:47:39 [INFO] - | [Giulio] Monitor(cyberark_16) |
+2024-12-13 14:47:39 [INFO] - + ----------------------------- +
+2024-12-13 14:47:40 [INFO] - Found 6 Applications definition in Allow Application Group
+2024-12-13 14:47:40 [INFO] - Processing 1 of 6 Applications definition
+2024-12-13 14:47:40 [WARN] - |- b9bda138-613b-4d7b-98a1-01fd2632990f - Child Process already enabled
+2024-12-13 14:47:40 [INFO] - Processing 2 of 6 Applications definition
+2024-12-13 14:47:40 [WARN] - |- c729a5e4-c342-4a3b-a8f7-edb4ad38c705 - Child Process already enabled
+2024-12-13 14:47:40 [INFO] - Processing 3 of 6 Applications definition
+2024-12-13 14:47:40 [WARN] - |- 45393aaf-0c6a-4a9f-b067-27fa9d4b39ce - Child Process already enabled
+2024-12-13 14:47:40 [INFO] - Processing 4 of 6 Applications definition
+2024-12-13 14:47:40 [WARN] - |- 708818a0-6004-4124-897c-6d31cbf0d8ab - Child Process already enabled
+2024-12-13 14:47:40 [INFO] - Processing 5 of 6 Applications definition
+2024-12-13 14:47:40 [WARN] - |- b6245bc4-9366-426c-8b32-3732b6ab1899 - Child Process already enabled
+2024-12-13 14:47:40 [INFO] - Processing 6 of 6 Applications definition
+2024-12-13 14:47:40 [WARN] - |- bea10ae3-21a5-46ad-a3f8-45becdf04888 - Child Process already enabled
+2024-12-13 14:47:40 [WARN] - No change in the application definition. Application will not be updated

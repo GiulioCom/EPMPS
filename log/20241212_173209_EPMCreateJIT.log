@@ -1,0 +1,25 @@
+2024-12-12 17:32:09 [INFO] - Logging enabled. Log file: C:\Users\giulioc\OneDrive - CyberArk Ltd\Documents\Script\EPM\EPMScript\EPMScript\log\20241212_173209_EPMCreateJIT.log
+2024-12-12 17:32:09 [INFO] - + ------------ +
+2024-12-12 17:32:09 [INFO] - | EPMCreateJIT |
+2024-12-12 17:32:09 [INFO] - + ------------ +
+2024-12-12 17:32:13 [INFO] - + --------------- +
+2024-12-12 17:32:13 [INFO] - | Available Sets: |
+2024-12-12 17:32:13 [INFO] - + --------------- +
+2024-12-12 17:32:13 [INFO] - 1. [Giulio] Elevate(cyberark_16)
+2024-12-12 17:32:13 [INFO] - 2. [Giulio] Monitor(cyberark_16)
+2024-12-12 17:32:13 [INFO] - 3. MXC_NG (cyberark_16)
+2024-12-12 17:32:13 [INFO] - 4. MXC_22.6 (cyberark_16)
+2024-12-12 17:32:13 [INFO] - 5. [Giulio] Block(cyberark_16)
+2024-12-12 17:32:13 [INFO] - 6. [Giulio] Server(cyberark_16)
+2024-12-12 17:32:13 [INFO] - 7. ITALGAS (cyberark_16)
+2024-12-12 17:32:13 [INFO] - 8. [Giulio] Ferrovial(cyberark_16)
+2024-12-12 17:32:13 [INFO] - 9. ITALGAS AdmNonAdm(cyberark_16)
+2024-12-12 17:32:13 [INFO] - 10. MacOS - Test Giuglio(cyberark_16)
+2024-12-12 17:32:13 [INFO] - 11. [Giulio] QuickStart(cyberark_16)
+2024-12-12 17:32:13 [INFO] - 12. FINCANTIERI(cyberark_16)
+2024-12-12 17:32:15 [INFO] - Found last events file: C:\Users\giulioc\OneDrive - CyberArk Ltd\Documents\Script\EPM\EPMScript\EPMScript\EPMJIT_lastEvents\lastEvents.txt
+2024-12-12 17:32:15 [INFO] - Searching Manual Request events from 2024-12-12T15:42:30.916Z
+2024-12-12 17:32:18 [INFO] - Found 1 Manual Request from 2024-12-12T15:42:30.916Z
+2024-12-12 17:32:18 [INFO] - Processing 1 of 1 Manual Request for GIULIO\user1 on WIN10X64-1
+2024-12-12 17:32:26 [INFO] - JIT GIULIO\user1 on WIN10X64-1 (13) policy created
+2024-12-12 17:32:26 [INFO] - Store last event date 2024-12-12T15:42:30.917Z in C:\Users\giulioc\OneDrive - CyberArk Ltd\Documents\Script\EPM\EPMScript\EPMScript\EPMJIT_lastEvents\lastEvents.txt

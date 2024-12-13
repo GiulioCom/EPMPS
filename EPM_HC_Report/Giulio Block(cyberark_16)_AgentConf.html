@@ -1,0 +1,194 @@
+﻿    <!DOCTYPE html>
+    <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Agent Configuration - SET: [Giulio] Block(cyberark_16)</title>
+            <!-- Include Titillium Web font from Google Fonts -->
+            <link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@300;400;600&display=swap" rel="stylesheet">
+            <style>
+                /* Apply the Titillium Web font */
+                body {
+                    font-family: 'Titillium Web', sans-serif;
+                    line-height: 1.6;
+                }
+                h1 {
+                    text-align: center;
+                    color: #333;
+                    font-weight: 600;
+                }
+                h2, h3 {
+                    text-align: center;
+                    color: #666;
+                }
+                table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-bottom: 20px;
+                    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+                }
+                table, th, td {
+                    border: 1px solid #ddd;
+                }
+                th, td {
+                    padding: 10px;
+                    text-align: left;
+                }
+                /* Header color: Turquoise */
+                th {
+                    background-color: turquoise;
+                    color: white;
+                    font-weight: 600;
+                }
+                tr {
+                    background-color: rgb(167, 201, 225);
+                }
+                /* Even row color: rgb(199, 221, 236) */
+                //tr:nth-child(even) {
+                //    background-color: rgb(199, 221, 236);
+                //}
+                /* Odd row color: rgb(167, 201, 225) */
+                //tr:nth-child(odd) {
+                //    background-color: rgb(167, 201, 225);
+                //}
+                /* Add hover effect for rows */
+                tr:hover {
+                    background-color: #f1f1f1;
+                }
+            </style>
+        </head>
+        <body>
+            <h1>Agent Configuration</h1>
+            <h2>Configuration Policy: General configuration</h2>
+            <h3>SET: [Giulio] Block(cyberark_16)</h3>
+            <table>
+                <tr><th>ParameterType</th> <th>Parameter</th> <th>OS</th> <th>Settings</th></tr>
+                <tr><td>Extended Protection</td><td>Agent self-defense</td><td>Windows, macOS, Linux</td><td>ON</td></tr><tr><td>Extended Protection</td><td>Support info file password</td><td>Windows, macOS, Linux</td><td>No Value</td></tr><tr><td>Extended Protection</td><td>Protect elevated processes from DLL hijacking</td><td>Windows</td><td>OFF</td></tr><tr><td>Data collection</td><td>Collect policy audit data</td><td>Windows, macOS, Linux</td><td>ON</td></tr><tr><td>Data collection</td><td>Threat protection excluded applications</td><td>Windows</td><td>No Value</td></tr><tr><td>Data collection</td><td>Exclude new files from the Application Catalog and Events Management</td><td>Windows</td><td><ul><li>Location: '%WINDIR%\Installer'</li> <li>Location: '*\Local Settings\Temporary Internet Files'</li> <li>Location: '*\Local Settings\Temp\Temporary Internet Files'</li> <li>Location: '*\LocalService\Temp\Temporary Internet Files'</li> <li>Location: '*\Microsoft\Windows\Temporary Internet Files'</li> <li>Location: '*\Google\Chrome\User Data'</li> <li>Location: '*\Mozilla\Firefox\Profiles'</li> <li>Location: '*\Local Settings\Application Data\Apple Computer\Safari\'</li> <li>Location: '*\Roaming\AppleComputer\Safari'</li> <li>Location: '*\AppData\Local\Temp'</li> <li>Location: '%WINDIR%\SoftwareDistribution\Download'</li> <li>Location: '%WINDIR%\winsxs'</li> <li>Location: '%WINDIR%\SoftwareDistribution\SelfUpdate\Packages'</li> <li>Location: '*:\RECYCLER'</li> <li>Location: '*:\$Recycle.Bin'</li> <li>Location: '%WINDIR%\assembly'</li> <li>Location: '%SystemDrive%\Config.msi'</li> <li>Location: '*:\System Volume Information'</li> <li>Location: '*\AppData\Local\Microsoft\Windows\INetCache\IE'</li> <li>Location: '*\AppData\Local\Microsoft\Windows\INetCache\Low'</li> <li>Location: '%WINDIR%\System32\spool'</li> <li>Location: '%WINDIR%\Microsoft.NET\assembly'</li> <li>Location: '%SystemDrive%\Windows.old'</li> <li>Location: '%SystemDrive%\$WINDOWS.~BT'</li> <li>Location: '%SystemDrive%\$Windows.~WS'</li> <li>Location: '%ProgramFiles%\WindowsApps'</li> <li>Location: '%WINDIR%\rescache'</li> <li>Location: '%SystemRoot%\Microsoft.NET\Framework\*\Temporary ASP.NET Files'</li> <li>Location: '*\AppData\Local\Temp\Temporary ASP.NET Files'</li> <li>Location: '*\AppData\Local\Packages\Microsoft.MicrosoftEdge_*\AC\*\Cache'</li> <li>File Name: '*.ps1', ... (other parameters)</li> <li>File Name: '*.ps1', ... (other parameters)</li> <li>File Name: '*.ps1', ... (other parameters)</li></td></tr><tr><td>Data collection</td><td>File types to scan for Application Catalog</td><td>Windows, macOS</td><td><ul><li>Windows - Executable extensions: EXE</li>
+<li>Windows - Installation package extensions: MSI, MSP, MSU</li>
+<li>Windows - Dynamic link library (DLL) extensions: </li>
+<li>Windows - Script file extensions: </li>
+<li>macOS - Executables: DMG, PKG, MPKG</li>
+<li>macOS - Installation: ON</li>
+</ul></td></tr><tr><td>Data collection</td><td>Event queue flush period</td><td>Windows, macOS, Linux</td><td>30</td></tr><tr><td>Data collection</td><td>Policy audit event flush period</td><td>Windows, macOS, Linux</td><td>28800</td></tr><tr><td>Data collection</td><td>Collect events in event log</td><td>Windows</td><td>OFF</td></tr><tr><td>Data collection</td><td>Collect events in WMI</td><td>Windows</td><td>OFF</td></tr><tr><td>Data collection</td><td>Collect temporary files</td><td>Windows</td><td>OFF</td></tr><tr><td>Data collection</td><td>Collect events triggered by service accounts</td><td>Windows</td><td>OFF</td></tr><tr><td>Data collection</td><td>Collect child command events</td><td>Linux</td><td>ON</td></tr><tr><td>Data collection</td><td>Report user groups in events</td><td>Windows</td><td>ON</td></tr><tr><td>Data collection</td><td>Collect protected accounts</td><td>Windows</td><td><ul><li>ON</li>
+
+<li>Protected accounts interval (Number of hours between accounts collection): 12</li>
+</ul></td></tr><tr><td>Policies</td><td>Enable policy suspension</td><td>Windows, macOS</td><td><ul><li>OFF</li>
+
+<li>Target users and/or groups
+<ul><li>name: No Value</li>
+
+<li>sid: No Value</li>
+
+<li>Account Type: UNKNOWN</li>
+</ul>
+</li></ul></td></tr><tr><td>Policies</td><td>Confirm elevation</td><td>Windows, macOS</td><td><ul><li>ElevationType: Administrators</li>
+
+<li>Target users and/or groups
+<ul><li>name: No Value</li>
+
+<li>sid: No Value</li>
+
+<li>Account Type: UNKNOWN</li>
+</ul>
+</li></ul></td></tr><tr><td>Policies</td><td>Heartbeat timeout</td><td>Windows, macOS</td><td>60</td></tr><tr><td>Policies</td><td>Policy condition timeout</td><td>Windows, macOS</td><td>300</td></tr><tr><td>Policies</td><td>Script timeout</td><td>Windows, macOS</td><td>10</td></tr><tr><td>Policies</td><td>Policy update interval</td><td>Windows</td><td><ul><li>Rate: 0</li>
+
+<li>UpdateTime: 3600</li>
+
+<li>Delay: 10</li>
+</ul></td></tr><tr><td>Policies</td><td>Refresh Windows desktop after policy update</td><td>Windows</td><td>ON</td></tr><tr><td>Policies</td><td>Threat protection event queue flush period</td><td>Windows</td><td>5</td></tr><tr><td>Policies</td><td>Trace policy usage on agents</td><td>Windows</td><td>2</td></tr><tr><td>Policies</td><td>Well known publishers</td><td>Windows, macOS</td><td><ul><li>ABBYY PRODUCTION LLC</li> <li>Absolute Software Corp.</li> <li>Acresso Software Inc.</li> <li>Acronis International GmbH</li> <li>Adaptive Protocols, Inc.</li> <li>Addin Technology Inc.</li> <li>Adobe Inc.</li> <li>Adobe Systems Incorporated</li> <li>Adobe Systems, Incorporated</li> <li>Advanced Micro Devices, Inc.</li> <li>AirWatch LLC.</li> <li>Aladdin Knowledge Systems LTD</li> <li>Alert Logic, Inc.</li> <li>Alertus Technologies, LLC</li> <li>Alloy Software, Inc.</li> <li>ALPS ELECTRIC CO., LTD.</li> <li>Alps Electric Co., LTD.</li> <li>Altiris Inc</li> <li>Amazon Services LLC</li> <li>Amazon Web Services, Inc.</li> <li>Andrea Electronics</li> <li>APN LLC</li> <li>Apple</li> <li>Apple Inc.</li> <li>Ask.com</li> <li>ASUSTeK Computer Inc.</li> <li>AT&amp;T Inc.</li> <li>AT&amp;T Mobility LLC</li> <li>Aternity Information Systems Ltd</li> <li>Atlassian, Inc.</li> <li>Autodesk, Inc</li> <li>Autodesk, Inc.</li> <li>AVAST Software a.s.</li> <li>AVAST Software s.r.o.</li> <li>AVG Technologies CZ, s.r.o.</li> <li>AWIND INCORPORATED</li> <li>Axure Software Solutions, Inc</li> <li>Bitdefender SRL</li> <li>Blackmagic Design Pty Ltd</li> <li>Blue Coat Systems, Inc.</li> <li>Blue Jeans Network, Inc.</li> <li>BMC SOFTWARE FRANCE SAS</li> <li>Boldon James Limited</li> <li>Bomgar Corporation</li> <li>Bradford Networks</li> <li>Broadcom Corporation</li> <li>Brother Industries, ltd.</li> <li>CANON INC.</li> <li>Check Point Software Technologies Ltd.</li> <li>Chocolatey Software, Inc.</li> <li>Cisco Systems Inc.</li> <li>Cisco Systems, Inc.</li> <li>Cisco WebEx LLC</li> <li>Citrix Online</li> <li>Citrix Systems, Inc.</li> <li>Conexant Systems LLC</li> <li>Conexant Systems, Inc.</li> <li>ConnectWise, Inc.</li> <li>ConnectWise, LLC</li> <li>Corel Corporation</li> <li>CutCom Software Inc.</li> <li>CyberArk Software Ltd.</li> <li>Cyber-Ark Software Ltd.</li> <li>Cybereason Inc</li> <li>CyberLink</li> <li>CyberLink Corp.</li> <li>CYCARRIER TECHNOLOGY CO., LTD.</li> <li>Cylance, Inc.</li> <li>Cypress Semiconductor</li> <li>DASSAULT SYSTEMES SA</li> <li>Dassault Systemes SolidWorks Corp.</li> <li>Dell</li> <li>Dell Inc</li> <li>Dell Inc.</li> <li>Digital Wave Ltd</li> <li>DigitalPersona, Inc.</li> <li>DISPLAYLINK</li> <li>DivX, LLC.</li> <li>D-LINK CORPORATION</li> <li>Docker Inc</li> <li>Dolby Laboratories, Inc.</li> <li>Dropbox, Inc</li> <li>Druva Inc</li> <li>DTS, Inc.</li> <li>Eastman Kodak Company</li> <li>eClinicalWorks, LLC</li> <li>EFI Software (Electronics for Imaging, Inc.)</li> <li>EMC Corporation</li> <li>Epson America, Inc.</li> <li>ESET, spol. s r.o.</li> <li>Essential Objects, Inc.</li> <li>EVERNOTE CORPORATION</li> <li>F5 Networks</li> <li>F5 Networks Inc</li> <li>FastTrack Software Aps</li> <li>FireEye, Inc.</li> <li>Flexera Software LLC</li> <li>Flexera Software, Inc. </li> <li>FonePaw Technology Limited</li> <li>Forcepoint LLC</li> <li>Forescout Technologies Israel Ltd</li> <li>ForeScout Technologies, Inc.</li> <li>Fortemedia Inc</li> <li>Fortemedia Inc.</li> <li>Fortinet Technologies (Canada) Inc.</li> <li>Foxit Software Incorporated</li> <li>FrontRange Solutions Deutschland GmbH</li> <li>Garmin International, Inc.</li> <li>Geek Software GmbH</li> <li>GEMALTO SA</li> <li>General Electric Company</li> <li>Ghisler Software GmbH</li> <li>GitHub, Inc.</li> <li>Google Inc</li> <li>Google LLC</li> <li>HCL America Inc.</li> <li>HEAT Software Deutschland GmbH</li> <li>Hewlett Packard</li> <li>Hewlett Packard Enterprise Company</li> <li>Hewlett-Packard</li> <li>Hewlett-Packard Company</li> <li>HID Global Corporation</li> <li>Hitachi, Ltd.</li> <li>HP Inc.</li> <li>IBM</li> <li>IBM Canada Limited</li> <li>IBM Corporation</li> <li>IBM UK Ltd</li> <li>IBM United Kingdom Limited</li> <li>IBM United Kingdom Ltd</li> <li>Intel Corporation</li> <li>Intel Corporation - Intel® Management Engine Firmware</li> <li>Intel Corporation - Intel® Rapid Storage Technology</li> <li>Intel Corporation - Mobile Wireless Group</li> <li>Intel Corporation - pGFX</li> <li>Intel Corporation - Software and Firmware Products</li> <li>Intel Corporation-Mobile Wireless Group</li> <li>Intel Corporation-Wireless Connectivity Solutions</li> <li>Intel Cyber DLP</li> <li>Intel(R) Client Connectivity Division SW</li> <li>Intel(R) Embedded Subsystems and IP Blocks Group</li> <li>Intel(R) IT</li> <li>Intel(R) pGFX</li> <li>Intel(R) pGFX 2020</li> <li>Intel(R) Rapid Storage Technology</li> <li>Intel(R) Setup and Configuration Software</li> <li>Intel(R) Software</li> <li>Intel(R) Software Development Products</li> <li>Intel(R) Software Products</li> <li>Intel(R) Trust Services</li> <li>Intel(R) Wireless Connectivity Solutions</li> <li>International Business Machines</li> <li>International Business Machines Corporation</li> <li>International Business Machines, Corporation</li> <li>INTUIT INC.</li> <li>IObit Information Technology</li> <li>Ivanti, Inc.</li> <li>JetBrains s.r.o.</li> <li>Johannes Schindelin</li> <li>Jungle Disk, LLC</li> <li>Juniper Networks, Inc.</li> <li>Kaseya Corporation</li> <li>Kaseya Development, LLC</li> <li>Kaspersky Lab</li> <li>Kofax, Inc.</li> <li>Kollective Technology, Inc</li> <li>Lakeside Software, Inc.</li> <li>LANDesk Software, Inc.</li> <li>Lansweeper</li> <li>Laplink Software Inc.</li> <li>LENOVO</li> <li>Lexmark International, Inc.</li> <li>LG Electronics Inc.</li> <li>Logitech</li> <li>Logitech Inc</li> <li>Logitech, Inc.</li> <li>LogMeIn, Inc.</li> <li>Loomis, Sayles &amp; Company, L.P.</li> <li>Lumension Security</li> <li>Lumension Security, Inc.</li> <li>LunarG, Inc.</li> <li>Macrovision Corporation</li> <li>MadCap Software, Inc.</li> <li>Malwarebytes Corporation</li> <li>Malwarebytes Inc</li> <li>Marvell Semiconductor</li> <li>McAfee, Inc.</li> <li>McAfee, LLC</li> <li>Mentor Graphics Corporation</li> <li>Microsoft 3rd Party Application Component</li> <li>Microsoft Azure Code Sign</li> <li>Microsoft Azure Dependency Code Sign</li> <li>Microsoft Corp.</li> <li>Microsoft Corporation</li> <li>Microsoft Corporation (Europe)</li> <li>Microsoft Corporation (Internal Use Only)</li> <li>Microsoft Corporation (UBF8T346G9)</li> <li>Microsoft Corporation MSN</li> <li>Microsoft Dynamic Code Publisher</li> <li>Microsoft Mobile Device Privileged Component Update Publisher</li> <li>Microsoft Mobile Device Privileged Publisher</li> <li>Microsoft Mobile Device VSD Publisher</li> <li>Microsoft Open Technologies Inc</li> <li>Microsoft Product 2 PE Signing 1</li> <li>Microsoft Studios</li> <li>Microsoft Update</li> <li>Microsoft Windows</li> <li>Microsoft Windows 3rd party Component</li> <li>Microsoft Windows Component Publisher</li> <li>Microsoft Windows Hardware Abstraction Layer Publisher</li> <li>Microsoft Windows Hardware Compatibility Publisher</li> <li>Microsoft Windows Publisher</li> <li>Microsoft Visual Studio Signing Authority</li> <li>Microsoft Windows 2000 Beta</li> <li>Microsoft Windows 2000 Publisher</li> <li>Microsoft Windows 2000 Publisher (Europe)</li> <li>Microsoft Windows 2000 Test</li> <li>Microsoft Windows 3rd party Component</li> <li>Microsoft Windows Component Publisher</li> <li>Microsoft Windows Hardware Abstraction Layer Publisher</li> <li>Microsoft Windows Hardware Compatibility Publisher</li> <li>Microsoft Windows Kits Publisher</li> <li>Microsoft Windows Kits Publisher Test Certificate</li> <li>Microsoft Windows Publisher</li> <li>Microsoft Windows Third Party Application Component</li> <li>Microsoft Windows Whistler Test</li> <li>Microsoft Windows XP Publisher</li> <li>Mozilla Corporation</li> <li>MWR InfoSecurity (Pty) Limited</li> <li>National Instruments Corporation</li> <li>NCH Software Pty Ltd</li> <li>Nero AG</li> <li>NEXTHINK S.A.</li> <li>NGWIN Software Co.</li> <li>Nitro Software, Inc.</li> <li>Node.js Foundation</li> <li>NOKIA</li> <li>Notepad++</li> <li>Nuance Communications, Inc.</li> <li>Nullsoft Inc.</li> <li>NVIDIA Corporation</li> <li>Open Source Geospatial Foundation</li> <li>Open Text Corporation</li> <li>OpenDNS</li> <li>Opera Software AS</li> <li>Opera Software ASA</li> <li>OPSWAT</li> <li>OPSWAT, Inc.</li> <li>Oracle America, Inc.</li> <li>Oracle Corporation</li> <li>Palo Alto Networks</li> <li>Palo Alto Networks (Netherlands) B.V.</li> <li>Patch My PC</li> <li>Patch My PC, LLC</li> <li>Patchlink Corporation</li> <li>PC-Doctor, Inc.</li> <li>Persistent Systems Ltd.</li> <li>PKWARE, Inc.</li> <li>Piriform Ltd</li> <li>Plus Technologies, LLC</li> <li>PolicyPak Software, Inc.</li> <li>Power Software Limited</li> <li>PrinterLogic</li> <li>Priory Solutions Ltd</li> <li>Proxy Networks, Inc.</li> <li>PTC Inc.</li> <li>Pulse Secure, LLC</li> <li>Python Software Foundation</li> <li>Qualys Test-Signed System Component</li> <li>Qualys, Inc</li> <li>Qualys, Inc.</li> <li>Quest Software Inc</li> <li>Quest Software Inc.</li> <li>Quest Software, Inc.</li> <li>Rapid7 LLC</li> <li>Razer USA Ltd.</li> <li>RealNetworks, Inc.</li> <li>Realtek Semiconductor Corp</li> <li>Realtek Semiconductor Corp.</li> <li>RealVNC Ltd</li> <li>Red Gate Software Ltd</li> <li>Research In Motion</li> <li>RGA Workstation</li> <li>Rockwell Automation</li> <li>SAGE (UK) LTD</li> <li>Salesforce.com, Inc</li> <li>Samsung Electronics CO., LTD.</li> <li>SanDisk Corporation</li> <li>SAP AG</li> <li>SAP SE</li> <li>ScreenConnect Software</li> <li>SEIKO EPSON Corporation</li> <li>Sennheiser Communications</li> <li>Shavlik Technologies</li> <li>Skype Software Sarl</li> <li>Skype Technologies SA</li> <li>Slack Technologies, Inc.</li> <li>Solarwinds Worldwide, LLC</li> <li>SolarWinds, Inc.</li> <li>Sonic Solutions</li> <li>Sony Corporation</li> <li>Sophos Limited</li> <li>Sophos Ltd</li> <li>Splunk, Inc.</li> <li>Spotify AB</li> <li>Sun Microsystems, Inc.</li> <li>Symantec Corporation</li> <li>Synactive Software Komponenten GmbH</li> <li>Synaptics Inc.</li> <li>Synaptics Incorporated</li> <li>SysAid Technologies Ltd</li> <li>Sysinternals</li> <li>Tableau Software Inc.</li> <li>Tanium Inc.</li> <li>TeamViewer</li> <li>TeamViewer Germany GmbH</li> <li>TeamViewer GmbH</li> <li>TechSmith Corporation</li> <li>Tenable Inc.</li> <li>Tenable Network Security Inc.</li> <li>ThousandEyes, Inc.</li> <li>Thycotic Software</li> <li>TomTom International BV</li> <li>VideoLAN</li> <li>Viewfinity Inc.</li> <li>VMware, Inc.</li> <li>VOLTAGE SECURITY</li> <li>WalkMe Ltd</li> <li>Waves Inc</li> <li>WebEx Communications Inc.</li> <li>Websense, Inc.</li> <li>win.rar GmbH</li> <li>Wombat Security Technologies Inc.</li> <li>Windows Phone</li> <li>WinZip Computing</li> <li>Wireshark Foundation, Inc.</li> <li>Zandent Ltd</li> <li>Zeplin, Inc.</li> <li>ZOHO Corporation</li> <li>ZOHO Corporation private Limited</li> <li>Zoom Video Communications, Inc.</li> <li>OpenJS Foundation</li></td></tr><tr><td>Policies</td><td>Exclude service accounts from access restrictions</td><td>Windows</td><td>ON</td></tr><tr><td>Policies</td><td>Elevate SCCM "for user" installations</td><td>Windows</td><td>ON</td></tr><tr><td>Policies</td><td>Protect administrative user groups</td><td>Windows</td><td>Elevate</td></tr><tr><td>Policies</td><td>Restrict CMD special characters</td><td>Windows</td><td>ON</td></tr><tr><td>Policies</td><td>Anti-tampering protection</td><td>Windows</td><td>2</td></tr><tr><td>Policies</td><td>Allowed interpreters</td><td>Linux</td><td><ul><li>/usr/bin/bash</li> <li>/bin/bash</li> <li>/usr/bin/sh</li> <li>/bin/sh</li> <li>/usr/libexec/platform-python</li> <li>/usr/bin/python</li> <li>/usr/bin/python3</li> <li>/usr/bin/perl</li> <li>/usr/bin/ruby</li></td></tr><tr><td>Policies</td><td>Environment variables</td><td>Linux</td><td><ul><li>DefaultKeepList: COLORS, DISPLAY, HOSTNAME, HISTSIZE, KDEDIR, LS_COLORS, MAIL, PS1, PS2, QTDIR, USERNAME, LANG, LC_ADDRESS, LC_CTYPE, LC_COLLATE, LC_IDENTIFICATION, LC_MEASUREMENT, LC_MESSAGES, LC_MONETARY, LC_NAME, LC_NUMERIC, LC_PAPER ,LC_TELEPHONE, LC_TIME, LC_ALL, LANGUAGE, LINGUAS, _XKB_CHARSET, XAUTHORITY, TEMP</li>
+
+<li>DefaultDeleteList: IFS, CDPATH, LOCALDOMAIN, RES_OPTIONS, HOSTALIASES, NLSPATH, PATH_LOCALE, LD_LIBRARY_PATH, TERMINFO, TERMINFO_DIRS, TERMPATH, TERMCAP, ENV, BASH_ENV, PS4, GLOBIGNORE, SHELLOPTS, JAVA_TOOL_OPTIONS, PERLIO_DEBUG,PERLLIB, PERL5LIB, PERL5OPT, PERL5DBFPATH, NULLCMD, READNULLCMD, ZDOTDIR, TMPPREFIX, PYTHONHOME, PYTHONPATH, PYTHONINSPECT, RUBYLIB, RUBYOPT</li>
+</ul></td></tr><tr><td>Endpoint UI</td><td>Show icon in task/menu bar</td><td>Windows, macOS</td><td><ul><li>ON</li>
+
+<li>HideGetSupportInfoOption: OFF</li>
+
+<li>ShowNotificationBalloons: ON</li>
+
+<li>ShowBalloonOnPolicyUpdate: ON</li>
+
+<li>Icon
+<ul><li>Content: DEFAULT</li>
+
+<li>Name</li>
+
+<li>FileType: 0</li>
+</ul>
+</li></ul></td></tr><tr><td>Endpoint UI</td><td>Show CyberArk EPM tab in File Properties</td><td>Windows</td><td>ON</td></tr><tr><td>Endpoint UI</td><td>Show CyberArk EPM Control Panel on desktop</td><td>Windows</td><td><ul><li>ON</li>
+
+<li>ControlPanelName: CyberArk EPM Control Panel</li>
+
+<li>Icon
+<ul><li>Content: DEFAULT</li>
+
+<li>Name</li>
+
+<li>FileType: 0</li>
+</ul>
+</li></ul></td></tr><tr><td>Endpoint UI</td><td>Hide Windows "Run As..." menu items</td><td>Windows</td><td>OFF</td></tr><tr><td>Endpoint UI</td><td>Hide CyberArk EPM agent from installed programs</td><td>Windows</td><td>OFF</td></tr><tr><td>Endpoint UI</td><td>Shell elevate menu text</td><td>Windows</td><td>Run with Elevated Privileges</td></tr><tr><td>Endpoint UI</td><td>Enable tabbed browsing</td><td>Windows</td><td>OFF</td></tr><tr><td>IdP settings</td><td>CyberArk Identity </td><td></td><td><ul><li>TenantId: No Value</li>
+</ul></td></tr><tr><td>IdP settings</td><td>Custom identity provider</td><td>Windows, macOS</td><td><ul><li>OFF</li>
+
+<li>IdentityProviderName: No Value</li>
+
+<li>ClientId: No Value</li>
+
+<li>UserDomain: No Value</li>
+
+<li>OpenIdConfigurationURL: No Value</li>
+
+<li>RedirectURI: com.cyberark.epm://login</li>
+</ul></td></tr><tr><td>Cloud environments</td><td>Enable Azure Active Directory</td><td>Windows</td><td><ul><li>OFF</li>
+
+<li>TenantId: No Value</li>
+
+<li>ClientId: No Value</li>
+
+<li>ClientSecret: No Value</li>
+
+<li>AzureType: 1</li>
+</ul></td></tr><tr><td>Offline policy authorization generator</td><td>PublicCertificate</td><td>No OS</td><td>No Value</td></tr><tr><td>Offline policy authorization generator</td><td>EncryptionPhrase</td><td>No OS</td><td>No Value</td></tr><tr><td>Offline policy authorization generator</td><td>PolicyAuthorizationGenerator</td><td>Windows, macOS</td><td><ul><li>OFF</li>
+
+<li>NumberOfAttempts: 3</li>
+
+<li>ShellRunAuthorizationMenuText: Request Authorization</li>
+</ul></td></tr><tr><td>Offline policy authorization generator</td><td>RunWithAuthorizationToken</td><td>Windows</td><td><ul><li>OFF</li>
+
+<li>ShellRunAuthorizationTokenMenuText: Run with Authorization Token</li>
+</ul></td></tr><tr><td>Audit video configuration</td><td>Allow application to run if recording is unavailable</td><td>Windows</td><td>ON</td></tr><tr><td>Audit video configuration</td><td>Maximum movie length</td><td>Windows</td><td>10</td></tr><tr><td>Audit video configuration</td><td>Video file retention period</td><td>Windows</td><td>14</td></tr><tr><td>Audit video configuration</td><td>Video file destination</td><td>Windows</td><td><ul><li>MovieLocationType: 0</li>
+
+<li>EndUserComputerLocation
+<ul><li>MinFreeDiskSpace: 1024</li>
+
+<li>MaxUsedDiskSpace: 2048</li>
+</ul>
+</li>
+<li>NetworkShareLocation
+<ul><li>MaxMovieSize: 2048</li>
+
+<li>MovieUploadFolder: No Value</li>
+
+<li>Username: No Value</li>
+
+<li>Password: No Value</li>
+
+<li>BandwidthMB: 10</li>
+</ul>
+</li></ul></td></tr><tr><td>Agent behavior</td><td>Exclude files from policies (Windows)</td><td>Windows</td><td><ul><li>Location: '%ProgramFiles(x86)%\Symantec\Symantec Endpoint Protection'</li> <li>Location: '%ProgramFiles%\Symantec\Symantec Endpoint Protection'</li> <li>Location: '%ProgramFiles(x86)%\Sophos\Sophos Anti-Virus'</li> <li>Location: '%ProgramFiles%\Sophos\Sophos Anti-Virus'</li> <li>Location: '%ProgramFiles(x86)%\McAfee\VirusScan Enterprise'</li> <li>Location: '%ProgramFiles%\McAfee\VirusScan Enterprise'</li> <li>Location: '%ProgramFiles(x86)%\McAfee\Endpoint Security'</li> <li>Location: '%ProgramFiles%\McAfee\Endpoint Security'</li> <li>Location: '%ProgramFiles(x86)%\Common Files\McAfee'</li> <li>Location: '%ProgramFiles%\Common Files\McAfee'</li> <li>Location: '%ProgramFiles%\ESET'</li> <li>Location: '%ProgramFiles(x86)%\Kaspersky Lab\'</li> <li>Location: '%ProgramFiles%\Kaspersky Lab\'</li> <li>Location: '%ProgramFiles(x86)%\Trend Micro\'</li> <li>Location: '%ProgramFiles%\Trend Micro\'</li> <li>Location: '%ProgramFiles(x86)%\Windows Defender\'</li> <li>Location: '%ProgramFiles%\Windows Defender\'</li> <li>Location: '%ProgramFiles%\AVAST Software\Avast'</li> <li>Location: '%ProgramFiles(x86)%\AVG\Av'</li> <li>Location: '%ProgramFiles%\Common Files\AV\avast! Antivirus'</li></td></tr><tr><td>Agent behavior</td><td>Exclude files from policies (macOS)</td><td>macOS</td><td><ul><li>Location: '/Applications/Falcon.app/', ... (other parameters)</li> <li>Location: '/Library/Sentinel/sentinel-agent.bundle/', ... (other parameters)</li> <li>Location: '/Applications/SentinelOne/SentinelOne Extensions.app/', ... (other parameters)</li> <li>Location: '/Applications/Microsoft Defender ATP.app/', ... (other parameters)</li> <li>Location: '/Library/Application Support/Zscaler/', ... (other parameters)</li> <li>Location: '/Applications/Zscaler/Zscaler.app', ... (other parameters)</li> <li>Location: '/Applications/GlobalProtect.app/', ... (other parameters)</li> <li>Location: '/Applications/EndpointProtectorClient.app', ... (other parameters)</li> <li>Location: '/Applications/QualysCloudAgent.app', ... (other parameters)</li> <li>Location: '/Applications/Cisco/Cisco AnyConnect Secure Mobility Client.app/', ... (other parameters)</li> <li>Location: '/opt/cisco/anyconnect/bin/', ... (other parameters)</li> <li>Location: '/Applications/Cisco/Cisco AnyConnect DART.app/', ... (other parameters)</li> <li>Location: '/Applications/Cisco/Cisco AnyConnect Socket Filter.app/', ... (other parameters)</li> <li>Location: '/Applications/Cisco Proximity.app/', ... (other parameters)</li> <li>Location: '/opt/cisco/anyconnect/NVM/', ... (other parameters)</li> <li>Location: '/Applications/Visual Studio.app/', ... (other parameters)</li> <li>Location: '/Applications/Sourcetree.app/', ... (other parameters)</li> <li>Location: '/Applications/MySQLWorkbench.app/', ... (other parameters)</li> <li>Location: '/Applications/Postman.app/', ... (other parameters)</li> <li>Location: '/Applications/VMware Fusion.app', ... (other parameters)</li> <li>Location: '/Library/Application Support/VMware/VMware Fusion', ... (other parameters)</li> <li>Location: '/Applications/Visual Studio Code.app', ... (other parameters)</li> <li>Location: '/Library/Frameworks/Xamarin.iOS.framework/', ... (other parameters)</li> <li>Location: '/Applications/IntelliJ IDEA CE.app', ... (other parameters)</li> <li>Location: '/Applications/PhpStorm.app', ... (other parameters)</li> <li>Location: '/Applications/GoLang.app/', ... (other parameters)</li> <li>Location: '/Applications/PyCharm CE.app', ... (other parameters)</li> <li>Location: '/Applications/Docker.app', ... (other parameters)</li> <li>Location: '/Applications/GitHub Desktop.app', ... (other parameters)</li> <li>Location: '/Applications/Beyond Compare.app', ... (other parameters)</li> <li>Location: '/Library/Frameworks/Python.framework/Versions/', ... (other parameters)</li> <li>Location: '/Applications/Python 3.7/Python Launcher.app', ... (other parameters)</li> <li>Location: '/Applications/Sublime Text.app', ... (other parameters)</li></td></tr><tr><td>Agent behavior</td><td>MonitorSystemProcesses</td><td>Windows</td><td>ON</td></tr><tr><td>Agent behavior</td><td>Store file info in extended attributes</td><td>Windows, macOS</td><td>ON</td></tr><tr><td>Agent behavior</td><td>Enable DLL support</td><td>Windows</td><td>OFF</td></tr><tr><td>Agent behavior</td><td>Verify digital signature on scripts</td><td>Windows</td><td>ON</td></tr><tr><td>Agent behavior</td><td>Discover source URL</td><td>Windows</td><td>ON</td></tr><tr><td>Agent behavior</td><td>Discover source email</td><td>Windows</td><td>OFF</td></tr><tr><td>Agent behavior</td><td>Support network shares</td><td>Windows</td><td>Full</td></tr><tr><td>Agent behavior</td><td>Monitor SIP files</td><td>macOS</td><td>OFF</td></tr><tr><td>Agent behavior</td><td>Boot-start driver</td><td>Windows</td><td>OFF</td></tr><tr><td>Agent behavior</td><td>Allow root permission for root programs</td><td>macOS</td><td>ON</td></tr><tr><td>Agent behavior</td><td>Prevent sudoers file modification</td><td>macOS, Linux</td><td>ON</td></tr><tr><td>Agent behavior</td><td>Sudo grace validation period</td><td>macOS</td><td>30</td></tr><tr><td>Agent behavior</td><td>Trace new files</td><td>Windows</td><td>OFF</td></tr><tr><td>Agent behavior</td><td>Sudo no password</td><td>Linux</td><td>OFF</td></tr><tr><td>Agent behavior</td><td>Sudo secure path</td><td>macOS, Linux</td><td><ul><li>MacPaths:</li>
+<ul>
+<li>/usr/local/bin</li>
+<li>/usr/bin</li>
+<li>/bin</li>
+<li>/usr/sbin</li>
+<li>/sbin</li>
+<li>/Applications/CyberArk EPM.app/Contents/Helpers</li>
+</ul>
+<li>LinuxPaths:</li>
+<ul>
+<li>/usr/local/bin</li>
+<li>/usr/bin</li>
+<li>/bin</li>
+<li>/usr/sbin</li>
+<li>/sbin</li>
+</ul></ul></td></tr><tr><td>Agent behavior</td><td>Allowed preloader</td><td>Linux</td><td>No Value</td></tr><tr><td>Agent behavior</td><td>Allow sudoers interoperability</td><td>macOS</td><td>OFF</td></tr>
+            </table>
+        </body>
+    </html>

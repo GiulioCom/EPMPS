@@ -1,0 +1,69 @@
+﻿    <!DOCTYPE html>
+    <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Default Policy - SET: [Giulio] Block(cyberark_16)</title>
+            <!-- Include Titillium Web font from Google Fonts -->
+            <link href="https://fonts.googleapis.com/css2?family=Titillium+Web:wght@300;400;600&display=swap" rel="stylesheet">
+            <style>
+                /* Apply the Titillium Web font */
+                body {
+                    font-family: 'Titillium Web', sans-serif;
+                    line-height: 1.6;
+                }
+                h1 {
+                    text-align: center;
+                    color: #333;
+                    font-weight: 600;
+                }
+                h2, h3 {
+                    text-align: center;
+                    color: #666;
+                }
+                table {
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin-bottom: 20px;
+                    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+                }
+                table, th, td {
+                    border: 1px solid #ddd;
+                }
+                th, td {
+                    padding: 10px;
+                    text-align: left;
+                }
+                /* Header color: Turquoise */
+                th {
+                    background-color: turquoise;
+                    color: white;
+                    font-weight: 600;
+                }
+                tr {
+                    background-color: rgb(167, 201, 225);
+                }
+                /* Even row color: rgb(199, 221, 236) */
+                //tr:nth-child(even) {
+                //    background-color: rgb(199, 221, 236);
+                //}
+                /* Odd row color: rgb(167, 201, 225) */
+                //tr:nth-child(odd) {
+                //    background-color: rgb(167, 201, 225);
+                //}
+                /* Add hover effect for rows */
+                tr:hover {
+                    background-color: #f1f1f1;
+                }
+            </style>
+        </head>
+        <body>
+            <h1>Default Policy</h1>
+            <h2></h2>
+            <h3>SET: [Giulio] Block(cyberark_16)</h3>
+            <table>
+                <tr><th>Policy Type</th> <th>Main Settings</th> <th>Extended Settings</th></tr>
+                <tr><td rowspan=3>Application Control Block: ON</td></tr><tr><td>Detect attempts to launch unhandled applications: ON</td><td>Notify users when an unhandled application is blocked (Windows): Baloon or Dialog<br>Notify users when an unhandled application is blocked (macOS): Baloon or Dialog</td></tr><tr><td>Include applications installed before the EPM agent: ON</td><td></td></tr><tr><td>Include controlled Windows OS programs (Windows Only): OFF</td><td></td></tr><tr><td>Policy Applied to all Computers</td><td></td></tr><tr><td rowspan=7>Application Control Detect: ON</td></tr><tr><td>Detect launch of unhandled applications: ON</td><td>Notify end users when an unhandled application is launched (Windows only): Baloon or Dialog</td></tr><tr><td>Detect installation of unhandled applications (Windows only): OFF</td><td></td></tr><tr><td>Detect access to sensitive resources by unhandled applications: ON</td><td></td></tr><tr><td>Include applications installed before the EPM agent: ON</td><td></td></tr><tr><td>Policy Applied to all Computers</td><td></td></tr>
+            </table>
+        </body>
+    </html>
