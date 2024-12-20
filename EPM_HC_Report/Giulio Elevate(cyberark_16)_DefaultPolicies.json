@@ -1,6 +1,22 @@
 {
     "Policies":  [
                      {
+                         "PolicyId":  "bb86682a-4a87-4e0a-834e-45a93068cf80",
+                         "PolicyName":  "[PM Detect]",
+                         "Action":  0,
+                         "IsActive":  true,
+                         "PolicyType":  1,
+                         "Order":  0,
+                         "IsAppliedToAllComputers":  false,
+                         "OsType":  0,
+                         "CreatedDate":  "2021-10-03T14:07:57.7065907",
+                         "ModifiedDate":  "2024-12-19T14:43:29.2691733",
+                         "ReferencedApplicationGroups":  [
+
+                                                         ],
+                         "UserPolicyPermissions":  -1
+                     },
+                     {
                          "PolicyId":  "d48703e5-b1b0-48a3-a210-3bf76b48d337",
                          "PolicyName":  "[PM Elevate]",
                          "Action":  0,
@@ -11,22 +27,6 @@
                          "OsType":  0,
                          "CreatedDate":  "2021-10-03T14:07:57.7817902",
                          "ModifiedDate":  "2024-12-13T19:14:54.0460766",
-                         "ReferencedApplicationGroups":  [
-
-                                                         ],
-                         "UserPolicyPermissions":  -1
-                     },
-                     {
-                         "PolicyId":  "bb86682a-4a87-4e0a-834e-45a93068cf80",
-                         "PolicyName":  "[PM Detect]",
-                         "Action":  0,
-                         "IsActive":  true,
-                         "PolicyType":  1,
-                         "Order":  0,
-                         "IsAppliedToAllComputers":  true,
-                         "OsType":  0,
-                         "CreatedDate":  "2021-10-03T14:07:57.7065907",
-                         "ModifiedDate":  "2024-12-06T09:02:46.7855919",
                          "ReferencedApplicationGroups":  [
 
                                                          ],

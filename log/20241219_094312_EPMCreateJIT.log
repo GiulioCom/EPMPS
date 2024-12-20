@@ -1,0 +1,27 @@
+2024-12-19 09:43:12 [INFO] - Logging enabled. Log file: C:\Users\giulioc\OneDrive - CyberArk Ltd\Documents\Script\EPM\EPMScript\EPMScript\log\20241219_094312_EPMCreateJIT.log
+2024-12-19 09:43:12 [INFO] - + ------------ +
+2024-12-19 09:43:12 [INFO] - | EPMCreateJIT |
+2024-12-19 09:43:12 [INFO] - + ------------ +
+2024-12-19 09:43:17 [INFO] - + --------------- +
+2024-12-19 09:43:17 [INFO] - | Available Sets: |
+2024-12-19 09:43:17 [INFO] - + --------------- +
+2024-12-19 09:43:17 [INFO] - 1. [Giulio] Elevate(cyberark_16)
+2024-12-19 09:43:17 [INFO] - 2. [Giulio] Monitor(cyberark_16)
+2024-12-19 09:43:17 [INFO] - 3. MXC_NG (cyberark_16)
+2024-12-19 09:43:17 [INFO] - 4. MXC_22.6 (cyberark_16)
+2024-12-19 09:43:17 [INFO] - 5. [Giulio] Block(cyberark_16)
+2024-12-19 09:43:17 [INFO] - 6. [Giulio] Server(cyberark_16)
+2024-12-19 09:43:17 [INFO] - 7. ITALGAS (cyberark_16)
+2024-12-19 09:43:17 [INFO] - 8. [Giulio] Ferrovial(cyberark_16)
+2024-12-19 09:43:17 [INFO] - 9. ITALGAS AdmNonAdm(cyberark_16)
+2024-12-19 09:43:17 [INFO] - 10. MacOS - Test Giuglio(cyberark_16)
+2024-12-19 09:43:17 [INFO] - 11. [Giulio] QuickStart(cyberark_16)
+2024-12-19 09:43:17 [INFO] - 12. FINCANTIERI(cyberark_16)
+2024-12-19 09:43:18 [INFO] - Found last events file: C:\Users\giulioc\OneDrive - CyberArk Ltd\Documents\Script\EPM\EPMScript\EPMScript\EPMJIT_lastEvents\lastEvents.txt
+2024-12-19 09:43:18 [INFO] - Searching Manual Request events from 2024-12-09T19:39:48.343Z
+2024-12-19 09:43:19 [INFO] - Found 2 Manual Request from 2024-12-09T19:39:48.343Z
+2024-12-19 09:43:20 [INFO] - Processing 1 of 2 Manual Request for GIULIO\user1 on WIN10X64-1
+2024-12-19 09:43:24 [INFO] - JIT GIULIO\user1 on WIN10X64-1 (1) policy created
+2024-12-19 09:43:24 [INFO] - Processing 2 of 2 Manual Request for GIULIO\user1 on WIN10X64-1
+2024-12-19 09:43:28 [INFO] - JIT GIULIO\user1 on WIN10X64-1 (2) policy created
+2024-12-19 09:43:28 [INFO] - The last event date 2024-12-12T15:42:30.916Z, save last event date 2024-12-12T15:42:30.917Z in C:\Users\giulioc\OneDrive - CyberArk Ltd\Documents\Script\EPM\EPMScript\EPMScript\EPMJIT_lastEvents\lastEvents.txt

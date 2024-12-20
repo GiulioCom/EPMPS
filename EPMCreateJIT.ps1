@@ -446,6 +446,8 @@ $eventsFilter = @{
 
 $events = Invoke-EPMRestMethod -URI "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Events/Search?limit=1000&sortDir=asc" -Method 'POST' -Headers $sessionHeader -Body $eventsFilter
 
+Write-Log $($events | Convertto-Json -Depth 10) INFO
+
 if ($events.filteredCount -gt 0) {
     Write-Log "Found $($events.filteredCount) Manual Request from $lastEventTimestamp" INFO
 
@@ -500,10 +502,9 @@ if ($events.filteredCount -gt 0) {
             $newfirstEventDate = Add-msToTimestamp -timestamp $event.firstEventDate
             # Update last event timestamp in the log file
             
-            Write-Log "Store last event date $newfirstEventDate in $lastEventFile" INFO
+            Write-Log "The last event date $($event.firstEventDate), save last event date $newfirstEventDate in $lastEventFile" INFO
             $newfirstEventDate | Set-Content -Path $lastEventFile -Force
         }
-
         $count++
     }
 

@@ -353,6 +353,26 @@ function Save-File {
     }
 }
 
+
+
+#######
+
+### Mappings
+# Define your mappings
+
+$supportedOS = @{
+    0 = "No OS"
+    1 = "Windows"
+    2 = "macOS"
+    3 = "Windows, macOS"
+    4 = "Linux"
+    6 = "macOS, Linux"
+    7 = "Windows, macOS, Linux"
+}
+##########
+
+### Script Functions
+
 function Write-Log-HTML {
     param (
         [Parameter(Mandatory)]
@@ -394,16 +414,24 @@ function Write-Log-HTML {
     return "$row"
 }
 
-function Write-RowDefPolType {
+function Write-RowDefPolType-New {
     param (
         [Parameter(Mandatory)]
         [int]$param,         # The content in cell
-        [int]$rowspan
+        
+        [Parameter(Mandatory)]
+        [string]$HTMLtable   # The HTML table containing <tr> tags
     ) 
 
+    # Count the number of <tr> tags in the HTML table
+    $rowspan = ($HTMLtable -split "<tr>").Count
+
+    # Construct the return value
     $returnValue = "$($policyTypes[$param]): $(Resolve-DefPolValue -value $($policyDetails.Policy.IsActive))"
     Write-Log "$returnValue" INFO -ForegroundColor DarkMagenta
-    return "<tr><td rowspan=$rowspan>$returnValue</td></tr>"
+
+    # Return the new table row with calculated rowspan
+    return "<tr><td rowspan=$rowspan>$returnValue</td></tr>$HTMLtable"
 }
 
 function Write-RowSingleData {
@@ -424,25 +452,7 @@ function Write-RowSingleData {
     Write-Log "- $returnValue" INFO
     return "<tr><td>$returnValue</td><td></td></tr>"
 }
-
-#######
-
-### Mappings
-# Define your mappings
-
-$supportedOS = @{
-    0 = "No OS"
-    1 = "Windows"
-    2 = "macOS"
-    3 = "Windows, macOS"
-    4 = "Linux"
-    6 = "macOS, Linux"
-    7 = "Windows, macOS, Linux"
-}
-##########
-
-### Script Functions
-function Output-PolicyTarget {
+function Get-PolicyTarget {
     
     param (
         [Parameter(Mandatory = $true)]
@@ -466,32 +476,67 @@ function Output-PolicyTarget {
         9 = "IdP group"
     }
 
-    if ($policy.Executors.Count -gt 0) {
-        $defaultPolicyTableBody += Write-Log-HTML "Policy applied to the following EPM Computers or EPM Groups" -ErrorLevel INFO -span $policy.Executors.Count+1
-        #Write-Log " - Policy applied to the following EPM Computers or EPM Groups:" INFO
-        $policyDetails.Policy.Executors | ForEach-Object {
-            #Write-Log " -- $($ExecutorType[($_.ExecutorType)]): $($_.Name)" INFO
-            $defaultPolicyTableBody += Write-Log-HTML "$($ExecutorType[($_.ExecutorType)]): $($_.Name)" -ErrorLevel INFO -column 3
+    $returnTarget = ""
+    $includeComp = ""
+    $includeCompADGroup = ""
+    $IncludeUsers = ""
+    $excludeComp = ""
+    $excludeCompADGroup = ""
+
+    if ($policyDetails.Policy.IsAppliedToAllComputers -eq $false) {
+        if ($policy.Executors.Count -gt 0) {
+            $policyDetails.Policy.Executors | ForEach-Object {
+                if ($_.IsIncluded -eq $true) {
+                    $includeComp += "<div>$($ExecutorType[($_.ExecutorType)]): $($_.Name)</div>"
+                } else {
+                    $excludeComp += "<div>$($ExecutorType[($_.ExecutorType)]): $($_.Name)</div>"
+                }
+            }
+        } else {
+            $includeComp = "All"
+            $excludeComp = "None"
         }
-    }
-    if ($policy.Accounts.Count -gt 0) {
-        Write-Log " - Policy applied to the folowing Users or Groups:" INFO
-        $policy.Accounts | ForEach-Object {
-            Write-Log " -- $($AccountType[($_.AccountType)]): $($_.SamName)" INFO
+
+        if ($policy.Accounts.Count -gt 0) {
+            $policy.Accounts | ForEach-Object {
+                $IncludeUsers += "<div>$($AccountType[($_.AccountType)]): $($_.SamName)</div>"
+            }
+        } else {
+            $IncludeUsers = "All"
         }
-    }
-    if ($policy.IncludeADComputerGroups.Count -gt 0) {
-        Write-Log "Policy applied to the folowing AD Computer Groups:" INFO
-        $policy.Accounts | ForEach-Object {
-            Write-Log " -- $($AccountType[($_.AccountType)]): $($_.SamName)" INFO
+
+        if ($policy.IncludeADComputerGroups.Count -gt 0) {
+            $policy.Accounts | ForEach-Object {
+                $includeCompADGroup += "$($AccountType[($_.AccountType)]): $($_.SamName)"
+            }
+        } else {
+            $includeCompADGroup = "All"
         }
-    }
-    if ($policy.ExcludeADComputerGroups.Count -gt 0) {
-        Write-Log "Policy excluded for the folowing AD Computer Groups:" INFO
-        $policy.Accounts | ForEach-Object {
-            Write-Log " -- $($AccountType[($_.AccountType)]): $($_.SamName)" INFO
+
+        if ($policy.ExcludeADComputerGroups.Count -gt 0) {
+            $policy.Accounts | ForEach-Object {
+                $excludeCompADGroup += "$($AccountType[($_.AccountType)]): $($_.SamName)"
+            }
+        } else {
+            $excludeCompADGroup = "All"
         }
+    } else {
+        $includeComp = "All"
+        $includeCompADGroup = "All"
+        $IncludeUsers = "All"
+        $excludeComp = "None"
+        $excludeCompADGroup = "None"
     }
+
+    $returnTarget +="<tr><td colspan=2>Apply Policy to</td></tr>"
+    $returnTarget +="<tr><td>&nbsp;&nbsp;Computers in this set</td><td>$includeComp</td></tr>"
+    $returnTarget +="<tr><td>&nbsp;&nbsp;Computers in AD security groups</td><td>$includeCompADGroup</td></tr>"
+    $returnTarget +="<tr><td>&nbsp;&nbsp;Users and groups</td><td>$IncludeUsers</td></tr>"
+    $returnTarget +="<tr><td colspan=2>Exclude from policy</td></tr>"
+    $returnTarget +="<tr><td>&nbsp;&nbsp;Computers in this set</td><td>$excludeComp</td></tr>"
+    $returnTarget +="<tr><td>&nbsp;&nbsp;Computers in AD security groups</td><td>$excludeCompADGroup</td></tr>"
+
+    return $returnTarget
 }
 
 function Resolve-DefPolValue {
@@ -889,7 +934,7 @@ function Create-HTMLReport {
                 }
                 /* Header color: Turquoise */
                 th {
-                    background-color: turquoise;
+                    background-color: rgb(20, 133, 179);
                     color: white;
                     font-weight: 600;
                 }
@@ -1080,9 +1125,9 @@ foreach ($policy in $policySearch.Policies) {
         switch ($policy.PolicyType) {
             # [PM Detect]
             1 { 
-                $defaultPolicyTableBody += Write-RowDefPolType -param $($policyDetails.Policy.PolicyType) -rowspan 7
+                $PMDetectTable = ""
 
-                $defaultPolicyTableBody += Write-RowSingleData -param "DetectUserActionsOnly"
+                $PMDetectTable += Write-RowSingleData -param "DetectUserActionsOnly"
             
                 $DetectEvents4StdUsers = "$($DefPolPropMap["DetectEvents4StdUsers"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectEvents4StdUsers))"
                 Write-Log "-- $DetectEvents4StdUsers" INFO
@@ -1090,7 +1135,7 @@ foreach ($policy in $policySearch.Policies) {
                     $PMDetectStdNotificationMode = "$($DefPolPropMap["PMDetectStdNotificationMode"]): $(Resolve-DefPolValue -name "PMDetectStdNotificationMode" -value $($policyDetails.Policy.PMDetectStdNotificationMode))"
                     Write-Log "--- $DetectEvents4StdUsers" INFO
                 }
-                $defaultPolicyTableBody += "<tr><td>$DetectEvents4StdUsers</td><td>$PMDetectStdNotificationMode</td></tr>"
+                $PMDetectTable += "<tr><td>$DetectEvents4StdUsers</td><td>$PMDetectStdNotificationMode</td></tr>"
 
                 $DetectEvents4AdmUsers = "$($DefPolPropMap["DetectEvents4AdmUsers"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectEvents4AdmUsers))"
                 Write-Log "-- $DetectEvents4AdmUsers" INFO
@@ -1098,7 +1143,7 @@ foreach ($policy in $policySearch.Policies) {
                     $PMDetectAdmNotificationMode = "$($DefPolPropMap["PMDetectAdmNotificationMode"]): $(Resolve-DefPolValue -name "PMDetectAdmNotificationMode" -value $($policyDetails.Policy.PMDetectStdNotificationMode))"
                     Write-Log "--- $DetectEvents4StdUsers" INFO
                 }
-                $defaultPolicyTableBody += "<tr><td>$DetectEvents4AdmUsers</td><td>$PMDetectAdmNotificationMode</td></tr>"
+                $PMDetectTable += "<tr><td>$DetectEvents4AdmUsers</td><td>$PMDetectAdmNotificationMode</td></tr>"
                 
                 $DetectHeuristics = "$($DefPolPropMap["DetectHeuristics"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectHeuristics))"
                 Write-Log "-- $DetectHeuristics" INFO
@@ -1106,7 +1151,7 @@ foreach ($policy in $policySearch.Policies) {
                     $PMDetectHeuristicsNotification = "$($DefPolPropMap["PMDetectHeuristicsNotification"]): Baloon or Dialog"
                     Write-Log "--- $PMDetectHeuristicsNotification" INFO
                 }
-                $defaultPolicyTableBody += "<tr><td>$DetectHeuristics</td><td>$PMDetectHeuristicsNotification</td></tr>"
+                $PMDetectTable += "<tr><td>$DetectHeuristics</td><td>$PMDetectHeuristicsNotification</td></tr>"
 
                 $ManualRequests = "$($DefPolPropMap["ManualRequests"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.ManualRequests))"
                 Write-Log "-- $ManualRequests" INFO
@@ -1114,19 +1159,16 @@ foreach ($policy in $policySearch.Policies) {
                     $PMDetectManualNotification = "$($DefPolPropMap["PMDetectManualNotification"]): Baloon or Dialog"
                     Write-Log "--- $PMDetectManualNotification" INFO
                 }
-                $defaultPolicyTableBody += "<tr><td>$ManualRequests</td><td>$PMDetectManualNotification</td></tr>"
+                $PMDetectTable += "<tr><td>$ManualRequests</td><td>$PMDetectManualNotification</td></tr>"
                
-                if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
-                    $IsAppliedToAllComputers = "Policy Applied to all Computers"
-                    Write-Log "-- $IsAppliedToAllComputers" INFO
-                    $defaultPolicyTableBody += "<tr><td>$IsAppliedToAllComputers</td><td></td></tr>"
-                } else {
-                    Output-PolicyTarget $policyDetails.policy
-                }
+                $PMDetectTable += Get-PolicyTarget -policy $policyDetails.Policy
+
+                $defaultPolicyTableBody += Write-RowDefPolType-New -param $($policyDetails.Policy.PolicyType) -HTMLtable $PMDetectTable
+
             }
             # [AC Detect]
             2 {
-                $defaultPolicyTableBody += Write-RowDefPolType -param $($policyDetails.Policy.PolicyType) -rowspan 7
+                $ACDetectTable = ""
                 
                 $DetectLaunches = "$($DefPolPropMap["DetectLaunches"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectLaunches))"
                 Write-Log "- $DetectLaunches" INFO
@@ -1134,35 +1176,31 @@ foreach ($policy in $policySearch.Policies) {
                     $ACLaunchWinNotification = "$($DefPolPropMap["ACLaunchWinNotification"]): Baloon or Dialog"
                     Write-Log "-- $ACLaunchWinNotification" INFO
                 }
-                $defaultPolicyTableBody += "<tr><td>$DetectLaunches</td><td>$ACLaunchWinNotification</td></tr>"
+                $ACDetectTable += "<tr><td>$DetectLaunches</td><td>$ACLaunchWinNotification</td></tr>"
 
-                $defaultPolicyTableBody += Write-RowSingleData -param "DetectInstallations"
+                $ACDetectTable += Write-RowSingleData -param "DetectInstallations"
 
-                $defaultPolicyTableBody += Write-RowSingleData -param "DetectAccess"
+                $ACDetectTable += Write-RowSingleData -param "DetectAccess"
                 
-                $defaultPolicyTableBody += Write-RowSingleData -param "Apply2OldApps"
+                $ACDetectTable += Write-RowSingleData -param "Apply2OldApps"
 
-                if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
-                    $IsAppliedToAllComputers = "Policy Applied to all Computers"
-                    Write-Log "- $IsAppliedToAllComputers" INFO
-                    $defaultPolicyTableBody += "<tr><td>$IsAppliedToAllComputers</td><td></td></tr>"
-                } else {
-                    Output-PolicyTarget $policyDetails.policy
-                }
+                $ACDetectTable += Get-PolicyTarget -policy $policyDetails.Policy
+
+                $defaultPolicyTableBody += Write-RowDefPolType-New -param $($policyDetails.Policy.PolicyType) -HTMLtable $ACDetectTable
             }
             # [AC Restrict]
             3 {
-                $defaultPolicyTableBody += Write-RowDefPolType -param $($policyDetails.Policy.PolicyType) -rowspan 9
-
+                $ACRestrictTable = ""
+                
                 $DetectLaunches = "$($DefPolPropMap["DetectLaunches"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectLaunches))"
                 Write-Log "- $DetectLaunches" INFO
                 if ($policyDetails.Policy.DetectLaunches -and $policyDetails.Policy.ACLaunchWinNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
                     $ACLaunchWinNotification = "$($DefPolPropMap["ACLaunchWinNotification"]): Baloon or Dialog"
                     Write-Log "-- $ACLaunchWinNotification" INFO
                 }
-                $defaultPolicyTableBody += "<tr><td>$DetectLaunches</td><td>$ACLaunchWinNotification</td></tr>"
+                $ACRestrictTable += "<tr><td>$DetectLaunches</td><td>$ACLaunchWinNotification</td></tr>"
 
-                $defaultPolicyTableBody += Write-RowSingleData -param "DetectInstallations"
+                $ACRestrictTable += Write-RowSingleData -param "DetectInstallations"
 
                 $RestrictAccessInternet = "$($DefPolPropMap["RestrictAccessInternet"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.RestrictAccessInternet))"
                 Write-Log "- $RestrictAccessInternet" INFO
@@ -1183,32 +1221,28 @@ foreach ($policy in $policySearch.Policies) {
                 }
 
                 if ($policyDetails.Policy.ACRestrictAccessMacNotification.Id -ne "00000000-0000-0000-0000-000000000000"){
-                    $ACRestrictAccessWinNotification = "Dialog"
+                    $ACRestrictAccessMacNotification = "Dialog"
                 } else {
-                    $ACRestrictAccessWinNotification = "OFF"
+                    $ACRestrictAccessMacNotification = "OFF"
                 }
 
                 Write-Log "-- $($DefPolPropMap["ACRestrictAccessWinNotification"]): $ACRestrictAccessWinNotification" INFO
                 Write-Log "-- $($DefPolPropMap["ACRestrictAccessMacNotification"]): $ACRestrictAccessMacNotification" INFO
 
-                $defaultPolicyTableBody += "<tr><td>$RestrictAccessInternet</td><td rowspan=2>$($DefPolPropMap["ACRestrictAccessWinNotification"]): $ACRestrictAccessWinNotification</td></tr>"
-                $defaultPolicyTableBody += "<tr><td>$RestrictAccessIntranet</td></tr>"
-                $defaultPolicyTableBody += "<tr><td>$RestrictAccessShares</td><td rowspan=2>$($DefPolPropMap["ACRestrictAccessMacNotification"]): $ACRestrictAccessMacNotification</td></tr>"
-                $defaultPolicyTableBody += "<tr><td>$RestrictAccessRAM</td></tr>"
+                $ACRestrictTable += "<tr><td>$RestrictAccessInternet</td><td rowspan=2>$($DefPolPropMap["ACRestrictAccessWinNotification"]): $ACRestrictAccessWinNotification</td></tr>"
+                $ACRestrictTable += "<tr><td>$RestrictAccessIntranet</td></tr>"
+                $ACRestrictTable += "<tr><td>$RestrictAccessShares</td><td rowspan=2>$($DefPolPropMap["ACRestrictAccessMacNotification"]): $ACRestrictAccessMacNotification</td></tr>"
+                $ACRestrictTable += "<tr><td>$RestrictAccessRAM</td></tr>"
 
-                $defaultPolicyTableBody += Write-RowSingleData -param "Apply2OldApps"
+                $ACRestrictTable += Write-RowSingleData -param "Apply2OldApps"
 
-                if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
-                    $IsAppliedToAllComputers = "Policy Applied to all Computers"
-                    Write-Log "- $IsAppliedToAllComputers" INFO
-                    $defaultPolicyTableBody += "<tr><td>$IsAppliedToAllComputers</td><td></td></tr>"
-                } else {
-                    #Output-PolicyTarget $policyDetails.policy
-                }
+                $ACRestrictTable += Get-PolicyTarget -policy $policyDetails.Policy
+
+                $defaultPolicyTableBody += Write-RowDefPolType-New -param $($policyDetails.Policy.PolicyType) -HTMLtable $ACRestrictTable
             }
             # [RP Detect] and [RP Restrict]
             {$_ -eq 4 -or $_ -eq 5} {
-                $defaultPolicyTableBody += Write-RowDefPolType -param $($policyDetails.Policy.PolicyType) -rowspan 3
+                $RPDetectTable = ""
                 
                 $RestrictRulesPathList = ""
                 foreach ($RestrictRulesPath in $policyDetails.Policy.RPRestrictRulesPaths) {
@@ -1218,22 +1252,18 @@ foreach ($policy in $policySearch.Policies) {
                     } else {
                         $pattern = "Location"
                     }
-                    $RestrictRulesPathList += "<li>$($pattern): $($RestrictRulesPath.Path)</li>"
+                    $RestrictRulesPathList += "<div>$($pattern): $($RestrictRulesPath.Path)</div>"
                 }
-                $defaultPolicyTableBody += "<tr><td><ul>$RestrictRulesPathList</ul></td><td></td></tr>"
+                $RPDetectTable += "<tr><td>$RestrictRulesPathList</td><td></td></tr>"
 
-                if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
-                    $IsAppliedToAllComputers = "Policy Applied to all Computers"
-                    Write-Log "- $IsAppliedToAllComputers" INFO
-                    $defaultPolicyTableBody += "<tr><td>$IsAppliedToAllComputers</td><td></td></tr>"
-                } else {
-                    Output-PolicyTarget $policyDetails.policy
-                }
+                $RPDetectTable += Get-PolicyTarget -policy $policyDetails.Policy
+
+                $defaultPolicyTableBody += Write-RowDefPolType-New -param $($policyDetails.Policy.PolicyType) -HTMLtable $RPDetectTable
             }
             # [Internet Detect]
             6 {
-                $defaultPolicyTableBody += Write-RowDefPolType -param $($policyDetails.Policy.PolicyType) -rowspan 6
-                
+                $InternetDetectTable = ""
+
                 $IntDetectLaunches = "$($DefPolPropMap["IntDetectLaunches"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectLaunches))"
                 Write-Log "- $IntDetectLaunches" INFO
                 if ($policyDetails.Policy.DetectLaunches) {
@@ -1245,22 +1275,18 @@ foreach ($policy in $policySearch.Policies) {
                 }
                 Write-Log "-- $IntLaunchWinNotification" INFO
                 
-                $defaultPolicyTableBody += "<tr><td>$IntDetectLaunches</td><td>$IntLaunchWinNotification</td></tr>"
+                $InternetDetectTable += "<tr><td>$IntDetectLaunches</td><td>$IntLaunchWinNotification</td></tr>"
 
-                $defaultPolicyTableBody += Write-RowSingleData -param "IntDetectInstallations" -serverParam "DetectInstallations"
-                $defaultPolicyTableBody += Write-RowSingleData -param "IntDetectAccess" -serverParam "DetectAccess"
+                $InternetDetectTable += Write-RowSingleData -param "IntDetectInstallations" -serverParam "DetectInstallations"
+                $InternetDetectTable += Write-RowSingleData -param "IntDetectAccess" -serverParam "DetectAccess"
 
-                if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
-                    $IsAppliedToAllComputers = "Policy Applied to all Computers"
-                    Write-Log "-- $IsAppliedToAllComputers" INFO
-                    $defaultPolicyTableBody += "<tr><td>$IsAppliedToAllComputers</td><td></td></tr>"
-                } else {
-                    Output-PolicyTarget $policyDetails.policy
-                }
+                $InternetDetectTable += Get-PolicyTarget -policy $policyDetails.Policy
+
+                $defaultPolicyTableBody += Write-RowDefPolType-New -param $($policyDetails.Policy.PolicyType) -HTMLtable $InternetDetectTable
             }             
             # [Internet Restrict]
             7 {
-                $defaultPolicyTableBody += Write-RowDefPolType -param $($policyDetails.Policy.PolicyType) -rowspan 9
+                $InternetRestrictTable = ""
 
                 $IntDetectLaunches = "$($DefPolPropMap["IntDetectLaunches"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectLaunches))"
                 Write-Log "- $IntDetectLaunches" INFO
@@ -1274,9 +1300,9 @@ foreach ($policy in $policySearch.Policies) {
                 }
                 Write-Log "-- $IntLaunchWinNotification" INFO
 
-                $defaultPolicyTableBody += "<tr><td>$IntDetectLaunches</td><td>$IntLaunchWinNotification</td></tr>"
+                $InternetRestrictTable += "<tr><td>$IntDetectLaunches</td><td>$IntLaunchWinNotification</td></tr>"
 
-                $defaultPolicyTableBody += Write-RowSingleData -param "IntDetectInstallations" -serverParam "DetectInstallations"
+                $InternetRestrictTable += Write-RowSingleData -param "IntDetectInstallations" -serverParam "DetectInstallations"
 
                 $IntRestrictAccessInternet = "$($DefPolPropMap["RestrictAccessInternet"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.RestrictAccessInternet))"
                 Write-Log "-- $IntRestrictAccessInternet" INFO
@@ -1298,22 +1324,18 @@ foreach ($policy in $policySearch.Policies) {
 
                 Write-Log "--- $($DefPolPropMap["IntRestrictAccessWinNotification"]): $IntRestrictAccessWinNotification" INFO
 
-                $defaultPolicyTableBody += "<tr><td>$IntRestrictAccessInternet</td><td rowspan=4>$($DefPolPropMap["IntRestrictAccessWinNotification"]): $IntRestrictAccessWinNotification</td></tr>"
-                $defaultPolicyTableBody += "<tr><td>$IntRestrictAccessIntranet</td></tr>"
-                $defaultPolicyTableBody += "<tr><td>$IntRestrictAccessShares</td></tr>"
-                $defaultPolicyTableBody += "<tr><td>$IntRestrictAccessRAM</td></tr>"
+                $InternetRestrictTable += "<tr><td>$IntRestrictAccessInternet</td><td rowspan=4>$($DefPolPropMap["IntRestrictAccessWinNotification"]): $IntRestrictAccessWinNotification</td></tr>"
+                $InternetRestrictTable += "<tr><td>$IntRestrictAccessIntranet</td></tr>"
+                $InternetRestrictTable += "<tr><td>$IntRestrictAccessShares</td></tr>"
+                $InternetRestrictTable += "<tr><td>$IntRestrictAccessRAM</td></tr>"
 
-                if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
-                    $IsAppliedToAllComputers = "Policy Applied to all Computers"
-                    Write-Log "-- $IsAppliedToAllComputers" INFO
-                    $defaultPolicyTableBody += "<tr><td>$IsAppliedToAllComputers</td><td></td></tr>"
-                } else {
-                    Output-PolicyTarget $policyDetails.policy
-                }
+                $InternetRestrictTable += Get-PolicyTarget -policy $policyDetails.Policy
+
+                $defaultPolicyTableBody += Write-RowDefPolType-New -param $($policyDetails.Policy.PolicyType) -HTMLtable $InternetRestrictTable
             }
             # [Internet Block]
             8 {
-                $defaultPolicyTableBody += Write-RowDefPolType -param $($policyDetails.Policy.PolicyType) -rowspan 3
+                $InternetBlockTable = ""
                 
                 $IntSendBlockEvent = "$($DefPolPropMap["IntSendBlockEvent"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.SendBlockEvent))"
                 Write-Log "- $IntSendBlockEvent" INFO
@@ -1326,19 +1348,15 @@ foreach ($policy in $policySearch.Policies) {
                 }
                 Write-Log "-- $IntBlockWinNotification" INFO
 
-                $defaultPolicyTableBody += "<tr><td>$IntSendBlockEvent</td><td>$IntBlockWinNotification</td></tr>"
+                $InternetBlockTable += "<tr><td>$IntSendBlockEvent</td><td>$IntBlockWinNotification</td></tr>"
 
-                if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
-                    $IsAppliedToAllComputers = "Policy Applied to all Computers"
-                    Write-Log "-- $IsAppliedToAllComputers" INFO
-                    $defaultPolicyTableBody += "<tr><td>$IsAppliedToAllComputers</td><td></td></tr>"
-                } else {
-                    Output-PolicyTarget $policyDetails.policy
-                }
+                $InternetBlockTable += Get-PolicyTarget -policy $policyDetails.Policy
+
+                $defaultPolicyTableBody += Write-RowDefPolType-New -param $($policyDetails.Policy.PolicyType) -HTMLtable $InternetBlockTable
             }
             # [PM Elevate]
             9 { 
-                $defaultPolicyTableBody += Write-RowDefPolType -param $($policyDetails.Policy.PolicyType) -rowspan 5
+                $PMElevateTable = ""
 
                 $Elevate4StdUsers = "$($DefPolPropMap["Elevate4StdUsers"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.Elevate4StdUsers))"
                 Write-Log "- $Elevate4StdUsers" INFO
@@ -1364,7 +1382,7 @@ foreach ($policy in $policySearch.Policies) {
                     }
                     Write-Log "-- $PMElevateStdLinuxNotification" INFO
                 }
-                $defaultPolicyTableBody += "<tr><td>$Elevate4StdUsers</td><td>$PMElevateStdWinNotification<br>$PMElevateStdMacNotification<br>$PMElevateStdLinuxNotification</tr>"
+                $PMElevateTable += "<tr><td>$Elevate4StdUsers</td><td>$PMElevateStdWinNotification<br>$PMElevateStdMacNotification<br>$PMElevateStdLinuxNotification</tr>"
 
                 $Elevate4AdmUsers = "$($DefPolPropMap["Elevate4AdmUsers"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.Elevate4AdmUsers))"
                 Write-Log "- $Elevate4AdmUsers" INFO
@@ -1390,7 +1408,7 @@ foreach ($policy in $policySearch.Policies) {
                     }
                     Write-Log "-- $PMElevateAdmLinuxNotification" INFO
                 }
-                $defaultPolicyTableBody += "<tr><td>$Elevate4AdmUsers</td><td>$PMElevateAdmWinNotification<br>$PMElevateAdmMacNotification<br>$PMElevateAdmLinuxNotification</tr>"
+                $PMElevateTable += "<tr><td>$Elevate4AdmUsers</td><td>$PMElevateAdmWinNotification<br>$PMElevateAdmMacNotification<br>$PMElevateAdmLinuxNotification</tr>"
 
                 $ManualRequests = "$($DefPolPropMap["ElevateManualRequests"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.ManualRequests))"
                 Write-Log "- $ManualRequests" INFO
@@ -1401,19 +1419,15 @@ foreach ($policy in $policySearch.Policies) {
                 }
                 Write-Log "-- $PMElevateManualNotification" INFO
 
-                $defaultPolicyTableBody += "<tr><td>$ManualRequests</td><td>$PMElevateManualNotification</td></tr>"
+                $PMElevateTable += "<tr><td>$ManualRequests</td><td>$PMElevateManualNotification</td></tr>"
                
-                if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
-                    $IsAppliedToAllComputers = "Policy Applied to all Computers"
-                    Write-Log "- $IsAppliedToAllComputers" INFO
-                    $defaultPolicyTableBody += "<tr><td>$IsAppliedToAllComputers</td><td></td></tr>"
-                } else {
-                    Output-PolicyTarget $policyDetails.policy
-                }
+                $PMElevateTable += Get-PolicyTarget -policy $policyDetails.Policy
+
+                $defaultPolicyTableBody += Write-RowDefPolType-New -param $($policyDetails.Policy.PolicyType) -HTMLtable $PMElevateTable
             }
             # [AC Block]
             10 {
-                $defaultPolicyTableBody += Write-RowDefPolType -param $($policyDetails.Policy.PolicyType) -rowspan 5
+                $ACBlockTable = ""
                 
                 $SendBlockEvent = "$($DefPolPropMap["SendBlockEvent"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.SendBlockEvent))"
                 Write-Log "- $SendBlockEvent" INFO
@@ -1433,18 +1447,14 @@ foreach ($policy in $policySearch.Policies) {
                     Write-Log "-- $ACBlockMacNotification" INFO
                 }
 
-                $defaultPolicyTableBody += "<tr><td>$SendBlockEvent</td><td>$ACBlockWinNotification<br>$ACBlockMacNotification</td></tr>"
+                $ACBlockTable += "<tr><td>$SendBlockEvent</td><td>$ACBlockWinNotification<br>$ACBlockMacNotification</td></tr>"
 
-                $defaultPolicyTableBody += Write-RowSingleData -param "Apply2OldApps"
-                $defaultPolicyTableBody += Write-RowSingleData -param "Apply2WindowsPrograms"
+                $ACBlockTable += Write-RowSingleData -param "Apply2OldApps"
+                $ACBlockTable += Write-RowSingleData -param "Apply2WindowsPrograms"
 
-                if ($policyDetails.Policy.IsAppliedToAllComputers -eq $true) {
-                    $IsAppliedToAllComputers = "Policy Applied to all Computers"
-                    Write-Log "- $IsAppliedToAllComputers" INFO
-                    $defaultPolicyTableBody += "<tr><td>$IsAppliedToAllComputers</td><td></td></tr>"
-                } else {
-                    Output-PolicyTarget $policyDetails.policy
-                }
+                $ACBlockTable += Get-PolicyTarget -policy $policyDetails.Policy
+
+                $defaultPolicyTableBody += Write-RowDefPolType-New -param $($policyDetails.Policy.PolicyType) -HTMLtable $ACBlockTable
             }
             Default {}
         }

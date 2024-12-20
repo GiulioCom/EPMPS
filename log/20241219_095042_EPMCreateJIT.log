@@ -1,0 +1,102 @@
+2024-12-19 09:50:42 [INFO] - Logging enabled. Log file: C:\Users\giulioc\OneDrive - CyberArk Ltd\Documents\Script\EPM\EPMScript\EPMScript\log\20241219_095042_EPMCreateJIT.log
+2024-12-19 09:50:42 [INFO] - + ------------ +
+2024-12-19 09:50:42 [INFO] - | EPMCreateJIT |
+2024-12-19 09:50:42 [INFO] - + ------------ +
+2024-12-19 09:50:46 [INFO] - + --------------- +
+2024-12-19 09:50:46 [INFO] - | Available Sets: |
+2024-12-19 09:50:46 [INFO] - + --------------- +
+2024-12-19 09:50:46 [INFO] - 1. [Giulio] Elevate(cyberark_16)
+2024-12-19 09:50:46 [INFO] - 2. [Giulio] Monitor(cyberark_16)
+2024-12-19 09:50:46 [INFO] - 3. MXC_NG (cyberark_16)
+2024-12-19 09:50:46 [INFO] - 4. MXC_22.6 (cyberark_16)
+2024-12-19 09:50:46 [INFO] - 5. [Giulio] Block(cyberark_16)
+2024-12-19 09:50:46 [INFO] - 6. [Giulio] Server(cyberark_16)
+2024-12-19 09:50:46 [INFO] - 7. ITALGAS (cyberark_16)
+2024-12-19 09:50:46 [INFO] - 8. [Giulio] Ferrovial(cyberark_16)
+2024-12-19 09:50:46 [INFO] - 9. ITALGAS AdmNonAdm(cyberark_16)
+2024-12-19 09:50:46 [INFO] - 10. MacOS - Test Giuglio(cyberark_16)
+2024-12-19 09:50:46 [INFO] - 11. [Giulio] QuickStart(cyberark_16)
+2024-12-19 09:50:46 [INFO] - 12. FINCANTIERI(cyberark_16)
+2024-12-19 09:50:48 [INFO] - Found last events file: C:\Users\giulioc\OneDrive - CyberArk Ltd\Documents\Script\EPM\EPMScript\EPMScript\EPMJIT_lastEvents\lastEvents.txt
+2024-12-19 09:50:48 [INFO] - Searching Manual Request events from 2024-12-09T19:39:48.343Z
+2024-12-19 09:50:49 [INFO] - {
+    "fileName":  null,
+    "originalFileName":  "",
+    "displayName":  "User request",
+    "policyName":  null,
+    "hash":  null,
+    "publisher":  "",
+    "eventType":  "ManualRequest",
+    "sourceType":  "Unknown",
+    "sourceName":  null,
+    "lastEventDate":  "2024-12-12T15:42:30.916Z",
+    "firstEventDate":  "2024-12-12T15:42:30.916Z",
+    "userName":  "GIULIO\\user1",
+    "justification":  "admins",
+    "justificationEmail":  null,
+    "fileSize":  -1,
+    "threatProtectionAction":  "ALL",
+    "threatProtectionActionId":  0,
+    "packageName":  "User request",
+    "company":  null,
+    "filePath":  null,
+    "filePathWithoutFilename":  null,
+    "fileDescription":  null,
+    "productName":  null,
+    "productVersion":  null,
+    "bundleName":  null,
+    "bundleVersion":  null,
+    "bundleId":  null,
+    "applicationSubType":  null,
+    "interpreter":  null,
+    "runAsUsername":  null,
+    "workingDirectory":  null,
+    "originUserUID":  null,
+    "fileAccessPermission":  null,
+    "symLink":  null,
+    "fileVersion":  null,
+    "modificationTime":  "2024-11-12T15:42:51.168Z",
+    "userIsAdmin":  false,
+    "agentEventCount":  1,
+    "skippedCount":  0,
+    "eventCount":  1,
+    "accessAction":  "false",
+    "accessTargetType":  "Internet",
+    "accessTargetName":  null,
+    "processCommandLine":  null,
+    "sourceProcessCommandLine":  null,
+    "sourceProcessUsername":  null,
+    "sourceProcessHash":  null,
+    "sourceProcessPublisher":  null,
+    "sourceProcessSigner":  null,
+    "evidences":  null,
+    "exposedUsers":  null,
+    "owner":  null,
+    "fileQualifier":  "5777512114524374643",
+    "sourceProcessCertificateIssuer":  null,
+    "processCertificateIssuer":  null,
+    "operatingSystemType":  "Windows",
+    "arrivalTime":  "2024-12-12T15:42:51.18Z",
+    "policyCategory":  null,
+    "deceptionType":  0,
+    "lureUser":  null,
+    "sourceWSName":  null,
+    "fatherProcess":  null,
+    "sourceWSIp":  null,
+    "winEventType":  0,
+    "winEventRecordId":  0,
+    "logonAttemptTypeId":  0,
+    "logonStatusId":  0,
+    "productCode":  null,
+    "upgradeCode":  null,
+    "authorizationRights":  null,
+    "agentId":  "2e40b95e-48b6-4887-bfb7-070490005b42",
+    "computerName":  "WIN10X64-1"
+}
+2024-12-19 09:50:49 [INFO] - @{fileName=; originalFileName=; displayName=User request; policyName=; hash=; publisher=; eventType=ManualRequest; sourceType=Unknown; sourceName=; lastEventDate=2024-12-12T15:42:30.916Z; firstEventDate=2024-12-12T15:42:30.916Z; userName=GIULIO\user1; justification=admins; justificationEmail=; fileSize=-1; threatProtectionAction=ALL; threatProtectionActionId=0; packageName=User request; company=; filePath=; filePathWithoutFilename=; fileDescription=; productName=; productVersion=; bundleName=; bundleVersion=; bundleId=; applicationSubType=; interpreter=; runAsUsername=; workingDirectory=; originUserUID=; fileAccessPermission=; symLink=; fileVersion=; modificationTime=2024-11-12T15:42:51.168Z; userIsAdmin=False; agentEventCount=1; skippedCount=0; eventCount=1; accessAction=false; accessTargetType=Internet; accessTargetName=; processCommandLine=; sourceProcessCommandLine=; sourceProcessUsername=; sourceProcessHash=; sourceProcessPublisher=; sourceProcessSigner=; evidences=; exposedUsers=; owner=; fileQualifier=5777512114524374643; sourceProcessCertificateIssuer=; processCertificateIssuer=; operatingSystemType=Windows; arrivalTime=2024-12-12T15:42:51.18Z; policyCategory=; deceptionType=0; lureUser=; sourceWSName=; fatherProcess=; sourceWSIp=; winEventType=0; winEventRecordId=0; logonAttemptTypeId=0; logonStatusId=0; productCode=; upgradeCode=; authorizationRights=; agentId=2e40b95e-48b6-4887-bfb7-070490005b42; computerName=WIN10X64-1}
+2024-12-19 09:50:49 [INFO] - Found 2 Manual Request from 2024-12-09T19:39:48.343Z
+2024-12-19 09:50:49 [INFO] - Processing 1 of 2 Manual Request for GIULIO\user1 on WIN10X64-1
+2024-12-19 09:50:54 [INFO] - JIT GIULIO\user1 on WIN10X64-1 (5) policy created
+2024-12-19 09:50:54 [INFO] - Processing 2 of 2 Manual Request for GIULIO\user1 on WIN10X64-1
+2024-12-19 09:50:59 [INFO] - JIT GIULIO\user1 on WIN10X64-1 (6) policy created
+2024-12-19 09:50:59 [INFO] - The last event date 2024-12-12T15:42:30.916Z, save last event date 2024-12-12T15:42:30.917Z in C:\Users\giulioc\OneDrive - CyberArk Ltd\Documents\Script\EPM\EPMScript\EPMScript\EPMJIT_lastEvents\lastEvents.txt
