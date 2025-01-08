@@ -506,7 +506,7 @@ function Write-Log-HTML {
 function Write-RowDefPolType-New {
     param (
         [Parameter(Mandatory)]
-        [int]$param,         # The content in cell
+        [int]$param,         # The parameter name
         
         [Parameter(Mandatory)]
         [string]$HTMLtable   # The HTML table containing <tr> tags
@@ -813,6 +813,22 @@ function Get-FileTypesToScanForApplicationCatalog {
     }
 }
 
+function Write-RowAdvAgentType {
+    param (
+        [Parameter(Mandatory)]
+        [string]$param,         # The parameter name
+        
+        [Parameter(Mandatory)]
+        [string]$HTMLtable   # The HTML table containing <tr> tags
+    ) 
+
+    # Count the number of <tr> tags in the HTML table
+    $rowspan = ($HTMLtable -split "<tr>").Count
+
+    # Return the new table row with calculated rowspan
+    return "<tr><td rowspan=$rowspan>$param</td></tr>$HTMLtable"
+}
+
 function Resolve-Value {
     param (
         [Parameter(Mandatory)]
@@ -1098,6 +1114,7 @@ $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -se
 
 Write-Log "Entering SET: $($set.setName)..." INFO -ForegroundColor Blue
 
+<#
 # Get Default policy
 Write-Log "Collecting Default Policy..." INFO -ForegroundColor Blue
 
@@ -1469,7 +1486,7 @@ $defaultPolicyReport = Create-HTMLReport -ReportTitle "Default Policy" `
 # Save to file
 Write-Log "Store Default Policy Report..." INFO
 Save-File -Content $defaultPolicyReport -FileName "$($set.setName)_DefaultPolicy.html" -DestFolder "$PSScriptRoot\\EPM_HC_Report"
-
+#>
 # Get Agent Configuration
 
 Write-Log "Collecting Advanced Agent General Configuration..." INFO -ForegroundColor Blue
@@ -1498,6 +1515,9 @@ foreach ($agentParamType in $agentConfGeneral.Policy.PSObject.Properties) {
     
     if ($validOptions -contains $agentParamType.Name) {
         #Write-Log " + $($agentParamType.Name)" INFO
+        
+        #$prevParamTypeName = ""
+        $paramTypeTable = ""
         
         foreach ($agentParam in $agentParamType.Value.PSObject.Properties){
             # Reset the variables
@@ -1559,14 +1579,21 @@ foreach ($agentParamType in $agentConfGeneral.Policy.PSObject.Properties) {
                 #$setting = Resolve-Value -optionName $agentParam.Name -optionValue $agentParam.Value.Value
                 $settingHTML = Resolve-Value -optionName $agentParam.Name -optionValue $agentParam.Value.Value
             }
-            
-            $paramTypeName = Resolve-DisplayName -OriginalName $agentParamType.Name
+
             $paramName = Resolve-DisplayName -OriginalName $agentParam.Name
+            $paramTypeTable += "<tr><td>$paramName</td><td>$OS</td><td>$settingHTML</td></tr>"
           
             #Write-Log " + - $($agentParam.Name) - $OS - $setting" INFO
           #  $htmlContent += "<tr><td>$paramTypeName</td><td>$paramName</td><td>$OS</td><td>$settingHTML</td></tr>"
-            $confAgentTableBody += "<tr><td>$paramTypeName</td><td>$paramName</td><td>$OS</td><td>$settingHTML</td></tr>"
+            #$confAgentTableBody += "<tr><td>$paramTypeName</td><td>$paramName</td><td>$OS</td><td>$settingHTML</td></tr>"
         }
+
+        $paramTypeName = Resolve-DisplayName -OriginalName $agentParamType.Name
+
+        $confAgentTableBody += Write-RowAdvAgentType -param $paramTypeName -HTMLtable $paramTypeTable
+        #$paramTypeTable = ""
+
+#        $prevParamTypeName = $paramTypeName
     }
 }
 
