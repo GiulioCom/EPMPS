@@ -343,9 +343,8 @@ function Save-File {
             throw "Unsupported file type: $sanitizedFileName"
         }
 
-        # Log the operation
         Write-Log "File saved to: $fullPath" INFO
-        return $fullPath
+#        return $fullPath
     }
     catch {
         Write-Log "Failed to save file: $_" ERROR
@@ -368,6 +367,96 @@ $supportedOS = @{
     4 = "Linux"
     6 = "macOS, Linux"
     7 = "Windows, macOS, Linux"
+}
+
+$policyTypes = @{
+    1 =	"Privilege Management Detect"
+    2 = "Application Control Detect"
+    3 =	"Application Control Restrict"
+    4 = "Ransomware Protection Detect"
+    5 = "Ransomware Protection Restrict"
+    6 =	"INT Detect"
+    7 = "INT Restrict"
+    8 =	"INT Block"
+    9 =	"Privilege Management Elevate"
+    10 = "Application Control Block"
+    11 = "Advanced Windows"
+    12 = "Advanced Linux"
+    13 = "Advanced Mac"
+    14 = "Application Group Win"
+    15 = "Application Group Linux"
+    16 = "Application Group Win"
+    17 = "Recommended Block Windows OS Applications"
+    18 = "Predefined App Groups Win"
+    19 = "Microsoft Windows Programs (Win Files)"
+    20 = "Developer Applications"
+    21 = "Authorized Applications (Ransomware)"
+    22 = "Credentials Rotation"
+    23 = "Trusted Install Package Windows"
+    24 = "Trusted Distributor Windows"
+    25 = "Trusted Updater Windows"
+    26 = "Trusted User/Group Windows"
+    27 = "Trusted Network Location Windows"
+    28 = "Trusted URL Windows"
+    29 = "Trusted Publisher Windows"
+    30 = "Trusted Product Windows"
+    31 = "Trusted Distributor Mac"
+    32 = "Trusted Publisher Mac"
+    33 = "Trusted Distributor Predefined Definition Win"
+    34 = "Trusted Updater Predefined Definition Win"
+    35 = "Trusted Distributor Predefined Definition Mac"
+    36 = "User Policy - Set Security Permissions for File System and Registry Keys"
+    37 = "User Policy - Set Security Permissions for Services"
+    38 = "User Policy - Set Security Permissions for Removable Storage (USB, Optical Discs)"
+    39 = "Collect UAC actions by Local Admin"
+    40 = "JIT Access and Elevation"
+    41 = "Deploy Script"
+    42 = "Execute Script"
+    43 = "Predefined App Groups Win"
+    45 = "Agent Configuration"
+    46 = "Remove Admin"
+    47 = "Deception"
+}
+
+$DefPolPropMap = @{
+    "DetectUserActionsOnly" = "Detection mode (Windows only)"
+    "DetectEvents4StdUsers" = "Standard end users: Detect unhandled applications when administrative privileges are required"
+    "PMDetectStdNotificationMode" = "Prompt end users when an unhandled application requires administrative privileges"
+    "DetectEvents4AdmUsers" = "Administrative end users: Detect unhandled applications when administrative privileges are required"
+    "PMDetectAdmNotificationMode" = "Notify end users when an unhandled application requires administrative privileges"
+    "DetectHeuristics" = "Detect unsuccessful application launches using heuristics (Windows only)"
+    "PMDetectHeuristicsNotification" = "Prompt users when an application is elevated manually"
+    "ManualRequests" = "Allow end users to submit elevation requests (Windows, macOS)"
+    "PMDetectManualNotification" = "Prompt users when an application is elevated manually"
+    "DetectLaunches" = "Detect launch of unhandled applications"
+    "ACLaunchWinNotification" = "Notify end users when an unhandled application is launched (Windows only)"
+    "DetectInstallations" = "Detect installation of unhandled applications (Windows only)"
+    "DetectAccess" = "Detect access to sensitive resources by unhandled applications"
+    "Apply2OldApps" = "Include applications installed before the EPM agent"
+    "RestrictAccessInternet" = "Restriction - Internet"
+    "RestrictAccessIntranet" = "Restriction - Intranet"
+    "RestrictAccessShares" = "Restriction - Network shares"
+    "RestrictAccessRAM" = "Restriction - Memory of other processes"
+    "ACRestrictAccessWinNotification" = "Notify end users when an unauthorized access attempt occurs (Windows)"
+    "ACRestrictAccessMacNotification" = "Notify end users when an unauthorized access attempt occurs (macOS)"
+    "IntDetectLaunches" = "Detect launch of unhandled applications downloaded from the internet"
+    "IntLaunchWinNotification" = "Notify end users when an unhandled application is launched"
+    "IntDetectInstallations" = "Detect installation of unhandled applications downloaded from the internet"
+    "IntDetectAccess" = "Detect access to the sensitive resources by unhandled applications downloaded from the internet"
+    "IntRestrictAccessWinNotification" = "Notify end users when an unauthorized access attempt occurs"
+    "IntSendBlockEvent" = "Detect attempts to launch unhandled applications downloaded from the internet"
+    "IntBlockWinNotification" = "Notify end user when unhandled application downloaded from the internet is blocked (Windows only)"
+    "Elevate4StdUsers" = "Standard end users: Elevate unhandled applications when privileges are required"
+    "PMElevateWinNotification" = "Prompt users when elevation is necessary - Windows"
+    "PMElevateMacNotification" = "Prompt users when elevation is necessary - macOS"
+    "PMElevateLinuxNotification" = "Prompt users when elevation is necessary - Linux"
+    "Elevate4AdmUsers" = "Administrative end users: Elevate unhandled applications when privileges are required"
+    "ElevateManualRequests" = "Add elevation option to Windows Explorer context menu for unhandled applications"
+    "PMElevateManualNotification" = "Prompt users when an application is elevated manually"
+    "SendBlockEvent" = "Detect attempts to launch unhandled applications"
+    "ACBlockWinNotification" = "Notify users when an unhandled application is blocked (Windows)"
+    "ACBlockMacNotification" = "Notify users when an unhandled application is blocked (macOS)"
+    "Apply2WindowsPrograms" = "Include controlled Windows OS programs (Windows Only)"
 }
 ##########
 
@@ -428,7 +517,7 @@ function Write-RowDefPolType-New {
 
     # Construct the return value
     $returnValue = "$($policyTypes[$param]): $(Resolve-DefPolValue -value $($policyDetails.Policy.IsActive))"
-    Write-Log "$returnValue" INFO -ForegroundColor DarkMagenta
+    #Write-Log "$returnValue" INFO -ForegroundColor DarkMagenta
 
     # Return the new table row with calculated rowspan
     return "<tr><td rowspan=$rowspan>$returnValue</td></tr>$HTMLtable"
@@ -449,7 +538,7 @@ function Write-RowSingleData {
     }
 
     $returnValue = "$($DefPolPropMap[$param]): $(Resolve-DefPolValue -value $($policyDetails.Policy.$serverParam))"
-    Write-Log "- $returnValue" INFO
+    #Write-Log "- $returnValue" INFO
     return "<tr><td>$returnValue</td><td></td></tr>"
 }
 function Get-PolicyTarget {
@@ -950,9 +1039,9 @@ function Create-HTMLReport {
                 //    background-color: rgb(167, 201, 225);
                 //}
                 /* Add hover effect for rows */
-                tr:hover {
-                    background-color: #f1f1f1;
-                }
+                //tr:hover {
+                //    background-color: #f1f1f1;
+                //}
             </style>
         </head>
         <body>
@@ -969,7 +1058,6 @@ function Create-HTMLReport {
 
     return $htmlContent
 }
-
 
 ### Begin Script ###
 
@@ -990,10 +1078,8 @@ $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
 $logFileName = "$timestamp`_$scriptName.log"
 $logFilePath = Join-Path $logFolder $logFileName
-##
 
 Write-Box "$scriptName"
-##
 
 # Request EPM Credentials
 $credential = Get-Credential -UserName $username -Message "Enter password for $username"
@@ -1010,11 +1096,10 @@ $sessionHeader = @{
 # Get SetId
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
-Write-Box "$($set.setName)"
+Write-Log "Entering SET: $($set.setName)..." INFO -ForegroundColor Blue
 
 # Get Default policy
-
-Write-Box "Collecting Default Policy"
+Write-Log "Collecting Default Policy..." INFO -ForegroundColor Blue
 
 $policiesSearchFilter = @{
     "filter" = "policyGroupType EQ 7"
@@ -1026,96 +1111,7 @@ $policySearch = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($
 Save-File -Content $policySearch -FileName "$($set.setName)_DefaultPolicies.json" -DestFolder "$PSScriptRoot\\EPM_HC_Report"
 
 # Analyze Policy result
-
-$policyTypes = @{
-    1 =	"Privilege Management Detect"
-    2 = "Application Control Detect"
-    3 =	"Application Control Restrict"
-    4 = "Ransomware Protection Detect"
-    5 = "Ransomware Protection Restrict"
-    6 =	"INT Detect"
-    7 = "INT Restrict"
-    8 =	"INT Block"
-    9 =	"Privilege Management Elevate"
-    10 = "Application Control Block"
-    11 = "Advanced Windows"
-    12 = "Advanced Linux"
-    13 = "Advanced Mac"
-    14 = "Application Group Win"
-    15 = "Application Group Linux"
-    16 = "Application Group Win"
-    17 = "Recommended Block Windows OS Applications"
-    18 = "Predefined App Groups Win"
-    19 = "Microsoft Windows Programs (Win Files)"
-    20 = "Developer Applications"
-    21 = "Authorized Applications (Ransomware)"
-    22 = "Credentials Rotation"
-    23 = "Trusted Install Package Windows"
-    24 = "Trusted Distributor Windows"
-    25 = "Trusted Updater Windows"
-    26 = "Trusted User/Group Windows"
-    27 = "Trusted Network Location Windows"
-    28 = "Trusted URL Windows"
-    29 = "Trusted Publisher Windows"
-    30 = "Trusted Product Windows"
-    31 = "Trusted Distributor Mac"
-    32 = "Trusted Publisher Mac"
-    33 = "Trusted Distributor Predefined Definition Win"
-    34 = "Trusted Updater Predefined Definition Win"
-    35 = "Trusted Distributor Predefined Definition Mac"
-    36 = "User Policy - Set Security Permissions for File System and Registry Keys"
-    37 = "User Policy - Set Security Permissions for Services"
-    38 = "User Policy - Set Security Permissions for Removable Storage (USB, Optical Discs)"
-    39 = "Collect UAC actions by Local Admin"
-    40 = "JIT Access and Elevation"
-    41 = "Deploy Script"
-    42 = "Execute Script"
-    43 = "Predefined App Groups Win"
-    45 = "Agent Configuration"
-    46 = "Remove Admin"
-    47 = "Deception"
-}
-
-$DefPolPropMap = @{
-    "DetectUserActionsOnly" = "Detection mode (Windows only)"
-    "DetectEvents4StdUsers" = "Standard end users: Detect unhandled applications when administrative privileges are required"
-    "PMDetectStdNotificationMode" = "Prompt end users when an unhandled application requires administrative privileges"
-    "DetectEvents4AdmUsers" = "Administrative end users: Detect unhandled applications when administrative privileges are required"
-    "PMDetectAdmNotificationMode" = "Notify end users when an unhandled application requires administrative privileges"
-    "DetectHeuristics" = "Detect unsuccessful application launches using heuristics (Windows only)"
-    "PMDetectHeuristicsNotification" = "Prompt users when an application is elevated manually"
-    "ManualRequests" = "Allow end users to submit elevation requests (Windows, macOS)"
-    "PMDetectManualNotification" = "Prompt users when an application is elevated manually"
-    "DetectLaunches" = "Detect launch of unhandled applications"
-    "ACLaunchWinNotification" = "Notify end users when an unhandled application is launched (Windows only)"
-    "DetectInstallations" = "Detect installation of unhandled applications (Windows only)"
-    "DetectAccess" = "Detect access to sensitive resources by unhandled applications"
-    "Apply2OldApps" = "Include applications installed before the EPM agent"
-    "RestrictAccessInternet" = "Restriction - Internet"
-    "RestrictAccessIntranet" = "Restriction - Intranet"
-    "RestrictAccessShares" = "Restriction - Network shares"
-    "RestrictAccessRAM" = "Restriction - Memory of other processes"
-    "ACRestrictAccessWinNotification" = "Notify end users when an unauthorized access attempt occurs (Windows)"
-    "ACRestrictAccessMacNotification" = "Notify end users when an unauthorized access attempt occurs (macOS)"
-    "IntDetectLaunches" = "Detect launch of unhandled applications downloaded from the internet"
-    "IntLaunchWinNotification" = "Notify end users when an unhandled application is launched"
-    "IntDetectInstallations" = "Detect installation of unhandled applications downloaded from the internet"
-    "IntDetectAccess" = "Detect access to the sensitive resources by unhandled applications downloaded from the internet"
-    "IntRestrictAccessWinNotification" = "Notify end users when an unauthorized access attempt occurs"
-    "IntSendBlockEvent" = "Detect attempts to launch unhandled applications downloaded from the internet"
-    "IntBlockWinNotification" = "Notify end user when unhandled application downloaded from the internet is blocked (Windows only)"
-    "Elevate4StdUsers" = "Standard end users: Elevate unhandled applications when privileges are required"
-    "PMElevateWinNotification" = "Prompt users when elevation is necessary - Windows"
-    "PMElevateMacNotification" = "Prompt users when elevation is necessary - macOS"
-    "PMElevateLinuxNotification" = "Prompt users when elevation is necessary - Linux"
-    "Elevate4AdmUsers" = "Administrative end users: Elevate unhandled applications when privileges are required"
-    "ElevateManualRequests" = "Add elevation option to Windows Explorer context menu for unhandled applications"
-    "PMElevateManualNotification" = "Prompt users when an application is elevated manually"
-    "SendBlockEvent" = "Detect attempts to launch unhandled applications"
-    "ACBlockWinNotification" = "Notify users when an unhandled application is blocked (Windows)"
-    "ACBlockMacNotification" = "Notify users when an unhandled application is blocked (macOS)"
-    "Apply2WindowsPrograms" = "Include controlled Windows OS programs (Windows Only)"
-}
+Write-Log "Processing Default Policy..." INFO -ForegroundColor Magenta
 
 $defaultPolicyTableBody = ""
 
@@ -1130,34 +1126,34 @@ foreach ($policy in $policySearch.Policies) {
                 $PMDetectTable += Write-RowSingleData -param "DetectUserActionsOnly"
             
                 $DetectEvents4StdUsers = "$($DefPolPropMap["DetectEvents4StdUsers"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectEvents4StdUsers))"
-                Write-Log "-- $DetectEvents4StdUsers" INFO
+                #Write-Log "-- $DetectEvents4StdUsers" INFO
                 if ($policyDetails.Policy.DetectEvents4StdUsers) {
                     $PMDetectStdNotificationMode = "$($DefPolPropMap["PMDetectStdNotificationMode"]): $(Resolve-DefPolValue -name "PMDetectStdNotificationMode" -value $($policyDetails.Policy.PMDetectStdNotificationMode))"
-                    Write-Log "--- $DetectEvents4StdUsers" INFO
+                #    Write-Log "--- $DetectEvents4StdUsers" INFO
                 }
                 $PMDetectTable += "<tr><td>$DetectEvents4StdUsers</td><td>$PMDetectStdNotificationMode</td></tr>"
 
                 $DetectEvents4AdmUsers = "$($DefPolPropMap["DetectEvents4AdmUsers"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectEvents4AdmUsers))"
-                Write-Log "-- $DetectEvents4AdmUsers" INFO
+                #Write-Log "-- $DetectEvents4AdmUsers" INFO
                 if ($policyDetails.Policy.DetectEvents4AdmUsers) {
                     $PMDetectAdmNotificationMode = "$($DefPolPropMap["PMDetectAdmNotificationMode"]): $(Resolve-DefPolValue -name "PMDetectAdmNotificationMode" -value $($policyDetails.Policy.PMDetectStdNotificationMode))"
-                    Write-Log "--- $DetectEvents4StdUsers" INFO
+                #    Write-Log "--- $DetectEvents4StdUsers" INFO
                 }
                 $PMDetectTable += "<tr><td>$DetectEvents4AdmUsers</td><td>$PMDetectAdmNotificationMode</td></tr>"
                 
                 $DetectHeuristics = "$($DefPolPropMap["DetectHeuristics"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectHeuristics))"
-                Write-Log "-- $DetectHeuristics" INFO
+                #Write-Log "-- $DetectHeuristics" INFO
                 if ($policyDetails.Policy.DetectHeuristics -and $policyDetails.Policy.PMDetectStdNotificationMode.Id -ne "00000000-0000-0000-0000-000000000000") {
                     $PMDetectHeuristicsNotification = "$($DefPolPropMap["PMDetectHeuristicsNotification"]): Baloon or Dialog"
-                    Write-Log "--- $PMDetectHeuristicsNotification" INFO
+                #    Write-Log "--- $PMDetectHeuristicsNotification" INFO
                 }
                 $PMDetectTable += "<tr><td>$DetectHeuristics</td><td>$PMDetectHeuristicsNotification</td></tr>"
 
                 $ManualRequests = "$($DefPolPropMap["ManualRequests"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.ManualRequests))"
-                Write-Log "-- $ManualRequests" INFO
+                #Write-Log "-- $ManualRequests" INFO
                 if ($policyDetails.Policy.ManualRequests -and $policyDetails.Policy.PMDetectManualNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
                     $PMDetectManualNotification = "$($DefPolPropMap["PMDetectManualNotification"]): Baloon or Dialog"
-                    Write-Log "--- $PMDetectManualNotification" INFO
+                #    Write-Log "--- $PMDetectManualNotification" INFO
                 }
                 $PMDetectTable += "<tr><td>$ManualRequests</td><td>$PMDetectManualNotification</td></tr>"
                
@@ -1171,10 +1167,10 @@ foreach ($policy in $policySearch.Policies) {
                 $ACDetectTable = ""
                 
                 $DetectLaunches = "$($DefPolPropMap["DetectLaunches"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectLaunches))"
-                Write-Log "- $DetectLaunches" INFO
+                #Write-Log "- $DetectLaunches" INFO
                 if ($policyDetails.Policy.DetectLaunches -and $policyDetails.Policy.ACLaunchWinNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
                     $ACLaunchWinNotification = "$($DefPolPropMap["ACLaunchWinNotification"]): Baloon or Dialog"
-                    Write-Log "-- $ACLaunchWinNotification" INFO
+                #    Write-Log "-- $ACLaunchWinNotification" INFO
                 }
                 $ACDetectTable += "<tr><td>$DetectLaunches</td><td>$ACLaunchWinNotification</td></tr>"
 
@@ -1193,26 +1189,26 @@ foreach ($policy in $policySearch.Policies) {
                 $ACRestrictTable = ""
                 
                 $DetectLaunches = "$($DefPolPropMap["DetectLaunches"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectLaunches))"
-                Write-Log "- $DetectLaunches" INFO
+                #Write-Log "- $DetectLaunches" INFO
                 if ($policyDetails.Policy.DetectLaunches -and $policyDetails.Policy.ACLaunchWinNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
                     $ACLaunchWinNotification = "$($DefPolPropMap["ACLaunchWinNotification"]): Baloon or Dialog"
-                    Write-Log "-- $ACLaunchWinNotification" INFO
+                #    Write-Log "-- $ACLaunchWinNotification" INFO
                 }
                 $ACRestrictTable += "<tr><td>$DetectLaunches</td><td>$ACLaunchWinNotification</td></tr>"
 
                 $ACRestrictTable += Write-RowSingleData -param "DetectInstallations"
 
                 $RestrictAccessInternet = "$($DefPolPropMap["RestrictAccessInternet"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.RestrictAccessInternet))"
-                Write-Log "- $RestrictAccessInternet" INFO
+                #Write-Log "- $RestrictAccessInternet" INFO
 
                 $RestrictAccessIntranet = "$($DefPolPropMap["RestrictAccessIntranet"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.RestrictAccessIntranet))"
-                Write-Log "- $RestrictAccessIntranet" INFO
+                #Write-Log "- $RestrictAccessIntranet" INFO
 
                 $RestrictAccessShares = "$($DefPolPropMap["RestrictAccessShares"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.RestrictAccessShares))"
-                Write-Log "- $RestrictAccessShares" INFO
+                #Write-Log "- $RestrictAccessShares" INFO
 
                 $RestrictAccessRAM = "$($DefPolPropMap["RestrictAccessRAM"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.RestrictAccessRAM))"
-                Write-Log "- $RestrictAccessRAM" INFO
+                #Write-Log "- $RestrictAccessRAM" INFO
 
                 if ($policyDetails.Policy.ACRestrictAccessWinNotification.Id -ne "00000000-0000-0000-0000-000000000000"){
                     $ACRestrictAccessWinNotification = "Dialog or Baloon"
@@ -1226,8 +1222,8 @@ foreach ($policy in $policySearch.Policies) {
                     $ACRestrictAccessMacNotification = "OFF"
                 }
 
-                Write-Log "-- $($DefPolPropMap["ACRestrictAccessWinNotification"]): $ACRestrictAccessWinNotification" INFO
-                Write-Log "-- $($DefPolPropMap["ACRestrictAccessMacNotification"]): $ACRestrictAccessMacNotification" INFO
+                #Write-Log "-- $($DefPolPropMap["ACRestrictAccessWinNotification"]): $ACRestrictAccessWinNotification" INFO
+                #Write-Log "-- $($DefPolPropMap["ACRestrictAccessMacNotification"]): $ACRestrictAccessMacNotification" INFO
 
                 $ACRestrictTable += "<tr><td>$RestrictAccessInternet</td><td rowspan=2>$($DefPolPropMap["ACRestrictAccessWinNotification"]): $ACRestrictAccessWinNotification</td></tr>"
                 $ACRestrictTable += "<tr><td>$RestrictAccessIntranet</td></tr>"
@@ -1265,7 +1261,7 @@ foreach ($policy in $policySearch.Policies) {
                 $InternetDetectTable = ""
 
                 $IntDetectLaunches = "$($DefPolPropMap["IntDetectLaunches"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectLaunches))"
-                Write-Log "- $IntDetectLaunches" INFO
+                #Write-Log "- $IntDetectLaunches" INFO
                 if ($policyDetails.Policy.DetectLaunches) {
                     if ($policyDetails.Policy.IntLaunchWinNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
                         $IntLaunchWinNotification = "$($DefPolPropMap["IntLaunchWinNotification"]): Baloon or Dialog"
@@ -1273,7 +1269,7 @@ foreach ($policy in $policySearch.Policies) {
                         $IntLaunchWinNotification = "$($DefPolPropMap["IntLaunchWinNotification"]): OFF"
                     }
                 }
-                Write-Log "-- $IntLaunchWinNotification" INFO
+                #Write-Log "-- $IntLaunchWinNotification" INFO
                 
                 $InternetDetectTable += "<tr><td>$IntDetectLaunches</td><td>$IntLaunchWinNotification</td></tr>"
 
@@ -1289,7 +1285,7 @@ foreach ($policy in $policySearch.Policies) {
                 $InternetRestrictTable = ""
 
                 $IntDetectLaunches = "$($DefPolPropMap["IntDetectLaunches"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.DetectLaunches))"
-                Write-Log "- $IntDetectLaunches" INFO
+                #Write-Log "- $IntDetectLaunches" INFO
                 
                 if ($policyDetails.Policy.DetectLaunches) {
                     if ($policyDetails.Policy.IntLaunchWinNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
@@ -1298,23 +1294,23 @@ foreach ($policy in $policySearch.Policies) {
                         $IntLaunchWinNotification = "$($DefPolPropMap["IntLaunchWinNotification"]): OFF"
                     }
                 }
-                Write-Log "-- $IntLaunchWinNotification" INFO
+                #Write-Log "-- $IntLaunchWinNotification" INFO
 
                 $InternetRestrictTable += "<tr><td>$IntDetectLaunches</td><td>$IntLaunchWinNotification</td></tr>"
 
                 $InternetRestrictTable += Write-RowSingleData -param "IntDetectInstallations" -serverParam "DetectInstallations"
 
                 $IntRestrictAccessInternet = "$($DefPolPropMap["RestrictAccessInternet"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.RestrictAccessInternet))"
-                Write-Log "-- $IntRestrictAccessInternet" INFO
+               # Write-Log "-- $IntRestrictAccessInternet" INFO
 
                 $IntRestrictAccessIntranet = "$($DefPolPropMap["RestrictAccessIntranet"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.RestrictAccessIntranet))"
-                Write-Log "-- $IntRestrictAccessIntranet" INFO
+               # Write-Log "-- $IntRestrictAccessIntranet" INFO
 
                 $IntRestrictAccessShares = "$($DefPolPropMap["RestrictAccessShares"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.RestrictAccessShares))"
-                Write-Log "-- $IntRestrictAccessShares" INFO
+               # Write-Log "-- $IntRestrictAccessShares" INFO
 
                 $IntRestrictAccessRAM = "$($DefPolPropMap["RestrictAccessRAM"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.RestrictAccessRAM))"
-                Write-Log "-- $IntRestrictAccessRAM" INFO
+                #Write-Log "-- $IntRestrictAccessRAM" INFO
 
                 if ($policyDetails.Policy.IntRestrictAccessWinNotification.Id -ne "00000000-0000-0000-0000-000000000000"){
                     $IntRestrictAccessWinNotification = "Dialog or Baloon"
@@ -1322,7 +1318,7 @@ foreach ($policy in $policySearch.Policies) {
                     $IntRestrictAccessWinNotification = "OFF"
                 }
 
-                Write-Log "--- $($DefPolPropMap["IntRestrictAccessWinNotification"]): $IntRestrictAccessWinNotification" INFO
+              #  Write-Log "--- $($DefPolPropMap["IntRestrictAccessWinNotification"]): $IntRestrictAccessWinNotification" INFO
 
                 $InternetRestrictTable += "<tr><td>$IntRestrictAccessInternet</td><td rowspan=4>$($DefPolPropMap["IntRestrictAccessWinNotification"]): $IntRestrictAccessWinNotification</td></tr>"
                 $InternetRestrictTable += "<tr><td>$IntRestrictAccessIntranet</td></tr>"
@@ -1338,7 +1334,7 @@ foreach ($policy in $policySearch.Policies) {
                 $InternetBlockTable = ""
                 
                 $IntSendBlockEvent = "$($DefPolPropMap["IntSendBlockEvent"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.SendBlockEvent))"
-                Write-Log "- $IntSendBlockEvent" INFO
+                #Write-Log "- $IntSendBlockEvent" INFO
                 if ($policyDetails.Policy.SendBlockEvent) {
                     if ($policyDetails.Policy.IntBlockWinNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
                         $IntBlockWinNotification = "$($DefPolPropMap["IntBlockWinNotification"]): Baloon or Dialog"
@@ -1346,7 +1342,7 @@ foreach ($policy in $policySearch.Policies) {
                         $IntBlockWinNotification = "$($DefPolPropMap["IntBlockWinNotification"]): OFF"
                     }
                 }
-                Write-Log "-- $IntBlockWinNotification" INFO
+                #Write-Log "-- $IntBlockWinNotification" INFO
 
                 $InternetBlockTable += "<tr><td>$IntSendBlockEvent</td><td>$IntBlockWinNotification</td></tr>"
 
@@ -1359,65 +1355,65 @@ foreach ($policy in $policySearch.Policies) {
                 $PMElevateTable = ""
 
                 $Elevate4StdUsers = "$($DefPolPropMap["Elevate4StdUsers"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.Elevate4StdUsers))"
-                Write-Log "- $Elevate4StdUsers" INFO
+                #Write-Log "- $Elevate4StdUsers" INFO
                 if ($policyDetails.Policy.Elevate4StdUsers) {
                     if ($policyDetails.Policy.PMElevateStdWinNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
                         $PMElevateStdWinNotification = "$($DefPolPropMap["PMElevateWinNotification"]): Baloon or Dialog"
                     } else {
                         $PMElevateStdWinNotification = "$($DefPolPropMap["PMElevateWinNotification"]): OFF"
                     }
-                    Write-Log "-- $PMElevateStdWinNotification" INFO
+                #    Write-Log "-- $PMElevateStdWinNotification" INFO
 
                     if ($policyDetails.Policy.PMElevateStdMacNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
                         $PMElevateStdMacNotification = "$($DefPolPropMap["PMElevateMacNotification"]): Dialog"
                     } else {
                         $PMElevateStdMacNotification = "$($DefPolPropMap["PMElevateMacNotification"]): OFF"
                     }
-                    Write-Log "-- $PMElevateStdMacNotification" INFO
+                #    Write-Log "-- $PMElevateStdMacNotification" INFO
 
                     if ($policyDetails.Policy.PMElevateStdLinuxNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
                         $PMElevateStdLinuxNotification = "$($DefPolPropMap["PMElevateLinuxNotification"]): Dialog"
                     } else {
                         $PMElevateStdLinuxNotification = "$($DefPolPropMap["PMElevateLinuxNotification"]): OFF"
                     }
-                    Write-Log "-- $PMElevateStdLinuxNotification" INFO
+                #    Write-Log "-- $PMElevateStdLinuxNotification" INFO
                 }
                 $PMElevateTable += "<tr><td>$Elevate4StdUsers</td><td>$PMElevateStdWinNotification<br>$PMElevateStdMacNotification<br>$PMElevateStdLinuxNotification</tr>"
 
                 $Elevate4AdmUsers = "$($DefPolPropMap["Elevate4AdmUsers"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.Elevate4AdmUsers))"
-                Write-Log "- $Elevate4AdmUsers" INFO
+                #Write-Log "- $Elevate4AdmUsers" INFO
                 if ($policyDetails.Policy.Elevate4AdmUsers) {
                     if ($policyDetails.Policy.PMElevateAdmWinNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
                         $PMElevateAdmWinNotification = "$($DefPolPropMap["PMElevateWinNotification"]): Baloon or Dialog"
                     } else {
                         $PMElevateAdmWinNotification = "$($DefPolPropMap["PMElevateWinNotification"]): OFF"
                     }
-                    Write-Log "-- $PMElevateAdmWinNotification" INFO
+                #    Write-Log "-- $PMElevateAdmWinNotification" INFO
 
                     if ($policyDetails.Policy.PMElevateStdMacNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
                         $PMElevateAdmMacNotification = "$($DefPolPropMap["PMElevateMacNotification"]): Dialog"
                     } else {
                         $PMElevateAdmMacNotification = "$($DefPolPropMap["PMElevateMacNotification"]): OFF"
                     }
-                    Write-Log "-- $PMElevateAdmMacNotification" INFO
+                #    Write-Log "-- $PMElevateAdmMacNotification" INFO
 
                     if ($policyDetails.Policy.PMElevateAdmLinuxNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
                         $PMElevateAdmLinuxNotification = "$($DefPolPropMap["PMElevateLinuxNotification"]): Dialog"
                     } else {
                         $PMElevateAdmLinuxNotification = "$($DefPolPropMap["PMElevateLinuxNotification"]): OFF"
                     }
-                    Write-Log "-- $PMElevateAdmLinuxNotification" INFO
+                #    Write-Log "-- $PMElevateAdmLinuxNotification" INFO
                 }
                 $PMElevateTable += "<tr><td>$Elevate4AdmUsers</td><td>$PMElevateAdmWinNotification<br>$PMElevateAdmMacNotification<br>$PMElevateAdmLinuxNotification</tr>"
 
                 $ManualRequests = "$($DefPolPropMap["ElevateManualRequests"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.ManualRequests))"
-                Write-Log "- $ManualRequests" INFO
+                #Write-Log "- $ManualRequests" INFO
                 if ($policyDetails.Policy.ManualRequests -and $policyDetails.Policy.PMElevateManualNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
                     $PMElevateManualNotification = "$($DefPolPropMap["PMDetectManualNotification"]): Baloon or Dialog"
                 } else {
                     $PMElevateManualNotification = "$($DefPolPropMap["PMDetectManualNotification"]): OFF"
                 }
-                Write-Log "-- $PMElevateManualNotification" INFO
+                #Write-Log "-- $PMElevateManualNotification" INFO
 
                 $PMElevateTable += "<tr><td>$ManualRequests</td><td>$PMElevateManualNotification</td></tr>"
                
@@ -1430,21 +1426,21 @@ foreach ($policy in $policySearch.Policies) {
                 $ACBlockTable = ""
                 
                 $SendBlockEvent = "$($DefPolPropMap["SendBlockEvent"]): $(Resolve-DefPolValue -value $($policyDetails.Policy.SendBlockEvent))"
-                Write-Log "- $SendBlockEvent" INFO
+                #Write-Log "- $SendBlockEvent" INFO
                 if ($policyDetails.Policy.SendBlockEvent) {
                     if ($policyDetails.Policy.BlockWinNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
                         $ACBlockWinNotification = "$($DefPolPropMap["ACBlockWinNotification"]): Baloon or Dialog"
                     } else {
                         $ACBlockWinNotification = "$($DefPolPropMap["ACBlockWinNotification"]): NO"
                     }
-                    Write-Log "-- $ACBlockWinNotification" INFO
+                #    Write-Log "-- $ACBlockWinNotification" INFO
 
                     if ($policyDetails.Policy.ACBlockMacNotification.Id -ne "00000000-0000-0000-0000-000000000000") {
                         $ACBlockMacNotification = "$($DefPolPropMap["ACBlockMacNotification"]): Baloon or Dialog"
                     } else {
                         $ACBlockMacNotification = "$($DefPolPropMap["ACBlockMacNotification"]): NO"
                     }
-                    Write-Log "-- $ACBlockMacNotification" INFO
+                #    Write-Log "-- $ACBlockMacNotification" INFO
                 }
 
                 $ACBlockTable += "<tr><td>$SendBlockEvent</td><td>$ACBlockWinNotification<br>$ACBlockMacNotification</td></tr>"
@@ -1463,16 +1459,26 @@ foreach ($policy in $policySearch.Policies) {
     }
 }
 
+# Generate the HTML report
+$defaultPolicyReport = Create-HTMLReport -ReportTitle "Default Policy" `
+    -SubTitle "" `
+    -SetName "SET: $($set.setName)" `
+    -TableHeader "<th>Policy Type</th>", "<th>Main Settings</th>", "<th>Extended Settings</th>"`
+    -TableBody $defaultPolicyTableBody
+
+# Save to file
+Write-Log "Store Default Policy Report..." INFO
+Save-File -Content $defaultPolicyReport -FileName "$($set.setName)_DefaultPolicy.html" -DestFolder "$PSScriptRoot\\EPM_HC_Report"
+
 # Get Agent Configuration
 
-Write-Box "Getting Advanced Agent General Configuration"
+Write-Log "Collecting Advanced Agent General Configuration..." INFO -ForegroundColor Blue
 $agentConfGeneral = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/AgentConfiguration/$($set.setId)" -Method 'GET' -Headers $sessionHeader
-
 Save-File -Content $agentConfGeneral -FileName "$($set.setName)_AgentConf.json" -DestFolder "$PSScriptRoot\\EPM_HC_Report"
 
 $confAgentTableBody = ""
 
-# List of options to exatract, the RestApi woudl contains other data not useful
+# List of options to extract, the result may contains other data not useful
 $validOptions = @(
     "ExtendedProtection",
     "DataCollection",
@@ -1485,16 +1491,20 @@ $validOptions = @(
     "AgentBehavior"
 )
 
+# Process Agent Configuration
+Write-Log "Processing Advanced Agent General Configuration..." INFO -ForegroundColor Magenta
+
 foreach ($agentParamType in $agentConfGeneral.Policy.PSObject.Properties) {
     
     if ($validOptions -contains $agentParamType.Name) {
-        Write-Log " + $($agentParamType.Name)" INFO
+        #Write-Log " + $($agentParamType.Name)" INFO
         
         foreach ($agentParam in $agentParamType.Value.PSObject.Properties){
             # Reset the variables
-            $setting = ""
+            #$setting = ""
             $settingHTML = ""
             $paramHTML = ""
+            
             # Define the OS
             $OS = $($supportedOS[$($agentParam.Value.SupportedOS)])
 
@@ -1510,11 +1520,11 @@ foreach ($agentParamType in $agentConfGeneral.Policy.PSObject.Properties) {
                     $agentParam.Name -eq "ExcludeFilesFromProtectionWindows") {
                     if ($null -eq $agentParam.Value.Value.Applications -or $agentParam.Value.Value.Applications.Count -eq 0) {
                         # Array is empty
-                        $setting = "No Value"
-                        $settingHTML = "$setting"
+                        #$setting = "No Value"
+                        $settingHTML = "No Value"
                     } else {
                         # Process Array 
-                        $setting = ($agentParam.Value.Value.Applications | ForEach-Object { $_.displayName }) -join ", "
+                        #$setting = ($agentParam.Value.Value.Applications | ForEach-Object { $_.displayName }) -join ", "
                         $settingHTML = "<ul>" + ($agentParam.Value.Value.Applications | ForEach-Object { "<li>$($_.displayName)</li>" }) -join "`n" + "</ul>"
                     }
                     
@@ -1522,12 +1532,12 @@ foreach ($agentParamType in $agentConfGeneral.Policy.PSObject.Properties) {
                     foreach ($property in $agentParam.Value.Value.PSObject.Properties) {
                         $returnFileType = Get-FileTypesToScanForApplicationCatalog -ParamName $property.Name -ParamValue $property.Value
                     
-                        $setting += "$($property.Name): $returnFileType - "
+                        #$setting += "$($property.Name): $returnFileType - "
                         $paramHTML += "<li>$(Resolve-DisplayName -OriginalName $property.Name): $returnFileType</li>`n"
                     }
                     $settingHTML = "<ul>$paramHTML</ul>"
                 } else {
-                    $setting = Get-AdvancedParameters -paramObject $agentParam.Value.Value
+                    #$setting = Get-AdvancedParameters -paramObject $agentParam.Value.Value
                     $settingHTML = Get-AdvancedParametersHTML -paramObject $agentParam.Value.Value
                 }
 
@@ -1535,32 +1545,31 @@ foreach ($agentParamType in $agentConfGeneral.Policy.PSObject.Properties) {
                 # If the Value is an array
                 if ($null -eq $agentParam.Value.Value -or $agentParam.Value.Value.Count -eq 0) {
                     # Array is empty
-                    $setting = "No Value"
-                    $settingHTML = $setting
+                    #$setting = "No Value"
+                    $settingHTML = "No Value"
                 } else {
                     # Array has data, join elements with a comma
-                    $setting = $agentParam.Value.Value -join ", "
+                    #$setting = $agentParam.Value.Value -join ", "
                     $paramHTML = "<ul>" + ($agentParam.Value.Value | ForEach-Object { "<li>$_</li>" }) -join "`n" + "</ul>"
                     $settingHTML = $paramHTML
                 }
                 
             } else {
                 # If the value are  BOOL, INT, String or others
-                $setting = Resolve-Value -optionName $agentParam.Name -optionValue $agentParam.Value.Value
-                $settingHTML = $setting
+                #$setting = Resolve-Value -optionName $agentParam.Name -optionValue $agentParam.Value.Value
+                $settingHTML = Resolve-Value -optionName $agentParam.Name -optionValue $agentParam.Value.Value
             }
             
             $paramTypeName = Resolve-DisplayName -OriginalName $agentParamType.Name
             $paramName = Resolve-DisplayName -OriginalName $agentParam.Name
           
-            Write-Log " + - $($agentParam.Name) - $OS - $setting" INFO
+            #Write-Log " + - $($agentParam.Name) - $OS - $setting" INFO
           #  $htmlContent += "<tr><td>$paramTypeName</td><td>$paramName</td><td>$OS</td><td>$settingHTML</td></tr>"
             $confAgentTableBody += "<tr><td>$paramTypeName</td><td>$paramName</td><td>$OS</td><td>$settingHTML</td></tr>"
         }
     }
 }
 
-# Generate the HTML report
 $agentConfReport = Create-HTMLReport -ReportTitle "Agent Configuration" `
     -SubTitle "Configuration Policy: $($agentConfGeneral.Policy.Name)" `
     -SetName "SET: $($set.setName)" `
@@ -1568,13 +1577,5 @@ $agentConfReport = Create-HTMLReport -ReportTitle "Agent Configuration" `
     -TableBody $confAgentTableBody
 
 # Save to file
+Write-Log "Store Agent Configuration Report..." INFO
 Save-File -Content $agentConfReport -FileName "$($set.setName)_AgentConf.html" -DestFolder "$PSScriptRoot\\EPM_HC_Report"
-
-$defaultPolicyReport = Create-HTMLReport -ReportTitle "Default Policy" `
-    -SubTitle "" `
-    -SetName "SET: $($set.setName)" `
-    -TableHeader "<th>Policy Type</th>", "<th>Main Settings</th>", "<th>Extended Settings</th>"`
-    -TableBody $defaultPolicyTableBody
-
-# Save to file
-Save-File -Content $defaultPolicyReport -FileName "$($set.setName)_DefaultPolicy.html" -DestFolder "$PSScriptRoot\\EPM_HC_Report"
