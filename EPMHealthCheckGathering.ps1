@@ -1115,7 +1115,7 @@ $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -se
 
 Write-Log "Entering SET: $($set.setName)..." INFO -ForegroundColor Blue
 
-<#
+
 # Get Default policy
 Write-Log "Collecting Default Policy..." INFO -ForegroundColor Blue
 
@@ -1487,7 +1487,7 @@ $defaultPolicyReport = Create-HTMLReport -ReportTitle "Default Policy" `
 # Save to file
 Write-Log "Store Default Policy Report..." INFO
 Save-File -Content $defaultPolicyReport -FileName "$($set.setName)_DefaultPolicy.html" -DestFolder "$PSScriptRoot\\EPM_HC_Report"
-#>
+
 # Get Agent Configuration
 
 Write-Log "Collecting Advanced Agent General Configuration..." INFO -ForegroundColor Blue

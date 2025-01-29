@@ -3883,6 +3883,32 @@
                                                                                           "SupportedOS":  2
                                                                                       }
                                      },
+                   "IdpConf":  {
+                                   "MinUid":  {
+                                                  "Value":  0,
+                                                  "SupportedOS":  4
+                                              },
+                                   "MinGid":  {
+                                                  "Value":  0,
+                                                  "SupportedOS":  4
+                                              },
+                                   "UseShortName":  {
+                                                        "Value":  false,
+                                                        "SupportedOS":  4
+                                                    },
+                                   "CacheRefreshIntervalHours":  {
+                                                                     "Value":  0,
+                                                                     "SupportedOS":  4
+                                                                 },
+                                   "DefaultHomeDir":  {
+                                                          "Value":  null,
+                                                          "SupportedOS":  4
+                                                      },
+                                   "DefaultLoginShell":  {
+                                                             "Value":  null,
+                                                             "SupportedOS":  4
+                                                         }
+                               },
                    "Executors":  [
 
                                  ],

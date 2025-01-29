@@ -16,7 +16,7 @@
             "type": "PowerShell",
             "request": "launch",
             "script": "./EPMHealthCheckGathering.ps1",
-            "args": ["-username giulio.compagnone@cyber-ark.com -tenant eu -set \"[Giulio] Elevate(cyberark_16)\""]
+            "args": ["-username giulio.compagnone@cyber-ark.com -tenant eu -set \"[Giulio] Monitor(cyberark_16)\""]
         },
         {
             "name": "PowerShell: Launch EPMApplicationUpdateExample",
