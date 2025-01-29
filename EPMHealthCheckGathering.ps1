@@ -14,14 +14,15 @@
     The EPM tenant name (e.g., eu, uk).
 
 .NOTES
-    File: EPMHCGetInfo.ps1
+    File: EPMHealthCheckGathering.ps1
     Author: Giulio Compagnone
     Company: CyberArk
     Version: 0.1 - INTERNAL
     Date: 10/2024
     
 .EXAMPLE
-    .\EPMHCGetInfo.ps1 -username "user@domain" -setName "MySet" -tenant "eu"
+    .\EPMHealthCheckGathering.ps1 -username user@domain -tenant eu -set "Set Name" -log
+    
 #>
 
 param (

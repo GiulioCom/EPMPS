@@ -12,10 +12,10 @@
             "args": ["-username giulio.compagnone@cyber-ark.com -tenant eu -log"]            
         },
         {
-            "name": "PowerShell: Launch EPMHealthCheckTool",
+            "name": "PowerShell: Launch EPMHealthCheckGathering",
             "type": "PowerShell",
             "request": "launch",
-            "script": "./EPMHealthCheckTool.ps1",
+            "script": "./EPMHealthCheckGathering.ps1",
             "args": ["-username giulio.compagnone@cyber-ark.com -tenant eu -set \"[Giulio] Elevate(cyberark_16)\""]
         },
         {
