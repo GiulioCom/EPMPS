@@ -431,7 +431,7 @@ function Process-Application{
     # Set the threshold, the value can change based on policy type or policy action
     $threshold = 0
     
-    # Policy type Linux or MacOS 60, Widows = 90
+    # Policy type Linux or MacOS 60, Windows = 90
     if ($PolicyType -eq 12 -or $PolicyType -eq 13) {
         $threshold = 60
     } else {
@@ -559,7 +559,7 @@ function Process-Application{
     }
 
     if (!$unspportedAppType) {
-        # Evaluate common patter, such as HASH
+        # Evaluate common pattern, such as HASH
         switch ($appTypeName) {
             { ($_ -eq "EXE") -or ($_ -eq "Script") -or ($_ -eq "MSI") -or ($_ -eq "MSU") -or ($_ -eq "COM") -or ($_ -eq "DLL") -or 
               ($_ -eq "Linux command") -or ($_ -eq "macPKG") -or ($_ -eq "MacApplication") -or ($_ -eq "MacDMG") -or ($_ -eq "MacSUDO")} {
@@ -581,7 +581,7 @@ function Process-Application{
         # Evaluate global pattern, such as child process
         switch ($appTypeName) {
             { ($_ -eq "EXE") -or ($_ -eq "Script") -or ($_ -eq "DLL") } {
-            # If child process is enabled divide the total            
+            # If child process is enabled divide the total
                 if ($Application.childProcess -eq $true) {
                     $totalWeight = $totalWeight / 2
                     $matchedConditions += [PSCustomObject]@{

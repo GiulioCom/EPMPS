@@ -31,7 +31,21 @@
             "request": "launch",
             "script": "./EPMDuplicateAgentConf.ps1",
             "args": ["-username giulio.compagnone@cyber-ark.com -tenant eu -set \"[Giulio] Elevate(cyberark_16)\" -agentPolicyName \"ubuntu-2204-1\" -destCompName \"Ubuntu2004-1\""]
-        },     
+        }, 
+        {
+            "name": "PowerShell: Launch EPMPolicyValidator",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "./EPMPolicyValidator.ps1",
+            "args": ["-username giulio.compagnone@cyber-ark.com -tenant eu -set \"[Giulio] Monitor(cyberark_16)\" -ScanPolicies \"all\""]
+        },
+        {
+            "name": "EPMMoveComputer",
+            "type": "PowerShell",
+            "request": "launch",
+            "script": "./EPMMoveComputer.ps1",
+            "args": ["-username giulio.compagnone@cyber-ark.com -tenant eu -set \"[Giulio] Monitor(cyberark_16)\" -computerList \"computerlist.txt\" -destSetName \"[Giulio] Elevate(cyberark_16)\" -log"]
+        },           
         {
             "name": "PowerShell: Launch Current File",
             "type": "PowerShell",
