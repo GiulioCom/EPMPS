@@ -46,10 +46,17 @@ param (
     [Parameter(HelpMessage = "Specify the log file path")]
     [string]$logFolder,
 
-    [Parameter(Mandatory = $true, HelpMessage = "Please provide the agent configuration policy name used as source for policy settings.")]
+    [Parameter(ParameterSetName="Copy", Mandatory = $true, HelpMessage = "Copy settings from sourceAgentConf to destCompName.")]
+    [switch]$copy,
+
+    [Parameter(ParameterSetName="Delete", Mandatory = $true, HelpMessage = "Delete the specified agent configuration.")]
+    [switch]$delete,
+
+    [Parameter(ParameterSetName="Copy", Mandatory = $true, HelpMessage = "Provide the source agent configuration policy name.")]
+    [Parameter(ParameterSetName="Delete", Mandatory = $true, HelpMessage = "Provide the agent configuration policy name to delete.")]
     [string]$agentPolicyName,
 
-    [Parameter(Mandatory = $true, HelpMessage = "Please provide the computer name where the policy will apply.")]
+    [Parameter(ParameterSetName="Copy", Mandatory = $true, HelpMessage = "Provide the destination computer name.")]
     [string]$destCompName
 )
 
@@ -357,12 +364,12 @@ function Get-ComputerID {
     
     if ($getComputers.Computers.length -eq 0 ) {
         Write-Log "No Computer named $compName was found, please refine your search." ERROR
-        exit
+        exit 1
     } elseif ($getComputers.Computers.length -gt 1) {
         Write-Log "To many device found having name $compName was found, please refine your search." ERROR
-        exit
+        exit 1
     } else {
-        Write-Log "$compName having ID: $($getComputers.Computers[0].AgentId)" INFO
+        # Write-Log "$compName having ID: $($getComputers.Computers[0].AgentId)" INFO
         return $getComputers.Computers[0].AgentId
     }
 }
@@ -383,6 +390,12 @@ if ($log) {
 
 Write-Box "$scriptName"
 
+# Validate that only one action flag is used
+if ($copy -and $delete) {
+    Write-Log "Error: You cannot use both -copy and -delete together. Please choose only one action." ERROR
+    exit 1
+}
+
 # Request EPM Credentials
 $credential = Get-Credential -UserName $username -Message "Enter password for $username"
 
@@ -398,34 +411,38 @@ $sessionHeader = @{
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
 # Get the agent configuration policy 
-
-$agentConfDetails = ""
-$destCompId = ""
-
+$agentConfDetails = $null
 Write-Log "Searching from Agent Configuration name: $agentPolicyName" INFO
 $agentPolicies = Invoke-EPMRestMethod -URI "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/AgentConfiguration/Search" -Method 'POST' -Headers $sessionHeader
 foreach ($agentPolicy in $agentPolicies.Policies) {
     if ($agentPolicy.PolicyName -eq $agentPolicyName) {
+        Write-Log "Agent Configuration '$agentPolicyName' found! Retrieving details..." INFO
         $agentConfDetails = Invoke-EPMRestMethod -URI "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/AgentConfiguration/$($agentPolicy.PolicyId)" -Method 'GET' -Headers $sessionHeader
         $agentConfDetails = $agentConfDetails.Policy
-        Write-Log "Agent Configuration name $agentPolicyName found!" INFO
+        Write-Log "Successfully retrieved agent configuration details." INFO
+        Break
     }
 }
 
-if ($agentConfDetails -eq "") {
+# Check if the agent conf is there
+if (-not $agentConfDetails) {
     Write-Log "Agent Configuration name $agentPolicyName does not exist. Check the policy name!" ERROR
-    exit
-} else {
+    exit 1
+}
+
+if ($copy) {
+    Write-Log "Starting copy operation from '$agentPolicyName' to '$destCompName'." INFO
+    
     $destCompId = Get-ComputerID -compName $destCompName
 
-    # Remove the ID
+    # Remove the ID from the conf policy 
     $agentConfDetails.PSObject.Properties.Remove("Id")
     
-    # Update Agent ID and Computer Name
+    # Update Agent ID and Computer Name from the conf policy
     $agentConfDetails.Executors[0].id = $destCompId
     $agentConfDetails.Executors[0].Name = $destCompName
     
-    # Update Policy Name
+    # Update Policy Name from the conf policy
     $agentConfDetails.Name = $destCompName
 
     #Convert policy as JSON ready to be uploaded
@@ -433,4 +450,16 @@ if ($agentConfDetails -eq "") {
     # Upload Application Group Details
     Write-Log "Uploading Agent Configuration for $destCompName..." INFO
     $uploadAgentConf = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/AgentConfiguration" -Method 'POST' -Headers $sessionHeader -Body $JSONagentConfDetails
-}    
+
+}
+elseif ($delete) {
+    Write-Log "Starting delete operation for agent configuration '$agentPolicyName'." INFO
+
+    $deleteAgentConf = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/AgentConfiguration/$($agentConfDetails.Id)" -Method 'DELETE' -Headers $sessionHeader
+}
+else {
+    Write-Log "Error: You must specify either -copy or -delete." ERROR
+    exit 1
+}
+
+

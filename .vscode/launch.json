@@ -26,14 +26,15 @@
             "args": ["-username giulio.compagnone@cyber-ark.com -tenant eu -set \"[Giulio] Monitor(cyberark_16)\" -log"]
         },
         {
-            "name": "PowerShell: Launch EPMDuplicateAgentConf",
+            "name": "EPMDuplicateAgentConf",
             "type": "PowerShell",
             "request": "launch",
             "script": "./EPMDuplicateAgentConf.ps1",
-            "args": ["-username giulio.compagnone@cyber-ark.com -tenant eu -set \"[Giulio] Elevate(cyberark_16)\" -agentPolicyName \"ubuntu-2204-1\" -destCompName \"Ubuntu2004-1\""]
+            "args": ["-username giulio.compagnone@cyber-ark.com -tenant eu -set \"[Giulio] Elevate(cyberark_16)\" -copy -agentPolicyName \"Ubuntu-4\" -destCompName \"Ubuntu2004-1\""]
+            //"args": ["-username giulio.compagnone@cyber-ark.com -tenant eu -set \"[Giulio] Elevate(cyberark_16)\" -delete -agentPolicyName \"Ubuntu2004-1\""]
         }, 
         {
-            "name": "PowerShell: Launch EPMPolicyValidator",
+            "name": "EPMPolicyValidator",
             "type": "PowerShell",
             "request": "launch",
             "script": "./EPMPolicyValidator.ps1",

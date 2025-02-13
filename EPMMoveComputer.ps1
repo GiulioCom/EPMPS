@@ -26,7 +26,7 @@
     Last Modified: 02/2025
 
 .EXAMPLE
-    .\EPMMoveComputers.ps1 -username user@domain -tenant eu -set "Set Name" -computerList "file" -destSetName "dest Set Name"  -log
+    .\EPMMoveComputers.ps1 -username user@domain -tenant eu -set "Set Name" -computerList "file" -destSetName "dest Set Name" -log
 #>
 
 param (
