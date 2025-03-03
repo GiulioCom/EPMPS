@@ -359,20 +359,21 @@ function Add-msToTimestamp {
         [string]$timestamp
     )
 
-    # Use a regex to parse and modify the timestamp
-    if ($timestamp -match '^(?<Date>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.)(?<Milliseconds>\d+)(?<Zone>Z)$') {
-        # Extract components
+    if ($timestamp -match '^(?<Date>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(?<Milliseconds>\d+))?(?<Zone>Z)$') {
+        
         $datePart = $Matches['Date']
         $milliseconds = $Matches['Milliseconds']
         $zone = $Matches['Zone']
 
-        # Add '001' to the millisecond part, ensuring 3 digits
-        $newMilliseconds = $milliseconds.PadRight(3, '0')
-        $newMilliseconds = [int]$newMilliseconds + 1
-        $newMilliseconds = $newMilliseconds.ToString().PadLeft(3, '0')
+        # Ensure milliseconds are always three digits
+        $milliseconds = if ($null -eq $milliseconds) { "000" } else { $milliseconds.PadRight(3, '0') }
 
-        # Construct the new timestamp
-        return "$datePart$newMilliseconds$zone"
+        $datems = "$datePart.$milliseconds"
+        
+        # Convert to integer and add 1 millisecond
+        $newDate = [datetime]::ParseExact($datems, "yyyy-MM-ddTHH:mm:ss.fff", $null).AddMilliseconds(1).ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+        return $newDate
+           
     } else {
         throw "Invalid timestamp format: $timestamp"
     }
@@ -451,8 +452,6 @@ Write-Log $($events | Convertto-Json -Depth 10) INFO
 if ($events.filteredCount -gt 0) {
     Write-Log "Found $($events.filteredCount) Manual Request from $lastEventTimestamp" INFO
 
-    $count = 1
-
     foreach ($event in $events.events) {
 
         # Create JIT policy
@@ -497,17 +496,11 @@ if ($events.filteredCount -gt 0) {
             Write-Log "Error creating policy for $($event.userName) on $($event.computerName)" ERROR
         }
         
-        if ($count -eq $events.filteredCount) {
-            # Add ms to firstEventDate to improve the next search
-            $newfirstEventDate = Add-msToTimestamp -timestamp $event.firstEventDate
-            # Update last event timestamp in the log file
-            
-            Write-Log "The last event date $($event.firstEventDate), save last event date $newfirstEventDate in $lastEventFile" INFO
-            $newfirstEventDate | Set-Content -Path $lastEventFile -Force
-        }
-        $count++
+        # Update lastevents file
+        $newfirstEventDate = Add-msToTimestamp -timestamp $event.firstEventDate
+        Write-Log "The last event date $($event.firstEventDate), save last event date $newfirstEventDate in $lastEventFile" INFO
+        $newfirstEventDate | Set-Content -Path $lastEventFile -Force
     }
-
 } else {
     Write-Log "No new Manual Request from $lastEventTimestamp" INFO
 }
