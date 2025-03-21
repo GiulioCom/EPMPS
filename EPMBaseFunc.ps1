@@ -103,67 +103,54 @@ function Write-Box {
     Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
 }
 
-function Invoke-EPMRestMethod  {
-<#
-.SYNOPSIS
-    Invokes a REST API method with automatic retry logic in case of transient failures.
-
-.DESCRIPTION
-    This function is designed to make REST API calls with automatic retries in case of specific errors, such as rate limiting.
-    It provides a robust way to handle transient failures and ensures that the API call is retried a specified number of times.
-
-.PARAMETER URI
-    The Uniform Resource Identifier (URI) for the REST API endpoint.
-
-.PARAMETER Method
-    The HTTP method (e.g., GET, POST, PUT, DELETE) for the API call.
-
-.PARAMETER Body
-    The request body data to be sent in the API call (can be null for certain methods).
-
-.PARAMETER Headers
-    Headers to include in the API request.
-#>
+function Invoke-EPMRestMethod {
     param (
         [string]$URI,
         [string]$Method,
-        [object]$Body,
-        [hashtable]$Headers
+        [object]$Body = $null,
+        [hashtable]$Headers = @{},
+        [int]$MaxRetries = 3,
+        [int]$RetryDelay = 120
     )
 
-    $apiDelaySeconds = 120
-    $maxRetries = 3
     $retryCount = 0
 
-    while ($retryCount -lt $maxRetries) {
+    while ($retryCount -lt $MaxRetries) {
         try {
+            # Write-Log "Attempt #$($retryCount + 1): Calling API: $URI with Method: $Method" INFO
             $response = Invoke-RestMethod -Uri $Uri -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
             return $response
         }
         catch {
-            # Convert Error message to Powershell Object
+            #$errorMessage = $_.Exception.Message
+            $ErrorDetailsMessage = $null
+
+            # Extract API error details if available
             if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
-                $ErrorDetailsMessage = $_.ErrorDetails.Message | ConvertFrom-Json
-            }
-            else {
-                throw "API call failed. $_"
+                try {
+                    $ErrorDetailsMessage = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction SilentlyContinue
+                }
+                catch {
+                    Write-Log "Failed to parse error message as JSON. Raw message: $($_.ErrorDetails.Message)" WARN
+                }
             }
 
-            # Error: EPM00000AE - Too many calls per 2 minute(s). The limit is 10
-            if ( $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
-                Write-Log $ErrorDetailsMessage.ErrorMessage ERROR
-                Write-Log "Retrying in $apiDelaySeconds seconds..." WARN
-                Start-Sleep -Seconds $apiDelaySeconds
+            # Handle rate limit error (EPM00000AE)
+            if ($ErrorDetailsMessage -and $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
+                Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
+                Start-Sleep -Seconds $RetryDelay
                 $retryCount++
-            }
-            else {
-                throw "API call failed. ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
+            } else {
+                # Log error only if it's NOT the handled EPM00000AE error
+                Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
+                throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
             }
         }
     }
 
-    # If all retries fail, handle accordingly
-    throw "API call failed after $RetryCount retries."
+    # If all retries fail, log and throw an error
+    Write-Log "API call failed after $MaxRetries retries. URI: $URI" ERROR
+    throw "API call failed after $MaxRetries retries."
 }
 
 function Connect-EPM {
@@ -185,27 +172,44 @@ function Connect-EPM {
 
     #>
     param (
+        [Parameter(Mandatory = $true)]
         [pscredential]$credential,  # Credential object containing the username and password
+
+        [Parameter(Mandatory = $true)]
         [string]$epmTenant          # EPM tenant name
     )
 
     # Convert credential information to JSON for authentication
     $authBody = @{
-        Username = $credential.UserName
-        Password = $credential.GetNetworkCredential().Password
+        Username      = $credential.UserName
+        Password      = $credential.GetNetworkCredential().Password
         ApplicationID = "Powershell"
-    } | ConvertTo-Json
+    } | ConvertTo-Json -Depth 3
 
     $authHeaders = @{
         "Content-Type" = "application/json"
     }
 
-    $response = Invoke-EPMRestMethod -URI "https://$epmTenant.epm.cyberark.com/EPM/API/Auth/EPM/Logon" -Method 'POST' -Headers $authHeaders -Body $authBody
+    try {
+        # Write-Log "Attempting to connect to EPM tenant: $epmTenant" INFO
+        $response = Invoke-EPMRestMethod -URI "https://$epmTenant.epm.cyberark.com/EPM/API/Auth/EPM/Logon" -Method 'POST' -Headers $authHeaders -Body $authBody
 
-    # Return a custom object with connection information
-    [PSCustomObject]@{
-        managerURL = $($response.ManagerURL)
-        auth       = $($response.EPMAuthenticationResult)
+        # Ensure the response contains the expected fields
+        if (-not $response -or -not $response.ManagerURL -or -not $response.EPMAuthenticationResult) {
+            throw "EPM authentication failed: Missing expected response fields."
+        }
+
+        # Write-Log "Successfully connected to EPM tenant: $epmTenant" INFO
+
+        # Return a custom object with connection information
+        return [PSCustomObject]@{
+            managerURL = $response.ManagerURL
+            auth       = $response.EPMAuthenticationResult
+        }
+    }
+    catch {
+        Write-Log "Failed to connect to EPM tenant: $epmTenant. Error: $_" ERROR
+        throw "Error connecting to EPM: $_"
     }
 }
 
@@ -220,80 +224,95 @@ function Get-EPMSetID {
     .PARAMETER managerURL
     The URL of the EPM manager.
 
-    .PARAMETER authToken
-    The authorization token for authentication.
+    .PARAMETER Headers
+    The authorization headers.
 
     .PARAMETER setName
     The name of the EPM set to retrieve.
 
     .OUTPUTS
     A custom object with the properties "setId" and "setName" representing the EPM set information.
-
     #>
+
     param (
+        [Parameter(Mandatory = $true)]
         [string]$managerURL,
+
+        [Parameter(Mandatory = $true)]
         [hashtable]$Headers,
+
         [string]$setName
     )
 
-    $sets = Invoke-EPMRestMethod -URI "$managerURL/EPM/API/Sets" -Method 'GET' -Headers $Headers
-    
-    $setId = $null
+    # Retrieve list of sets
+    try {
+        #Write-Log "Retrieving EPM Sets from: $managerURL" INFO
+        $sets = Invoke-EPMRestMethod -URI "$managerURL/EPM/API/Sets" -Method 'GET' -Headers $Headers
 
-    # Check if $SetName is empty
-    if ([string]::IsNullOrEmpty($setName)) {
+        if (-not $sets -or -not $sets.Sets) {
+            throw "No sets retrieved from EPM."
+        }
+    }
+    catch {
+        Write-Log "Failed to retrieve EPM Sets. Error: $_" ERROR
+        throw "Could not retrieve EPM sets."
+    }
 
-        # Repeat until a valid set number is entered
-        do {
-            # List the available sets with numbers
-            Write-Box "Available Sets:" INFO
-            $numberSets = 0
-            foreach ($set in $sets.Sets) {
-                Write-Log "$($numberSets + 1). $($set.Name)" INFO DarkCyan
-                $numberSets++
+    #$setId = $null
+
+    # If setName is provided, search for it directly
+    if (-not [string]::IsNullOrEmpty($setName)) {
+        $selectedSet = $sets.Sets | Where-Object { $_.Name -eq $setName } | Select-Object -First 1
+
+        if ($selectedSet) {
+            return [PSCustomObject]@{
+                setId   = $selectedSet.Id
+                setName = $selectedSet.Name
             }
-        
-            # Ask the user to choose a set by number
-            $chosenSetNumber = Read-Host "Enter the number of the set you want to choose"
-        
-            # Validate the chosen set number
-            try {
-                $chosenSetNumber = [int]$chosenSetNumber
-        
-                if ($chosenSetNumber -lt 1 -or $chosenSetNumber -gt $numberSets) {
-                    Write-Log "Invalid set number. Please enter a number between 1 and $numberSets." ERROR
-                } else {
-                    # Set chosenSet based on the user's selection
-                    $chosenSet = $sets.Sets[$chosenSetNumber - 1]
-                    $setId = $chosenSet.Id
-                    $setName = $chosenSet.Name
+        } else {
+            Write-Log "Error: Set '$setName' not found in EPM." ERROR
+            throw "Invalid Set Name: $setName"
+        }
+    }
+
+    # If no setName is provided, prompt the user to select one
+    #Write-Log "No set name provided. Listing available sets for selection..." INFO
+
+    if ($sets.Sets.Count -eq 0) {
+        Write-Log "No sets available in EPM." ERROR
+        throw "No sets found. Cannot proceed."
+    }
+
+    Write-Box "Available Sets:" INFO
+
+    for ($i = 0; $i -lt $sets.Sets.Count; $i++) {
+        Write-Log "$($i + 1). $($sets.Sets[$i].Name)" INFO DarkCyan
+    }
+
+    # Prompt user for input with max retries
+    $maxRetries = 3
+    for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+        $chosenSetNumber = Read-Host "Enter the number of the set you want to choose"
+
+        try {
+            $chosenSetNumber = [int]$chosenSetNumber
+
+            if ($chosenSetNumber -ge 1 -and $chosenSetNumber -le $sets.Sets.Count) {
+                $chosenSet = $sets.Sets[$chosenSetNumber - 1]
+                return [PSCustomObject]@{
+                    setId   = $chosenSet.Id
+                    setName = $chosenSet.Name
                 }
-            } catch {
-                Write-Log "Invalid input. Please enter a valid number." ERROR
-            }
-        } until ($setId)
-    }
-    
-    else {
-        # List the sets with numbers
-        foreach ($set in $sets.Sets) {
-            # Check if setname matches with the configured set
-            if ($set.Name -eq $SetName) {
-                $setId = $set.Id
-                break  # Exit the loop once the set is found
+            } else {
+                Write-Log "Invalid selection. Please enter a number between 1 and $($sets.Sets.Count)." ERROR
             }
         }
-        if ([string]::IsNullOrEmpty($setId)) {
-            Write-Log "$SetName : Invalid Set" ERROR
-            return
+        catch {
+            Write-Log "Invalid input. Please enter a valid number." ERROR
         }
     }
 
-    # Return a custom object with set information
-    [PSCustomObject]@{
-        setId   = $setId
-        setName = $setName
-    }
+    throw "Maximum attempts reached. Exiting set selection."
 }
 
 ### Begin Script ###
