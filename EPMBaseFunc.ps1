@@ -367,12 +367,12 @@ Write-Log $set.SetId INFO
 
 #Example Request 
 
-# Wring Body
-$policyFilter = @{
-    "filter" = "Active EQ true AND Action IN 3,4 AND PolicyType EQ ADV_WIN"
-}  | ConvertTo-Json
-
-Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search" -Method 'POST' -Headers $sessionHeader -Body $policyFilter
+# Wrong Body
+#$policyFilter = @{
+#    "filter" = "Active EQ true AND Action IN 3,4 AND PolicyType EQ ADV_WIN"
+#}  | ConvertTo-Json
+#
+#Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search" -Method 'POST' -Headers $sessionHeader -Body $policyFilter
 
 
 $retryCount = 0
