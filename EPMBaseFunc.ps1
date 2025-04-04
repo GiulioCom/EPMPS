@@ -141,9 +141,16 @@ function Invoke-EPMRestMethod {
                 Start-Sleep -Seconds $RetryDelay
                 $retryCount++
             } else {
-                # Log error only if it's NOT the handled EPM00000AE error
-                Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
-                throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
+                # Handle Body possible filter error 
+                if ($ErrorDetailsMessage.ErrorCode -eq "EPM000002E" -and $null -ne $Body) {
+                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
+                    Write-Log "Please verify the filter body if present, as it could be the cause of this error code." ERROR
+                    throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
+                } else {
+                    # Log error only if it's NOT the handled EPM00000AE error
+                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
+                    throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
+                }
             }
         }
     }
@@ -336,12 +343,6 @@ $logFileName = "$timestamp`_$scriptName.log"
 $logFilePath = Join-Path $logFolder $logFileName
 ##
 
-## Script Title
-# Get the full path and file name of the current script
-#$scriptFullPath = $PSCommandPath
-# Extract just the file name
-#$scriptName = [System.IO.Path]::GetFileName($scriptFullPath)
-
 Write-Box "$scriptName"
 ##
 
@@ -365,6 +366,14 @@ Write-Log $set.SetId INFO
 
 
 #Example Request 
+
+# Wring Body
+$policyFilter = @{
+    "filter" = "Active EQ true AND Action IN 3,4 AND PolicyType EQ ADV_WIN"
+}  | ConvertTo-Json
+
+Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search" -Method 'POST' -Headers $sessionHeader -Body $policyFilter
+
 
 $retryCount = 0
 do {
