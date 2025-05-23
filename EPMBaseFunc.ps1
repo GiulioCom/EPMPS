@@ -104,6 +104,27 @@ function Write-Box {
 }
 
 function Invoke-EPMRestMethod {
+    <#
+    .SYNOPSIS
+        Invokes a REST API method with automatic retry logic in case of transient failures.
+
+    .DESCRIPTION
+        This function is designed to make REST API calls with automatic retries in case of specific errors, such as rate limiting.
+        It provides a robust way to handle transient failures and ensures that the API call is retried a specified number of times.
+
+    .PARAMETER URI
+        The Uniform Resource Identifier (URI) for the REST API endpoint.
+
+    .PARAMETER Method
+        The HTTP method (e.g., GET, POST, PUT, DELETE) for the API call.
+
+    .PARAMETER Body
+        The request body data to be sent in the API call (can be null for certain methods).
+
+    .PARAMETER Headers
+        Headers to include in the API request.
+    #>
+    
     param (
         [string]$URI,
         [string]$Method,

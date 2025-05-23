@@ -224,7 +224,8 @@ function Invoke-EPMRestMethod  {
         throw "API call failed after $RetryCount retries."
     }
     
-function Connect-EPM {
+
+    function Connect-EPM {
     <#
     .SYNOPSIS
     Connects to the EPM (Enterprise Password Vault) using the provided credentials and tenant information.
