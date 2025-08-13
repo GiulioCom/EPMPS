@@ -1,8 +1,14 @@
 <#
 .SYNOPSIS
-    
+    Demo script to Get Events based on the filter (Privilege Management) and store in a file in orginal JSON format.
+    Docs:
+    - Get detailed raw events: https://docs.cyberark.com/epm/24.5/en/content/webservices/getdetailedrawevents.htm
+
 
 .DESCRIPTION
+    1. Retrieve events from EPM that occurred after the last stored timestamp.
+    2. Create JIT policies in EPM based on the retrieved events.
+    3. Update the log file with the latest event timestamp.
 
 .PARAMETER username
     The EPM username (e.g., user@domain).
@@ -13,17 +19,16 @@
 .PARAMETER tenant
     The EPM tenant name (e.g., eu, uk).
 
-.PARAMETER destinationFolder
-
-
 .NOTES
-    File: EPMAddComputertoPolicy.ps1
+    File: EPMGetEvents.ps1
     Author: Giulio Compagnone
     Company: CyberArk
-    Version: 2
-    Created: 05/2023
-    Last Modified: 07/2025
-    # Adding file to store the computer already managed
+    Version: 0.1 - POC
+    Date: 06/2025
+
+.EXAMPLE
+    1. .\EPMGetEvents.ps1 -username "user@domain" -setName "MySet" -tenant "eu"
+        Get events in the set and store in the current folder
 #>
 
 param (
@@ -31,7 +36,7 @@ param (
     [string]$username,
 
     [Parameter(HelpMessage="Please enter valid EPM set name")]
-    [string]$setName,
+    [string]$setName = "",
 
     [Parameter(Mandatory = $true, HelpMessage="Please enter valid EPM tenant (eu, uk, ....)")]
     [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch")]
@@ -41,14 +46,9 @@ param (
     [switch]$log,
 
     [Parameter(HelpMessage = "Specify the log file path")]
-    [string]$logFolder,
-
-    [Parameter(Mandatory=$true)]
-    [string]$policyFile
-
+    [string]$logFolder
 )
 
-# Function to log messages to console and file
 function Write-Log {
     param (
         [Parameter(Mandatory = $true)]
@@ -106,6 +106,49 @@ function Write-Box {
     Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
     Write-Log "| $title |" -severity INFO -ForegroundColor Cyan
     Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
+}
+
+function Resolve-Folder {
+    param (
+        [string]$ProvidedFolder,
+        [string]$DefaultSubFolder
+    )
+
+    # Determine the script directory or fallback to current directory
+    $scriptDirectory = if ($MyInvocation.MyCommand.Path) {
+        Split-Path -Parent $MyInvocation.MyCommand.Path
+    } else {
+        Get-Location
+    }
+
+    # Use the provided folder or create a default subfolder
+    $resolvedFolder = if ($ProvidedFolder) {
+        $ProvidedFolder
+    } else {
+        Join-Path $scriptDirectory $DefaultSubFolder
+    }
+
+    # Ensure the folder exists
+    if (-not (Test-Path $resolvedFolder)) {
+        New-Item -Path $resolvedFolder -ItemType Directory -Force | Out-Null
+    }
+
+    return $resolvedFolder
+}
+
+function Remove-InvalidCharacters {
+    param (
+        [Parameter(Mandatory)]
+        [string]$InputString
+    )
+
+    # Define invalid characters for file names
+    $invalidCharacters = '[\\/:*?"<>|[\]]'
+
+    # Remove invalid characters
+    $sanitizedString = $InputString -replace $invalidCharacters, ''
+
+    return $sanitizedString
 }
 
 function Invoke-EPMRestMethod {
@@ -185,7 +228,7 @@ function Invoke-EPMRestMethod {
     Write-Log "API call failed after $MaxRetries retries. URI: $URI" ERROR
     throw "API call failed after $MaxRetries retries."
 }
-
+    
 function Connect-EPM {
     <#
     .SYNOPSIS
@@ -245,7 +288,7 @@ function Connect-EPM {
         throw "Error connecting to EPM: $_"
     }
 }
-
+    
 function Get-EPMSetID {
     <#
     .SYNOPSIS
@@ -348,6 +391,31 @@ function Get-EPMSetID {
     throw "Maximum attempts reached. Exiting set selection."
 }
 
+function Add-msToTimestamp {
+    param (
+        [string]$timestamp
+    )
+
+    if ($timestamp -match '^(?<Date>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(?<Milliseconds>\d+))?(?<Zone>Z)$') {
+        
+        $datePart = $Matches['Date']
+        $milliseconds = $Matches['Milliseconds']
+        $zone = $Matches['Zone']
+
+        # Ensure milliseconds are always three digits
+        $milliseconds = if ($null -eq $milliseconds) { "000" } else { $milliseconds.PadRight(3, '0') }
+
+        $datems = "$datePart.$milliseconds"
+        
+        # Convert to integer and add 1 millisecond
+        $newDate = [datetime]::ParseExact($datems, "yyyy-MM-ddTHH:mm:ss.fff", $null).AddMilliseconds(1).ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+        return $newDate
+           
+    } else {
+        throw "Invalid timestamp format: $timestamp"
+    }
+}
+
 ### Begin Script ###
 
 ## Prepare log folder and file
@@ -387,124 +455,21 @@ $sessionHeader = @{
 # Get SetId
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
-# Check the policyFile
-if (-not (Test-Path $policyFile)) {
-    Write-Log "The specified CSV file '$policyFile' was not found." ERROR
-    exit 1
-}
-
-# Import the CSV
-try {
-    $policyContent = Import-Csv -Path $policyFile -Header ComputerName,Policies
-}
-catch {
-    Write-Warning "Failed to import CSV file '$policyFile'. Please check its format."
-    throw $_.Exception.Message
-}
-
-$csvComputerNames = $policyContent | Select-Object -ExpandProperty ComputerName
-
-## Store the processed endpoint in a file
-# Create or update the endpoint processed file
-$endpointsProcFile = "EndpointsProcessed.txt"
-$endpointsProc = ""
-# Check if the file exists
-if (Test-Path $endpointsProcFile -PathType Leaf) {
-    #Write-Log "Found Endoints processed file: $endpointsProcFile" INFO
-    # Load the file content
-    $endpointsProc = Get-Content $endpointsProcFile
-} else {
-    Set-Content -Path $endpointsProcFile -Value $endpointsProc -Force
-}
-
-$endpointsProc
-
-#Get the policies list
-$policiesFilter = @{
-    "filter" = "PolicyType EQ ADV_WIN"
+# Get Events
+$eventsFilter = @{
+    "filter" = "eventType IN ElevationRequest"
 }  | ConvertTo-Json
 
-$getPolicies = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search" -Method 'POST' -Headers $sessionHeader -Body $policiesFilter
+$events = Invoke-EPMRestMethod -URI "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Events/Search?limit=1000&sortDir=asc" -Method 'POST' -Headers $sessionHeader -Body $eventsFilter
 
-# Store in hashtable for faster access
-$retrievedPoliciesMap = @{}
+# Convert result in JSON
+$eventsJSON = $events | ConvertTo-Json -Depth 10
 
-foreach ($retrievedPolicy in $getPolicies.Policies) {
-    $retrievedPoliciesMap[$retrievedPolicy.PolicyName] = $retrievedPolicy.PolicyId
-}
+# Construct the full path to the output file.
+$eventsFileName = "PMEvents.json"
+$outputFilePath = Join-Path -Path $PSScriptRoot -ChildPath $eventsFileName
 
-# Get the computer list
-$getComputerList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers" -Method 'GET' -Headers $sessionHeader
+# Write in file
+$eventsJSON | Set-Content -Path $outputFilePath -Encoding UTF8
 
-foreach ($computer in $getComputerList.Computers) {
-    Write-Log "Processing computer: $($computer.ComputerName)" INFO
-    # Search the Computer Name in the CSV file
-    if ($csvComputerNames.Contains($computer.ComputerName)) {
-        if (!$endpointsProc.Contains($computer.ComputerName)){
-            Write-Log "Processing computer: $($computer.ComputerName)" INFO
-
-            $csvComputerName = $policyContent | Where-Object { $_.ComputerName -eq $computer.ComputerName }
-            $csvPoliciesName = $csvComputerName.Policies -split ';' | ForEach-Object { $_.Trim() }
-            foreach ($policy in $csvPoliciesName) {
-                Write-Log "Processing policy: $($policy)" INFO
-
-                # Check if the policy exist
-                If ($null -eq $($retrievedPoliciesMap[$policy])) {
-                    Write-Log "$($policy) not valid." ERROR
-                    Continue
-                }
-                
-                $getPolicy = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/$($retrievedPoliciesMap[$policy])" -Method 'GET' -Headers $sessionHeader
-                
-                # Forcing not applied to all computers
-                $getPolicy.Policy.IsAppliedToAllComputers=$False
-                
-                # Forcing policy Enabled
-                $getPolicy.Policy.IsActive=$True
-
-                ## Process the Executors
-                # Flag to determine if the computer was found in the existing executors
-                $computerFoundInExecutors = $false
-
-                # Iterate through existing executors to check if the computer name already exists
-                foreach ($executor in $getPolicy.Policy.Executors) {
-                    if ($executor.Name -eq $computer.ComputerName) {
-                        
-                        $computerFoundInExecutors = $true
-                        break # Exit the inner foreach loop as soon as it's found
-                    }
-                }
-
-                if ($computerFoundInExecutors) {
-                    Write-Log "Computer '$($computer.ComputerName)' already exists in policy executors. Skipping policy update for this computer." WARN
-                    # process other computers if there are any
-                    #continue 
-                } else {
-                    Write-Log "Computer '$($computer.ComputerName)' not found in policy executors. Adding it." INFO
-
-                    $newExecutor = [PSCustomObject]@{
-                        "Id"           = $computer.AgentId
-                        "Name"         = $computer.ComputerName
-                        "IsIncluded"   = $true
-                        "ExecutorType" = 1
-                    }
-                    ## Process the Executors Done
-
-                    # Upload the policy
-                    $getPolicy.Policy.Executors += $newExecutor
-                    
-                    $newPolicyJSON = $getPolicy.Policy | ConvertTo-Json -Depth 10
-                    $updatePolicy = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/$($retrievedPoliciesMap[$policy])" -Method 'PUT' -Headers $sessionHeader -Body $newPolicyJSON
-                    Write-Log "$($policy) updated correctly." INFO
-                }
-                # Add the Endopoint in the tracker file
-                #$endpointsProc += $computer.ComputerName
-                Add-Content -Path $endpointsProcFile -Value $computer.ComputerName
-                Write-Log "Tracker file $endpointsProcFile updated." INFO
-            }
-        } else {
-            Write-Log "Computer '$($computer.ComputerName)' already processed (in file $endpointsProcFile). Skipping." WARN
-        }
-    }
-}
-
+#Write-Log $($events | Convertto-Json -Depth 10) INFO

@@ -1,8 +1,10 @@
 <#
 .SYNOPSIS
-    
+    Add application definition defined in a variable to a Application Group    
 
 .DESCRIPTION
+    Application defined in the variable $AppDefinition
+    Application Group defined in the variable $targetAppGroup
 
 .PARAMETER username
     The EPM username (e.g., user@domain).
@@ -13,17 +15,21 @@
 .PARAMETER tenant
     The EPM tenant name (e.g., eu, uk).
 
-.PARAMETER destinationFolder
+.PARAMETER log
+    Enable logging to file and console
 
+.PARAMETER logFolder
+    Specify the log file path
+
+.EXAMPLE
+    EPMAddApplication.ps1 -username username@domain -tenant eu
 
 .NOTES
-    File: EPMAddComputertoPolicy.ps1
+    File: EPMAddApplicaion.ps1
     Author: Giulio Compagnone
     Company: CyberArk
-    Version: 2
-    Created: 05/2023
-    Last Modified: 07/2025
-    # Adding file to store the computer already managed
+    Version: 0.1
+    Created: 06/2025
 #>
 
 param (
@@ -41,11 +47,7 @@ param (
     [switch]$log,
 
     [Parameter(HelpMessage = "Specify the log file path")]
-    [string]$logFolder,
-
-    [Parameter(Mandatory=$true)]
-    [string]$policyFile
-
+    [string]$logFolder 
 )
 
 # Function to log messages to console and file
@@ -387,124 +389,85 @@ $sessionHeader = @{
 # Get SetId
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
-# Check the policyFile
-if (-not (Test-Path $policyFile)) {
-    Write-Log "The specified CSV file '$policyFile' was not found." ERROR
-    exit 1
-}
+# Define Application as JSON, ready to be addded to the applications array in an Application Group or Policy
+# For the full list of options:  https://docs.cyberark.com/epm/25.4.0/en/content/webservices/applicationpatterns.htm
 
-# Import the CSV
-try {
-    $policyContent = Import-Csv -Path $policyFile -Header ComputerName,Policies
-}
-catch {
-    Write-Warning "Failed to import CSV file '$policyFile'. Please check its format."
-    throw $_.Exception.Message
-}
-
-$csvComputerNames = $policyContent | Select-Object -ExpandProperty ComputerName
-
-## Store the processed endpoint in a file
-# Create or update the endpoint processed file
-$endpointsProcFile = "EndpointsProcessed.txt"
-$endpointsProc = ""
-# Check if the file exists
-if (Test-Path $endpointsProcFile -PathType Leaf) {
-    #Write-Log "Found Endoints processed file: $endpointsProcFile" INFO
-    # Load the file content
-    $endpointsProc = Get-Content $endpointsProcFile
-} else {
-    Set-Content -Path $endpointsProcFile -Value $endpointsProc -Force
-}
-
-$endpointsProc
-
-#Get the policies list
-$policiesFilter = @{
-    "filter" = "PolicyType EQ ADV_WIN"
-}  | ConvertTo-Json
-
-$getPolicies = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search" -Method 'POST' -Headers $sessionHeader -Body $policiesFilter
-
-# Store in hashtable for faster access
-$retrievedPoliciesMap = @{}
-
-foreach ($retrievedPolicy in $getPolicies.Policies) {
-    $retrievedPoliciesMap[$retrievedPolicy.PolicyName] = $retrievedPolicy.PolicyId
-}
-
-# Get the computer list
-$getComputerList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers" -Method 'GET' -Headers $sessionHeader
-
-foreach ($computer in $getComputerList.Computers) {
-    Write-Log "Processing computer: $($computer.ComputerName)" INFO
-    # Search the Computer Name in the CSV file
-    if ($csvComputerNames.Contains($computer.ComputerName)) {
-        if (!$endpointsProc.Contains($computer.ComputerName)){
-            Write-Log "Processing computer: $($computer.ComputerName)" INFO
-
-            $csvComputerName = $policyContent | Where-Object { $_.ComputerName -eq $computer.ComputerName }
-            $csvPoliciesName = $csvComputerName.Policies -split ';' | ForEach-Object { $_.Trim() }
-            foreach ($policy in $csvPoliciesName) {
-                Write-Log "Processing policy: $($policy)" INFO
-
-                # Check if the policy exist
-                If ($null -eq $($retrievedPoliciesMap[$policy])) {
-                    Write-Log "$($policy) not valid." ERROR
-                    Continue
-                }
-                
-                $getPolicy = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/$($retrievedPoliciesMap[$policy])" -Method 'GET' -Headers $sessionHeader
-                
-                # Forcing not applied to all computers
-                $getPolicy.Policy.IsAppliedToAllComputers=$False
-                
-                # Forcing policy Enabled
-                $getPolicy.Policy.IsActive=$True
-
-                ## Process the Executors
-                # Flag to determine if the computer was found in the existing executors
-                $computerFoundInExecutors = $false
-
-                # Iterate through existing executors to check if the computer name already exists
-                foreach ($executor in $getPolicy.Policy.Executors) {
-                    if ($executor.Name -eq $computer.ComputerName) {
-                        
-                        $computerFoundInExecutors = $true
-                        break # Exit the inner foreach loop as soon as it's found
-                    }
-                }
-
-                if ($computerFoundInExecutors) {
-                    Write-Log "Computer '$($computer.ComputerName)' already exists in policy executors. Skipping policy update for this computer." WARN
-                    # process other computers if there are any
-                    #continue 
-                } else {
-                    Write-Log "Computer '$($computer.ComputerName)' not found in policy executors. Adding it." INFO
-
-                    $newExecutor = [PSCustomObject]@{
-                        "Id"           = $computer.AgentId
-                        "Name"         = $computer.ComputerName
-                        "IsIncluded"   = $true
-                        "ExecutorType" = 1
-                    }
-                    ## Process the Executors Done
-
-                    # Upload the policy
-                    $getPolicy.Policy.Executors += $newExecutor
-                    
-                    $newPolicyJSON = $getPolicy.Policy | ConvertTo-Json -Depth 10
-                    $updatePolicy = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/$($retrievedPoliciesMap[$policy])" -Method 'PUT' -Headers $sessionHeader -Body $newPolicyJSON
-                    Write-Log "$($policy) updated correctly." INFO
-                }
-                # Add the Endopoint in the tracker file
-                #$endpointsProc += $computer.ComputerName
-                Add-Content -Path $endpointsProcFile -Value $computer.ComputerName
-                Write-Log "Tracker file $endpointsProcFile updated." INFO
-            }
-        } else {
-            Write-Log "Computer '$($computer.ComputerName)' already processed (in file $endpointsProcFile). Skipping." WARN
+$AppDefinition = @{
+    "internalId"= 0
+    "applicationType"= 3
+    "displayName"= ""
+    "description"= ""
+    "patterns"= @{
+        "FILE_NAME"= @{
+        "@type"= "FileName"
+        "hashAlgorithm"= ""
+        "hash"= ""
+        "hashSHA256"= ""
+        "fileSize"= 0
+        "isEmpty"= $false
+        "content"= "thunderbird.exe"
+        "compareAs"= 0
+        "caseSensitive"= $false
         }
+        "LOCATION"= @{
+        "@type"= "Location"
+        "content"= "C=\\Program Files\\Mozilla Thunderbird\\"
+        "withSubfolders"= $true
+        "caseSensitive"= $false
+        "isEmpty"= $false
+        }
+        "PUBLISHER"= @{
+        "@type"= "Publisher"
+        "signatureLevel"= 2
+        "separator"= ";"
+        "caseSensitive"= $false
+        "compareAs"= 3
+        "isEmpty"= $false
+        "content"= "Mozilla Corporation"
+        }
+        "ORIGINAL_FILE_NAME"= @{
+        "@type"= "FileInfo"
+        "elementName"= "FileVerInfo"
+        "attributeInfoName"= "OriginalFilename"
+        "isEmpty"= $false
+        "content"= "thunderbird.exe"
+        "compareAs"= 0
+        "caseSensitive"= $false
+        }
+    }
+    "childProcess"= $false
+    "restrictOpenSaveFileDialog"= $true
+}
+
+$targetAppGroup = "Master AppGroup" # To be changed
+$targetAppGroupId = $null
+
+
+
+$AppGroupsList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/ApplicationGroups/Search" -Method 'POST' -Headers $sessionHeader
+
+foreach ($appGroup in $AppGroupsList.Policies) {
+    if ($appGroup.PolicyName -eq $targetAppGroup) {
+        $targetAppGroupId = $appGroup.PolicyId
+        break
     }
 }
 
+if ($null -ne $targetAppGroupId) {
+    # Retrieve Target Applicaiton group details
+    $AppGroup = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/ApplicationGroups/$targetAppGroupId" -Method 'GET' -Headers $sessionHeader
+    
+    # Add the Application definition to the AppGroup
+    $appGroup.Policy.Applications += $AppDefinition
+
+    # Convert the AppGroup to JSON
+    $AppGroupJSON = $AppGroup.Policy | ConvertTo-Json -Depth 9
+ 
+    # Update the AppGroup
+    $UpdateAppGroup = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/ApplicationGroups/$targetAppGroupId" -Method 'PUT' -Headers $sessionHeader -Body $AppGroupJSON
+    Write-Log "Application added!" INFO
+} else {
+    # Exit if the application group is not valid
+    Write-Log "$targetAppGroup : Invalid AppGroup" ERROR
+    exit
+}

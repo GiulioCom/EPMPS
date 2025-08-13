@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    
+    Demo Script update policy propertiers massively
 
 .DESCRIPTION
-Demo Script update policy propertiers massively, in this example script enabling policy audit if not enabled 
+    Update Policy proterties (Enable Audit, Remove duplicated, Remove Imported prefix)
 
 .PARAMETER username
     The EPM username (e.g., user@domain).
@@ -451,31 +451,68 @@ if ($RemoveDuplicatedPolicy) {
 
 if ($RemoveImportedFlag) {
 
-    # Request Policies name contains [IMPORTED] keyword
+    Write-Log "Processing Policies..." INFO
+    
+    # Policies Search Filter
     $policiesSearchFilter = @{
         "filter" = "PolicyName CONTAINS [IMPORTED]"
     } | ConvertTo-Json
 
     $policySearch = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search?limit=1000" -Method 'POST' -Headers $sessionHeader -Body $policiesSearchFilter
     
-    Write-Log "Found $($policySearch.FilteredCount) of a total $($policySearch.TotalCount) policies" INFO
+    Write-Log "Found $($policySearch.FilteredCount) of a total $($policySearch.TotalCount) policies imported" INFO
 
     $counter = 1
     
     foreach ($policy in $policySearch.Policies) {
                
         if ($policy.PolicyName -match "^\[IMPORTED\] .*$") {
-            Write-Log "$counter/$($policySearch.FilteredCount) - $($policy.PolicyName): Get policy details" INFO
+            Write-Log "$counter/$($policySearch.FilteredCount) - $($policy.PolicyName): Getting policy details..." INFO
             $getPolicyDetails = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/$($policy.PolicyId)" -Method 'GET' -Headers $sessionHeader
 
-            $getPolicyDetails.Policy.Name = $policy.PolicyName -replace "^\[IMPORTED\]", ""
+            $getPolicyDetails.Policy.Name = $policy.PolicyName -replace "^\[IMPORTED\] ", ""
             Write-Log "$counter/$($policySearch.FilteredCount) - $($policy.PolicyName): Renamed as $($getPolicyDetails.Policy.Name)" INFO
 
             $updatePolicyJson = $getPolicyDetails.Policy | ConvertTo-Json -Depth 10
  
             $updatePolicy = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/$($policy.PolicyId)" -Method 'PUT' -Headers $sessionHeader -Body ([System.Text.Encoding]::UTF8.GetBytes($updatePolicyJson)) # to handle special char
-            Write-Log "$counter/$($policySearch.FilteredCount) - $($policy.PolicyName): Policy updated succesfully. Policy name is: $($updatePolicy.Name)" INFO
+            Write-Log "$counter/$($policySearch.FilteredCount) - $($policy.PolicyName): Policy updated succesfully. New policy name is: $($updatePolicy.Name)" INFO
+            
             $counter++
         }
     }
+
+    Write-Log "... Done Policies" INFO
+
+    Write-Log "Processing Application Groups..." INFO
+
+    # Application Group Search Filter
+    $appGroupSearchFilter = @{
+        "filter" = "PolicyName CONTAINS [IMPORTED]"
+    } | ConvertTo-Json
+
+    $appGroupSearch = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/ApplicationGroups/Search?limit=1000" -Method 'POST' -Headers $sessionHeader -Body $appGroupSearchFilter
+    
+    Write-Log "Found $($appGroupSearch.FilteredCount) of a total $($appGroupSearch.TotalCount) application groups imported" INFO
+
+    $counter = 1
+    
+    foreach ($appGroup in $appGroupSearch.Policies) {
+               
+        if ($appGroup.PolicyName -match "^\[IMPORTED\] .*$") {
+            Write-Log "$counter/$($appGroupSearch.FilteredCount) - $($appGroup.PolicyName): Getting application group details..." INFO
+            $getAppGroupDetails = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/ApplicationGroups/$($appGroup.PolicyId)" -Method 'GET' -Headers $sessionHeader
+
+            $getAppGroupDetails.Policy.Name = $appGroup.PolicyName -replace "^\[IMPORTED\] ", ""
+            Write-Log "$counter/$($appGroupSearch.FilteredCount) - $($appGroup.PolicyName): Renamed as $($getAppGroupDetails.Policy.Name)" INFO
+
+            $updateAppGroupJson = $getAppGroupDetails.Policy | ConvertTo-Json -Depth 10
+ 
+            $updateAppGroup = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/ApplicationGroups/$($appGroup.PolicyId)" -Method 'PUT' -Headers $sessionHeader -Body ([System.Text.Encoding]::UTF8.GetBytes($updateAppGroupJson)) # to handle special char
+            Write-Log "$counter/$($appGroupSearch.FilteredCount) - $($appGroup.PolicyName): Applcation Group updated succesfully. New application group name is: $($updateAppGroup.Name)" INFO
+            
+            $counter++
+        }
+    }
+    Write-Log "Processing Application Groups..." INFO
 }

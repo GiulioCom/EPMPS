@@ -56,7 +56,6 @@ param (
 
     [Parameter(HelpMessage = "Please provide the folder to store the last event date detail.")]
     [string]$lastEventFolder
-
 )
 
 function Write-Log {
