@@ -57,29 +57,36 @@ function Write-Log {
         [string]$ForegroundColor
     )
     
+    $expSeverity = $severity
+    $exceedingChars = 5-$severity.Length
+    
+    while ($exceedingChars -ne 0) {
+        $expSeverity = $expSeverity + " "
+        $exceedingChars--
+    }
+
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logMessage = "$timestamp [$severity] - $message"
+    $logMessage = "$timestamp [$expSeverity] $message"
 
     switch ($severity) {
         "INFO" {
             if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
                 $ForegroundColor = "Green"
             }
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
         "WARN" {
             if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
                 $ForegroundColor = "Yellow"
             }
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
         "ERROR" {
             if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
                 $ForegroundColor = "Red"
             }
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
     }
+
+    Write-Host $logMessage -ForegroundColor $ForegroundColor
 
     if ($log) {
         Add-Content -Path $logFilePath -Value $logMessage
@@ -103,28 +110,27 @@ function Write-Box {
     Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
 }
 
+<#
+.SYNOPSIS
+    Invokes a REST API method with automatic retry logic in case of transient failures.
+
+.DESCRIPTION
+    This function is designed to make REST API calls with automatic retries in case of specific errors, such as rate limiting.
+    It provides a robust way to handle transient failures and ensures that the API call is retried a specified number of times.
+
+.PARAMETER URI
+    The Uniform Resource Identifier (URI) for the REST API endpoint.
+
+.PARAMETER Method
+    The HTTP method (e.g., GET, POST, PUT, DELETE) for the API call.
+
+.PARAMETER Body
+    The request body data to be sent in the API call (can be null for certain methods).
+
+.PARAMETER Headers
+    Headers to include in the API request.
+#>
 function Invoke-EPMRestMethod {
-    <#
-    .SYNOPSIS
-        Invokes a REST API method with automatic retry logic in case of transient failures.
-
-    .DESCRIPTION
-        This function is designed to make REST API calls with automatic retries in case of specific errors, such as rate limiting.
-        It provides a robust way to handle transient failures and ensures that the API call is retried a specified number of times.
-
-    .PARAMETER URI
-        The Uniform Resource Identifier (URI) for the REST API endpoint.
-
-    .PARAMETER Method
-        The HTTP method (e.g., GET, POST, PUT, DELETE) for the API call.
-
-    .PARAMETER Body
-        The request body data to be sent in the API call (can be null for certain methods).
-
-    .PARAMETER Headers
-        Headers to include in the API request.
-    #>
-    
     param (
         [string]$URI,
         [string]$Method,
@@ -181,24 +187,26 @@ function Invoke-EPMRestMethod {
     throw "API call failed after $MaxRetries retries."
 }
 
+# EPM RestAPI Wrappers
+
+<#
+.SYNOPSIS
+Connects to the EPM (Enterprise Password Vault) using the provided credentials and tenant information.
+
+.DESCRIPTION
+This function performs authentication with the EPM API to obtain the manager URL and authentication details.
+
+.PARAMETER credential
+The credential object containing the username and password.
+
+.PARAMETER epmTenant
+The EPM tenant name.
+
+.OUTPUTS
+A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
+
+#>
 function Connect-EPM {
-    <#
-    .SYNOPSIS
-    Connects to the EPM (Enterprise Password Vault) using the provided credentials and tenant information.
-
-    .DESCRIPTION
-    This function performs authentication with the EPM API to obtain the manager URL and authentication details.
-
-    .PARAMETER credential
-    The credential object containing the username and password.
-
-    .PARAMETER epmTenant
-    The EPM tenant name.
-
-    .OUTPUTS
-    A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
-
-    #>
     param (
         [Parameter(Mandatory = $true)]
         [pscredential]$credential,  # Credential object containing the username and password
@@ -241,27 +249,26 @@ function Connect-EPM {
     }
 }
 
+<#
+.SYNOPSIS
+Retrieves the ID and name of an EPM set based on the provided parameters.
+
+.DESCRIPTION
+This function interacts with the EPM API to retrieve information about sets based on the specified parameters.
+
+.PARAMETER managerURL
+The URL of the EPM manager.
+
+.PARAMETER Headers
+The authorization headers.
+
+.PARAMETER setName
+The name of the EPM set to retrieve.
+
+.OUTPUTS
+A custom object with the properties "setId" and "setName" representing the EPM set information.
+#>
 function Get-EPMSetID {
-    <#
-    .SYNOPSIS
-    Retrieves the ID and name of an EPM set based on the provided parameters.
-
-    .DESCRIPTION
-    This function interacts with the EPM API to retrieve information about sets based on the specified parameters.
-
-    .PARAMETER managerURL
-    The URL of the EPM manager.
-
-    .PARAMETER Headers
-    The authorization headers.
-
-    .PARAMETER setName
-    The name of the EPM set to retrieve.
-
-    .OUTPUTS
-    A custom object with the properties "setId" and "setName" representing the EPM set information.
-    #>
-
     param (
         [Parameter(Mandatory = $true)]
         [string]$managerURL,
@@ -342,6 +349,147 @@ function Get-EPMSetID {
 
     throw "Maximum attempts reached. Exiting set selection."
 }
+
+<#
+.SYNOPSIS
+    Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
+
+.DESCRIPTION
+    This function acts as a wrapper for the CyberArk EPM REST API to get computers.
+    It automatically manages pagination by making multiple API calls if the total number
+    of computers exceeds the API's maximum limit (5000). The function merges all
+    computers into a single PSCustomObject for easy management.
+
+.PARAMETER limit
+    The maximum number of computers to retrieve per API call. The default is 5000,
+    which is the maximum allowed by the CyberArk EPM API.
+
+.EXAMPLE
+    Get-EPMTotalCount -limit 500
+
+.OUTPUTS
+    This function returns an object containing the merged computers and metadata.
+    The object has the following properties:
+        - Computers: An array of all policy objects.
+        - TotalCount: The total number of policies on the server.
+
+.NOTES
+    This function requires a valid session header and manager URL to be accessible
+    in the execution context. It uses Invoke-EPMRestMethod.
+#>
+Function Get-EPMComputers {
+        param (
+        [int]$limit = 5000  # Set limit to the max size if not declared
+    )
+
+    $mergeComputers = [PSCustomObject]@{
+        Computers = @()
+        TotalCount = 0
+    }
+
+    $offset = 0             # Offset
+    $iteration = 1          # Define the number of iteraction, used to increase the offset
+    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
+
+    while ($offset -lt $total) {
+        $getComputers = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers?offset=$offset&limit=$limit" -Method 'GET' -Headers $sessionHeader
+        
+        $mergeComputers.Computers += $getComputers.Computers    # Merge the current computer list
+        $mergeComputers.TotalCount = $getComputers.TotalCount   # Update the TotalCount
+
+        $total = $getComputers.TotalCount   # Update the total with the real total
+        $offset = $limit  * $iteration
+        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+    }
+    return $mergeComputers
+}
+
+<#
+.SYNOPSIS
+    Retrieves a list of EPM policies from a CyberArk EPM server, handling pagination automatically.
+
+.DESCRIPTION
+    This function acts as a wrapper for the CyberArk EPM REST API to get policies.
+    It automatically manages pagination by making multiple API calls if the total number
+    of policies exceeds the API's maximum limit (1000). The function merges all
+    policies into a single PSCustomObject for easy management.
+
+.PARAMETER limit
+    The maximum number of policies to retrieve per API call. The default is 1000,
+    which is the maximum allowed by the CyberArk EPM API.
+
+.PARAMETER sortBy
+    The field by which to sort the policies. Common values include "Updated", "Name",
+    and "PolicyType". The default is "Updated".
+
+.PARAMETER sortDir
+    The sorting direction. Valid values are "asc" (ascending) and "desc" (descending).
+    The default is "desc".
+
+.PARAMETER policyFilter
+    A hashtable containing filter criteria for the policies. The keys and values
+    must match the JSON format expected by the EPM API's search endpoint.
+    Example: @{ "filter" = "PolicyType IN 11,36,37,38" }.
+
+.EXAMPLE
+    Get-EPMPolicies -limit 500 -sortBy "Name"
+
+.EXAMPLE
+    $myFilter = @{
+        "filter" = "PolicyType IN 11,36"
+    }
+    Get-EPMPolicies -policyFilter $myFilter
+
+.OUTPUTS
+    This function returns an object containing the merged policies and metadata.
+    The object has the following properties:
+        - Policies: An array of all policy objects.
+        - ActiveCount: The count of active policies.
+        - TotalCount: The total number of policies on the server.
+        - FilteredCount: The total number of policies that match the applied filter.
+
+.NOTES
+    This function requires a valid session header and manager URL to be accessible
+    in the execution context. It uses Invoke-EPMRestMethod.
+#>
+Function Get-EPMPolicies {
+    param (
+        [int]$limit = 1000,         # Set limit to the max size if not declared
+        [string]$sortBy = "Updated",
+        [string]$sortDir = "desc",
+        [hashtable]$policyFilter
+    )
+
+    $mergePolicies = [PSCustomObject]@{
+        Policies = @()
+        ActiveCount = 0
+        TotalCount = 0
+        FilteredCount = 0
+    }
+
+    if ($null -ne $policiesFilter) {
+        $policyFilterJSON = $policyFilter | ConvertTo-Json
+    }
+
+    $offset = 0             # Offset
+    $iteration = 1          # Define the number of iteraction, used to increase the offset
+    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
+
+    while ($offset -lt $total) {
+        $getPolicies = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search?offset=$offset&limit=$limit&sortBy=$sortBy&sortDir=$sortDir" -Method 'POST' -Headers $sessionHeader -Body $policyFilterJSON
+        
+        $mergePolicies.Policies += $getPolicies.Policies            # Merge the current computer list
+        $mergePolicies.ActiveCount = $getPolicies.ActiveCount       # Update the ActiveCount
+        $mergePolicies.TotalCount = $getPolicies.TotalCount         # Update the TotalCount
+        $mergePolicies.FilteredCount = $getPolicies.FilteredCount   # Update the FilteredCount
+
+        $total = $getPolicies.FilteredCount   # Update the total with the real total
+        $offset = $limit * $iteration
+        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+    }
+    return $mergePolicies
+}
+
 
 ### Begin Script ###
 

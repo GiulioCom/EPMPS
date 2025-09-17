@@ -62,29 +62,36 @@ function Write-Log {
         [string]$ForegroundColor
     )
     
+    $expSeverity = $severity
+    $exceedingChars = 5-$severity.Length
+    
+    while ($exceedingChars -ne 0) {
+        $expSeverity = $expSeverity + " "
+        $exceedingChars--
+    }
+
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logMessage = "$timestamp [$severity] - $message"
+    $logMessage = "$timestamp [$expSeverity] $message"
 
     switch ($severity) {
         "INFO" {
             if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
                 $ForegroundColor = "Green"
             }
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
         "WARN" {
             if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
                 $ForegroundColor = "Yellow"
             }
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
         "ERROR" {
             if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
                 $ForegroundColor = "Red"
             }
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
     }
+
+    Write-Host $logMessage -ForegroundColor $ForegroundColor
 
     if ($log) {
         Add-Content -Path $logFilePath -Value $logMessage
@@ -348,6 +355,147 @@ function Get-EPMSetID {
     throw "Maximum attempts reached. Exiting set selection."
 }
 
+<#
+.SYNOPSIS
+    Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
+
+.DESCRIPTION
+    This function acts as a wrapper for the CyberArk EPM REST API to get computers.
+    It automatically manages pagination by making multiple API calls if the total number
+    of computers exceeds the API's maximum limit (5000). The function merges all
+    computers into a single PSCustomObject for easy management.
+
+.PARAMETER limit
+    The maximum number of computers to retrieve per API call. The default is 5000,
+    which is the maximum allowed by the CyberArk EPM API.
+
+.EXAMPLE
+    Get-EPMTotalCount -limit 500
+
+.OUTPUTS
+    This function returns an object containing the merged computers and metadata.
+    The object has the following properties:
+        - Computers: An array of all policy objects.
+        - TotalCount: The total number of policies on the server.
+
+.NOTES
+    This function requires a valid session header and manager URL to be accessible
+    in the execution context. It uses Invoke-EPMRestMethod.
+#>
+Function Get-EPMComputers {
+        param (
+        [int]$limit = 5000  # Set limit to the max size if not declared
+    )
+
+    $mergeComputers = [PSCustomObject]@{
+        Computers = @()
+        TotalCount = 0
+    }
+
+    $offset = 0             # Offset
+    $iteration = 1          # Define the number of iteraction, used to increase the offset
+    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
+
+    while ($offset -lt $total) {
+        $getComputers = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers?offset=$offset&limit=$limit" -Method 'GET' -Headers $sessionHeader
+        
+        $mergeComputers.Computers += $getComputers.Computers    # Merge the current computer list
+        $mergeComputers.TotalCount = $getComputers.TotalCount   # Update the TotalCount
+
+        $total = $getComputers.TotalCount   # Update the total with the real total
+        $offset = $limit  * $iteration
+        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+    }
+    return $mergeComputers
+}
+
+<#
+.SYNOPSIS
+    Retrieves a list of EPM policies from a CyberArk EPM server, handling pagination automatically.
+
+.DESCRIPTION
+    This function acts as a wrapper for the CyberArk EPM REST API to get policies.
+    It automatically manages pagination by making multiple API calls if the total number
+    of policies exceeds the API's maximum limit (1000). The function merges all
+    policies into a single PSCustomObject for easy management.
+
+.PARAMETER limit
+    The maximum number of policies to retrieve per API call. The default is 1000,
+    which is the maximum allowed by the CyberArk EPM API.
+
+.PARAMETER sortBy
+    The field by which to sort the policies. Common values include "Updated", "Name",
+    and "PolicyType". The default is "Updated".
+
+.PARAMETER sortDir
+    The sorting direction. Valid values are "asc" (ascending) and "desc" (descending).
+    The default is "desc".
+
+.PARAMETER policyFilter
+    A hashtable containing filter criteria for the policies. The keys and values
+    must match the JSON format expected by the EPM API's search endpoint.
+    Example: @{ "filter" = "PolicyType IN 11,36,37,38" }.
+
+.EXAMPLE
+    Get-EPMPolicies -limit 500 -sortBy "Name"
+
+.EXAMPLE
+    $myFilter = @{
+        "filter" = "PolicyType IN 11,36"
+    }
+    Get-EPMPolicies -policyFilter $myFilter
+
+.OUTPUTS
+    This function returns an object containing the merged policies and metadata.
+    The object has the following properties:
+        - Policies: An array of all policy objects.
+        - ActiveCount: The count of active policies.
+        - TotalCount: The total number of policies on the server.
+        - FilteredCount: The total number of policies that match the applied filter.
+
+.NOTES
+    This function requires a valid session header and manager URL to be accessible
+    in the execution context. It uses Invoke-EPMRestMethod.
+#>
+Function Get-EPMPolicies {
+    param (
+        [int]$limit = 1000,         # Set limit to the max size if not declared
+        [string]$sortBy = "Updated",
+        [string]$sortDir = "desc",
+        [hashtable]$policyFilter
+    )
+
+    $mergePolicies = [PSCustomObject]@{
+        Policies = @()
+        ActiveCount = 0
+        TotalCount = 0
+        FilteredCount = 0
+    }
+
+    if ($null -ne $policiesFilter) {
+        $policyFilterJSON = $policyFilter | ConvertTo-Json
+    }
+
+    $offset = 0             # Offset
+    $iteration = 1          # Define the number of iteraction, used to increase the offset
+    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
+
+    while ($offset -lt $total) {
+        $getPolicies = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search?offset=$offset&limit=$limit&sortBy=$sortBy&sortDir=$sortDir" -Method 'POST' -Headers $sessionHeader -Body $policyFilterJSON
+        
+        $mergePolicies.Policies += $getPolicies.Policies            # Merge the current computer list
+        $mergePolicies.ActiveCount = $getPolicies.ActiveCount       # Update the ActiveCount
+        $mergePolicies.TotalCount = $getPolicies.TotalCount         # Update the TotalCount
+        $mergePolicies.FilteredCount = $getPolicies.FilteredCount   # Update the FilteredCount
+
+        $total = $getPolicies.FilteredCount   # Update the total with the real total
+        $offset = $limit * $iteration
+        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+    }
+    return $mergePolicies
+}
+
+
 ### Begin Script ###
 
 ## Prepare log folder and file
@@ -387,6 +535,8 @@ $sessionHeader = @{
 # Get SetId
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
+Write-Log "Entering SET: $($set.setName)..." INFO -ForegroundColor Blue
+
 # Check the policyFile
 if (-not (Test-Path $policyFile)) {
     Write-Log "The specified CSV file '$policyFile' was not found." ERROR
@@ -395,36 +545,40 @@ if (-not (Test-Path $policyFile)) {
 
 # Import the CSV
 try {
+    Write-Log "Reading csv file '$policyFile'" INFO
     $policyContent = Import-Csv -Path $policyFile -Header ComputerName,Policies
 }
 catch {
-    Write-Warning "Failed to import CSV file '$policyFile'. Please check its format."
+    Write-Log "Failed to import CSV file '$policyFile'. Please check its format." ERROR
     throw $_.Exception.Message
 }
 
 $csvComputerNames = $policyContent | Select-Object -ExpandProperty ComputerName
 
-## Store the processed endpoint in a file
 # Create or update the endpoint processed file
 $endpointsProcFile = "EndpointsProcessed.txt"
-$endpointsProc = ""
+$endpointsProc = @()
 # Check if the file exists
 if (Test-Path $endpointsProcFile -PathType Leaf) {
-    #Write-Log "Found Endoints processed file: $endpointsProcFile" INFO
+    Write-Log "Found Endpoints processed file: $endpointsProcFile" INFO
     # Load the file content
     $endpointsProc = Get-Content $endpointsProcFile
 } else {
+    Write-Log "Endpoints processed file '$endpointsProcFile' not found, create new one." WARN
     Set-Content -Path $endpointsProcFile -Value $endpointsProc -Force
 }
 
-$endpointsProc
+# Get the policies list
+# 11: Advanced Windows
+# 36: User Policy Set Security Permissions for File System and Registry Keys
+# 37: User Policy Set Security Permissions for Services
+# 38: User Policy Set Security Permissions for Removable Storage (USB, Optical Discs)
 
-#Get the policies list
 $policiesFilter = @{
-    "filter" = "PolicyType EQ ADV_WIN"
-}  | ConvertTo-Json
+    "filter" = "PolicyType IN 11,36,37,38"
+}
 
-$getPolicies = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search" -Method 'POST' -Headers $sessionHeader -Body $policiesFilter
+$getPolicies = Get-EPMPolicies -policyFilter $policiesFilter
 
 # Store in hashtable for faster access
 $retrievedPoliciesMap = @{}
@@ -434,76 +588,77 @@ foreach ($retrievedPolicy in $getPolicies.Policies) {
 }
 
 # Get the computer list
-$getComputerList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers" -Method 'GET' -Headers $sessionHeader
+$getComputerList = Get-EPMComputers -limit 5000
 
 foreach ($computer in $getComputerList.Computers) {
-    Write-Log "Processing computer: $($computer.ComputerName)" INFO
+    $computerName = $computer.ComputerName
+    Write-Log "Processing computer: $($computerName)" INFO -ForegroundColor DarkCyan
     # Search the Computer Name in the CSV file
-    if ($csvComputerNames.Contains($computer.ComputerName)) {
-        if (!$endpointsProc.Contains($computer.ComputerName)){
-            Write-Log "Processing computer: $($computer.ComputerName)" INFO
+    if ($csvComputerNames.Contains($computerName)) {
+        Write-Log "- '$($computerName)' in the CSV policy file." INFO
+        # Check if the endpoint has been processed already by reading the file
+        if ($endpointsProc -notcontains $computerName){
+            Write-Log "- '$($computerName)' is not in the processed file." WARN
 
-            $csvComputerName = $policyContent | Where-Object { $_.ComputerName -eq $computer.ComputerName }
-            $csvPoliciesName = $csvComputerName.Policies -split ';' | ForEach-Object { $_.Trim() }
-            foreach ($policy in $csvPoliciesName) {
-                Write-Log "Processing policy: $($policy)" INFO
+            # Identify the polcies list from the CSV file
+            $csvPoliciesList = ($policyContent | Where-Object { $_.ComputerName -eq $computerName }).Policies -split ';' | ForEach-Object { $_.Trim() }
+            foreach ($policy in $csvPoliciesList) {
+                Write-Log "- Processing policy '$($policy)'" INFO
 
                 # Check if the policy exist
                 If ($null -eq $($retrievedPoliciesMap[$policy])) {
-                    Write-Log "$($policy) not valid." ERROR
+                    Write-Log "- '$($policy)' not available in set '$($set.SetName)'" ERROR
                     Continue
                 }
                 
                 $getPolicy = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/$($retrievedPoliciesMap[$policy])" -Method 'GET' -Headers $sessionHeader
                 
-                # Forcing not applied to all computers
+                # Configure the policy for specific device
                 $getPolicy.Policy.IsAppliedToAllComputers=$False
                 
-                # Forcing policy Enabled
+                # Enable the policy
                 $getPolicy.Policy.IsActive=$True
 
-                ## Process the Executors
+                ## Add the computer in the policy definition
                 # Flag to determine if the computer was found in the existing executors
                 $computerFoundInExecutors = $false
 
                 # Iterate through existing executors to check if the computer name already exists
                 foreach ($executor in $getPolicy.Policy.Executors) {
-                    if ($executor.Name -eq $computer.ComputerName) {
-                        
+                    if ($executor.Name -eq $computerName) {
                         $computerFoundInExecutors = $true
-                        break # Exit the inner foreach loop as soon as it's found
+                        break
                     }
                 }
 
                 if ($computerFoundInExecutors) {
-                    Write-Log "Computer '$($computer.ComputerName)' already exists in policy executors. Skipping policy update for this computer." WARN
-                    # process other computers if there are any
-                    #continue 
+                    Write-Log "- Computer '$($computerName)' already exists in the policy '$($policy)'. Continue to the next..." WARN
                 } else {
-                    Write-Log "Computer '$($computer.ComputerName)' not found in policy executors. Adding it." INFO
+                    Write-Log "- Computer '$($computerName)' not found in the policy '$($policy)'. Adding it now." INFO Magenta
 
+                    # Define the computer name
                     $newExecutor = [PSCustomObject]@{
                         "Id"           = $computer.AgentId
-                        "Name"         = $computer.ComputerName
+                        "Name"         = $computerName
                         "IsIncluded"   = $true
                         "ExecutorType" = 1
                     }
-                    ## Process the Executors Done
+
+                    # Add the Computer in the policy
+                    $getPolicy.Policy.Executors += $newExecutor
 
                     # Upload the policy
-                    $getPolicy.Policy.Executors += $newExecutor
-                    
                     $newPolicyJSON = $getPolicy.Policy | ConvertTo-Json -Depth 10
                     $updatePolicy = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/$($retrievedPoliciesMap[$policy])" -Method 'PUT' -Headers $sessionHeader -Body $newPolicyJSON
-                    Write-Log "$($policy) updated correctly." INFO
+                    Write-Log "- Policy '$($policy)' updated correctly." INFO
                 }
-                # Add the Endopoint in the tracker file
-                #$endpointsProc += $computer.ComputerName
-                Add-Content -Path $endpointsProcFile -Value $computer.ComputerName
-                Write-Log "Tracker file $endpointsProcFile updated." INFO
+
             }
+            # Add the Endopoint in the tracker file
+            Add-Content -Path $endpointsProcFile -Value $computerName
+            Write-Log "- Tracker file $endpointsProcFile updated for '$($computerName)'." INFO
         } else {
-            Write-Log "Computer '$($computer.ComputerName)' already processed (in file $endpointsProcFile). Skipping." WARN
+            Write-Log "- Computer '$($computerName)' already processed (in file $endpointsProcFile). Continue to the next..." WARN
         }
     }
 }

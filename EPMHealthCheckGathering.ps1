@@ -56,30 +56,37 @@ function Write-Log {
         [ValidateSet("Black", "DarkBlue", "DarkGreen", "DarkCyan", "DarkRed", "DarkMagenta", "DarkYellow", "Gray", "DarkGray", "Blue", "Green", "Cyan", "Red", "Magenta", "Yellow", "White")]
         [string]$ForegroundColor
     )
+
+    $expSeverity = $severity
+    $exceedingChars = 5-$severity.Length
     
+    while ($exceedingChars -ne 0) {
+        $expSeverity = $expSeverity + " "
+        $exceedingChars--
+    }
+
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logMessage = "$timestamp [$severity] - $message"
+    $logMessage = "$timestamp [$expSeverity] $message"
 
     switch ($severity) {
         "INFO" {
             if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
                 $ForegroundColor = "Green"
             }
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
         "WARN" {
             if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
                 $ForegroundColor = "Yellow"
             }
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
         "ERROR" {
             if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
                 $ForegroundColor = "Red"
             }
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
     }
+
+    Write-Host $logMessage -ForegroundColor $ForegroundColor
 
     if ($log) {
         Add-Content -Path $logFilePath -Value $logMessage

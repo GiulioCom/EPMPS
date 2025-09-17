@@ -8,9 +8,12 @@
                          "PolicyType":  4,
                          "Order":  0,
                          "IsAppliedToAllComputers":  true,
+                         "IsTargeted":  false,
+                         "IsTargetedIncluded":  false,
                          "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.7352618",
-                         "ModifiedDate":  "2024-12-13T17:16:26.557375",
+                         "Description":  "",
+                         "CreatedDate":  "2021-10-03T13:18:26",
+                         "ModifiedDate":  "2024-12-13T17:16:26",
                          "ReferencedApplicationGroups":  [
 
                                                          ],
@@ -24,11 +27,17 @@
                          "PolicyType":  5,
                          "Order":  0,
                          "IsAppliedToAllComputers":  true,
+                         "IsTargeted":  false,
+                         "IsTargetedIncluded":  false,
                          "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.7352618",
-                         "ModifiedDate":  "2024-12-13T17:16:24.4771845",
+                         "Description":  "",
+                         "CreatedDate":  "2021-10-03T13:18:26",
+                         "ModifiedDate":  "2024-12-13T17:16:24",
                          "ReferencedApplicationGroups":  [
-
+                                                             {
+                                                                 "Id":  "3383fdbd-62ca-452a-bec5-8f5dc1c8ab3d",
+                                                                 "ReferenceType":  5
+                                                             }
                                                          ],
                          "UserPolicyPermissions":  -1
                      },
@@ -40,11 +49,29 @@
                          "PolicyType":  1,
                          "Order":  0,
                          "IsAppliedToAllComputers":  true,
+                         "IsTargeted":  false,
+                         "IsTargetedIncluded":  false,
                          "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.7352618",
-                         "ModifiedDate":  "2024-12-13T16:31:07.1348109",
+                         "Description":  "",
+                         "CreatedDate":  "2021-10-03T13:18:26",
+                         "ModifiedDate":  "2024-12-13T16:31:07",
                          "ReferencedApplicationGroups":  [
-
+                                                             {
+                                                                 "Id":  "00000000-0000-0000-2337-000000000000",
+                                                                 "ReferenceType":  5
+                                                             },
+                                                             {
+                                                                 "Id":  "7bf90728-8a4c-4203-a920-31809fe57363",
+                                                                 "ReferenceType":  5
+                                                             },
+                                                             {
+                                                                 "Id":  "08ab4efa-edad-4527-83cf-a1eb372bb671",
+                                                                 "ReferenceType":  5
+                                                             },
+                                                             {
+                                                                 "Id":  "cb4c9620-a60b-40d8-8f7b-3ace9faac5f6",
+                                                                 "ReferenceType":  5
+                                                             }
                                                          ],
                          "UserPolicyPermissions":  -1
                      },
@@ -56,11 +83,25 @@
                          "PolicyType":  6,
                          "Order":  0,
                          "IsAppliedToAllComputers":  true,
+                         "IsTargeted":  false,
+                         "IsTargetedIncluded":  false,
                          "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.7508886",
-                         "ModifiedDate":  "2024-11-18T10:42:29.4311213",
+                         "Description":  "",
+                         "CreatedDate":  "2021-10-03T13:18:26",
+                         "ModifiedDate":  "2024-11-18T10:42:29",
                          "ReferencedApplicationGroups":  [
-
+                                                             {
+                                                                 "Id":  "75614536-41f6-49a3-942b-a86800f07400",
+                                                                 "ReferenceType":  5
+                                                             },
+                                                             {
+                                                                 "Id":  "7bf90728-8a4c-4203-a920-31809fe57363",
+                                                                 "ReferenceType":  5
+                                                             },
+                                                             {
+                                                                 "Id":  "08ab4efa-edad-4527-83cf-a1eb372bb671",
+                                                                 "ReferenceType":  5
+                                                             }
                                                          ],
                          "UserPolicyPermissions":  -1
                      },
@@ -72,11 +113,17 @@
                          "PolicyType":  7,
                          "Order":  0,
                          "IsAppliedToAllComputers":  true,
+                         "IsTargeted":  false,
+                         "IsTargetedIncluded":  false,
                          "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.766503",
-                         "ModifiedDate":  "2024-11-18T10:42:28.1355398",
+                         "Description":  "",
+                         "CreatedDate":  "2021-10-03T13:18:26",
+                         "ModifiedDate":  "2024-11-18T10:42:28",
                          "ReferencedApplicationGroups":  [
-
+                                                             {
+                                                                 "Id":  "3383fdbd-62ca-452a-bec5-8f5dc1c8ab3d",
+                                                                 "ReferenceType":  5
+                                                             }
                                                          ],
                          "UserPolicyPermissions":  -1
                      },
@@ -88,11 +135,17 @@
                          "PolicyType":  8,
                          "Order":  0,
                          "IsAppliedToAllComputers":  true,
+                         "IsTargeted":  false,
+                         "IsTargetedIncluded":  false,
                          "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.766503",
-                         "ModifiedDate":  "2024-10-24T08:03:32.4338067",
+                         "Description":  "",
+                         "CreatedDate":  "2021-10-03T13:18:26",
+                         "ModifiedDate":  "2024-10-24T08:03:32",
                          "ReferencedApplicationGroups":  [
-
+                                                             {
+                                                                 "Id":  "52ef822a-09a6-481b-b93b-b80940eb43a2",
+                                                                 "ReferenceType":  5
+                                                             }
                                                          ],
                          "UserPolicyPermissions":  -1
                      },
@@ -104,11 +157,25 @@
                          "PolicyType":  9,
                          "Order":  0,
                          "IsAppliedToAllComputers":  true,
+                         "IsTargeted":  false,
+                         "IsTargetedIncluded":  false,
                          "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.766503",
-                         "ModifiedDate":  "2024-10-23T08:55:19.6061105",
+                         "Description":  "",
+                         "CreatedDate":  "2021-10-03T13:18:26",
+                         "ModifiedDate":  "2024-10-23T08:55:19",
                          "ReferencedApplicationGroups":  [
-
+                                                             {
+                                                                 "Id":  "bf9d37bb-824d-4e72-ad6b-2d8f53bd985d",
+                                                                 "ReferenceType":  5
+                                                             },
+                                                             {
+                                                                 "Id":  "00000000-0000-0000-1337-000000000000",
+                                                                 "ReferenceType":  5
+                                                             },
+                                                             {
+                                                                 "Id":  "70dacbc1-f22e-41d2-a1d9-608f06c6d506",
+                                                                 "ReferenceType":  5
+                                                             }
                                                          ],
                          "UserPolicyPermissions":  -1
                      },
@@ -120,11 +187,29 @@
                          "PolicyType":  2,
                          "Order":  0,
                          "IsAppliedToAllComputers":  true,
+                         "IsTargeted":  false,
+                         "IsTargetedIncluded":  false,
                          "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.7508886",
-                         "ModifiedDate":  "2024-10-21T16:22:00.0296015",
+                         "Description":  "",
+                         "CreatedDate":  "2021-10-03T13:18:26",
+                         "ModifiedDate":  "2024-10-21T16:22:00",
                          "ReferencedApplicationGroups":  [
-
+                                                             {
+                                                                 "Id":  "75614536-41f6-49a3-942b-a86800f07400",
+                                                                 "ReferenceType":  5
+                                                             },
+                                                             {
+                                                                 "Id":  "7bf90728-8a4c-4203-a920-31809fe57363",
+                                                                 "ReferenceType":  5
+                                                             },
+                                                             {
+                                                                 "Id":  "08ab4efa-edad-4527-83cf-a1eb372bb671",
+                                                                 "ReferenceType":  5
+                                                             },
+                                                             {
+                                                                 "Id":  "cb4c9620-a60b-40d8-8f7b-3ace9faac5f6",
+                                                                 "ReferenceType":  5
+                                                             }
                                                          ],
                          "UserPolicyPermissions":  -1
                      },
@@ -136,11 +221,17 @@
                          "PolicyType":  3,
                          "Order":  0,
                          "IsAppliedToAllComputers":  true,
+                         "IsTargeted":  false,
+                         "IsTargetedIncluded":  false,
                          "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.7508886",
-                         "ModifiedDate":  "2024-10-21T16:21:59.8264862",
+                         "Description":  "",
+                         "CreatedDate":  "2021-10-03T13:18:26",
+                         "ModifiedDate":  "2024-10-21T16:21:59",
                          "ReferencedApplicationGroups":  [
-
+                                                             {
+                                                                 "Id":  "3383fdbd-62ca-452a-bec5-8f5dc1c8ab3d",
+                                                                 "ReferenceType":  5
+                                                             }
                                                          ],
                          "UserPolicyPermissions":  -1
                      },
@@ -152,16 +243,22 @@
                          "PolicyType":  10,
                          "Order":  0,
                          "IsAppliedToAllComputers":  true,
+                         "IsTargeted":  false,
+                         "IsTargetedIncluded":  false,
                          "OsType":  0,
-                         "CreatedDate":  "2021-10-03T13:18:26.7821297",
-                         "ModifiedDate":  "2021-10-03T13:18:26.7821297",
+                         "Description":  "",
+                         "CreatedDate":  "2021-10-03T13:18:26",
+                         "ModifiedDate":  "2021-10-03T13:18:26",
                          "ReferencedApplicationGroups":  [
-
+                                                             {
+                                                                 "Id":  "52ef822a-09a6-481b-b93b-b80940eb43a2",
+                                                                 "ReferenceType":  5
+                                                             }
                                                          ],
                          "UserPolicyPermissions":  -1
                      }
                  ],
-    "ActiveCount":  91,
-    "TotalCount":  206,
+    "ActiveCount":  100,
+    "TotalCount":  212,
     "FilteredCount":  10
 }

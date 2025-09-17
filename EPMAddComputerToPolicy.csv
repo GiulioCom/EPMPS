@@ -1,2 +1,2 @@
-WIN10X64-1,[ICT] Scrip;[LSEG] - Shell
-WIN11-1,[ICT] Scrip;[LSEG] - Shell
+WIN10X64-1,[ICT] Scrip;[LSEG] - Shell;PM-Allow Edit Enviroment Variable;PM-Allow Folder Access: C:\Users;PM-Allow Registro sistema;PM-Allow Start/Stop Services;PM-Allow Uninstall APP and Windows Features;PM-Trust Path: C:\EPM_TrustedApps
+WIN11-1,[ICT] Script
