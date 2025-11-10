@@ -22,7 +22,9 @@
     Company: CyberArk
     Version: 0.1
     Created: 04/2024
-    Last Modified: 04/2024
+    Update: 10/2025
+    -   Update API
+    -   Update base functions
 #>
 
 param (
@@ -46,7 +48,7 @@ param (
     [switch]$delete = $false
 )
 
-# Function to log messages to console and file
+## Write-Host Wrapper and log management
 function Write-Log {
     param (
         [Parameter(Mandatory = $true)]
@@ -60,29 +62,36 @@ function Write-Log {
         [string]$ForegroundColor
     )
     
+    $expSeverity = $severity
+    $exceedingChars = 5-$severity.Length
+    
+    while ($exceedingChars -ne 0) {
+        $expSeverity = $expSeverity + " "
+        $exceedingChars--
+    }
+
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logMessage = "$timestamp [$severity] - $message"
+    $logMessage = "$timestamp [$expSeverity] $message"
 
     switch ($severity) {
         "INFO" {
             if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
                 $ForegroundColor = "Green"
             }
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
         "WARN" {
             if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
                 $ForegroundColor = "Yellow"
             }
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
         "ERROR" {
             if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
                 $ForegroundColor = "Red"
             }
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
     }
+
+    Write-Host $logMessage -ForegroundColor $ForegroundColor
 
     if ($log) {
         Add-Content -Path $logFilePath -Value $logMessage
@@ -94,11 +103,8 @@ function Write-Box {
         [string]$title
     )
     
-    # Calculate the length of the title
-    $titleLength = $title.Length
-
     # Create the top and bottom lines
-    $line = "-" * $titleLength
+    $line = "-" * $title.Length
 
     # Print the box
     Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
@@ -106,26 +112,45 @@ function Write-Box {
     Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
 }
 
+## Invoke-RestMethod Wrapper
+<#
+.SYNOPSIS
+    Invokes a REST API method with automatic retry logic in case of transient failures.
+
+.DESCRIPTION
+    This function is designed to make REST API calls with automatic retries in case of specific errors, such as rate limiting.
+    It provides a robust way to handle transient failures and ensures that the API call is retried a specified number of times.
+
+.PARAMETER URI
+    The Uniform Resource Identifier (URI) for the REST API endpoint.
+
+.PARAMETER Method
+    The HTTP method (e.g., GET, POST, PUT, DELETE) for the API call.
+
+.PARAMETER Body
+    The request body data to be sent in the API call (can be null for certain methods).
+
+.PARAMETER Headers
+    Headers to include in the API request.
+#>
 function Invoke-EPMRestMethod {
     param (
         [string]$URI,
         [string]$Method,
         [object]$Body = $null,
         [hashtable]$Headers = @{},
-        [int]$MaxRetries = 3,
-        [int]$RetryDelay = 120
+        [int]$MaxRetries = 3
+    #    [int]$RetryDelay = 120
     )
 
     $retryCount = 0
 
     while ($retryCount -lt $MaxRetries) {
         try {
-            # Write-Log "Attempt #$($retryCount + 1): Calling API: $URI with Method: $Method" INFO
             $response = Invoke-RestMethod -Uri $Uri -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
             return $response
         }
         catch {
-            #$errorMessage = $_.Exception.Message
             $ErrorDetailsMessage = $null
 
             # Extract API error details if available
@@ -140,6 +165,14 @@ function Invoke-EPMRestMethod {
 
             # Handle rate limit error (EPM00000AE)
             if ($ErrorDetailsMessage -and $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
+                # Regex pattern to find numbers followed by "minute(s)"
+                $pattern = "\d+\s+minute"
+                $match = [regex]::Match($ErrorDetailsMessage.ErrorMessage, $pattern)
+                if ($match.Success) {
+                    $minutes = [int]($match.Value -replace '\s+minute', '')
+                    [int]$RetryDelay = $minutes * 60
+                }
+
                 Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
                 Start-Sleep -Seconds $RetryDelay
                 $retryCount++
@@ -163,24 +196,25 @@ function Invoke-EPMRestMethod {
     throw "API call failed after $MaxRetries retries."
 }
 
+## EPM RestAPI Wrappers
+<#
+.SYNOPSIS
+Connects to the EPM (Enterprise Password Vault) using the provided credentials and tenant information.
+
+.DESCRIPTION
+This function performs authentication with the EPM API to obtain the manager URL and authentication details.
+
+.PARAMETER credential
+The credential object containing the username and password.
+
+.PARAMETER epmTenant
+The EPM tenant name.
+
+.OUTPUTS
+A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
+
+#>
 function Connect-EPM {
-    <#
-    .SYNOPSIS
-    Connects to the EPM (Enterprise Password Vault) using the provided credentials and tenant information.
-
-    .DESCRIPTION
-    This function performs authentication with the EPM API to obtain the manager URL and authentication details.
-
-    .PARAMETER credential
-    The credential object containing the username and password.
-
-    .PARAMETER epmTenant
-    The EPM tenant name.
-
-    .OUTPUTS
-    A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
-    #>
-
     param (
         [Parameter(Mandatory = $true)]
         [pscredential]$credential,  # Credential object containing the username and password
@@ -223,27 +257,26 @@ function Connect-EPM {
     }
 }
 
+<#
+.SYNOPSIS
+Retrieves the ID and name of an EPM set based on the provided parameters.
+
+.DESCRIPTION
+This function interacts with the EPM API to retrieve information about sets based on the specified parameters.
+
+.PARAMETER managerURL
+The URL of the EPM manager.
+
+.PARAMETER Headers
+The authorization headers.
+
+.PARAMETER setName
+The name of the EPM set to retrieve.
+
+.OUTPUTS
+A custom object with the properties "setId" and "setName" representing the EPM set information.
+#>
 function Get-EPMSetID {
-    <#
-    .SYNOPSIS
-    Retrieves the ID and name of an EPM set based on the provided parameters.
-
-    .DESCRIPTION
-    This function interacts with the EPM API to retrieve information about sets based on the specified parameters.
-
-    .PARAMETER managerURL
-    The URL of the EPM manager.
-
-    .PARAMETER Headers
-    The authorization headers.
-
-    .PARAMETER setName
-    The name of the EPM set to retrieve.
-
-    .OUTPUTS
-    A custom object with the properties "setId" and "setName" representing the EPM set information.
-    #>
-
     param (
         [Parameter(Mandatory = $true)]
         [string]$managerURL,
@@ -325,6 +358,121 @@ function Get-EPMSetID {
     throw "Maximum attempts reached. Exiting set selection."
 }
 
+<#
+.SYNOPSIS
+    Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
+
+.DESCRIPTION
+    This function acts as a wrapper for the CyberArk EPM REST API to get computers.
+    It automatically manages pagination by making multiple API calls if the total number
+    of computers exceeds the API's maximum limit (5000). The function merges all
+    computers into a single PSCustomObject for easy management.
+
+.PARAMETER limit
+    The maximum number of computers to retrieve per API call. The default is 5000,
+    which is the maximum allowed by the CyberArk EPM API.
+
+.EXAMPLE
+    Get-EPMTotalCount -limit 500
+
+.OUTPUTS
+    This function returns an object containing the merged computers and metadata.
+    The object has the following properties:
+        - Computers: An array of all policy objects.
+        - TotalCount: The total number of policies on the server.
+
+.NOTES
+    This function requires a valid session header and manager URL to be accessible
+    in the execution context. It uses Invoke-EPMRestMethod.
+#>
+Function Get-EPMComputers {
+        param (
+        [int]$limit = 5000  # Set limit to the max size if not declared
+    )
+
+    $mergeComputers = [PSCustomObject]@{
+        Computers = @()
+        TotalCount = 0
+    }
+
+    $offset = 0             # Offset
+    $iteration = 1          # Define the number of iteraction, used to increase the offset
+    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
+
+    while ($offset -lt $total) {
+        $getComputers = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers?offset=$offset&limit=$limit" -Method 'GET' -Headers $sessionHeader
+        
+        $mergeComputers.Computers += $getComputers.Computers    # Merge the current computer list
+        $mergeComputers.TotalCount = $getComputers.TotalCount   # Update the TotalCount
+
+        $total = $getComputers.TotalCount   # Update the total with the real total
+        $offset = $limit  * $iteration
+        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+    }
+    return $mergeComputers
+}
+
+<#
+.SYNOPSIS
+    Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
+
+.DESCRIPTION
+    This function acts as a wrapper for the CyberArk EPM REST API to get computers.
+    It automatically manages pagination by making multiple API calls if the total number
+    of computers exceeds the API's maximum limit (5000). The function merges all
+    computers into a single PSCustomObject for easy management.
+
+.PARAMETER limit
+    The maximum number of computers to retrieve per API call. The default is 5000,
+    which is the maximum allowed by the CyberArk EPM API.
+
+.EXAMPLE
+    Get-EPMTotalCount -limit 500
+
+.OUTPUTS
+    This function returns an object containing the merged computers and metadata.
+    The object has the following properties:
+        - Computers: An array of all policy objects.
+        - TotalCount: The total number of policies on the server.
+
+.NOTES
+    This function requires a valid session header and manager URL to be accessible
+    in the execution context. It uses Invoke-EPMRestMethod.
+#>
+Function Get-EPMEndpoints {
+    param (
+        [int]$limit = 1000,         #Set limit to the max size if not declared
+        [hashtable]$filter    #Set the search body
+    )
+
+    $mergeEndpoints = [PSCustomObject]@{
+        endpoints = @()
+        filteredCount = 0
+        returnedCount = 0
+    }
+
+    if ($null -ne $filter) {
+        $filterJSON = $filter | ConvertTo-Json
+    }
+
+    $offset = 0             # Offset
+    $iteration = 1          # Define the number of iteraction, used to increase the offset
+    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
+
+    while ($offset -lt $total) {
+        $getEndpoints = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/search?offset=$offset&limit=$limit" -Method 'POST' -Headers $sessionHeader -Body $filterJSON
+        
+        $mergeEndpoints.endpoints += $getEndpoints.endpoints    # Merge the current computer list
+        $mergeEndpoints.filteredCount = $getEndpoints.filteredCount   # Update the filteredCount (the total device based on the filter)
+        $mergeEndpoints.returnedCount = $getEndpoints.returnedCount   # Update the returnedCount
+
+        $total = $getComputers.filteredCount   # Update the total with the real total
+        $offset = $limit  * $iteration
+        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+    }
+    return $mergeEndpoints
+}
+
 ### Begin Script ###
 
 ## Prepare log folder and file
@@ -365,59 +513,9 @@ $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -se
 
 Write-Box "$($set.setName)"
 
-# Get computers list
-$getComputerList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers" -Method 'GET' -Headers $sessionHeader
-
-<#
-$getComputerList = @'
-[
-    {
-        "AgentId": "c15764f3-d9ae-4ee0-83e9-f1f5806f91ca",
-        "AgentVersion": "24.2.0.1855",
-        "ComputerName": "WIN11-1",
-        "ComputerType": "Desktop",
-        "Platform": "Windows",
-        "InstallTime": "2024-03-14T16:27:09.257",
-        "Status": "Disconnected",
-        "LastSeen": "2024-04-11T10:56:35.38",
-        "LoggedIn": ""
-    },
-    {
-        "AgentId": "d5f92e1c-bf1b-48f3-9eae-7c5a3e8e642e",
-        "AgentVersion": "24.2.0.1855",
-        "ComputerName": "WIN11-2",
-        "ComputerType": "Desktop",
-        "Platform": "Windows",
-        "InstallTime": "2024-03-15T12:45:09.257",
-        "Status": "Connected",
-        "LastSeen": "2024-04-11T09:56:35.38",
-        "LoggedIn": "user1"
-    },
-    {
-        "AgentId": "e6b14235-2f11-4c8e-bcf2-9e3489776a3c",
-        "AgentVersion": "24.2.0.1855",
-        "ComputerName": "WIN11-1",
-        "ComputerType": "Desktop",
-        "Platform": "Windows",
-        "InstallTime": "2024-03-20T08:27:09.257",
-        "Status": "Disconnected",
-        "LastSeen": "2024-04-10T10:56:35.37",
-        "LoggedIn": ""
-    },
-    {
-        "AgentId": "e6b14234-2f11-4c8e-bcf2-9e3489776a3c",
-        "AgentVersion": "24.2.0.1855",
-        "ComputerName": "WIN11-1",
-        "ComputerType": "Desktop",
-        "Platform": "Windows",
-        "InstallTime": "2024-03-20T08:27:09.257",
-        "Status": "Disconnected",
-        "LastSeen": "2024-04-10T10:56:34.37",
-        "LoggedIn": ""
-    }
-]
-'@ | ConvertFrom-Json
-#>
+## Processing My Computer (Old API)
+Write-Log "Working on 'My Computer'." INFO
+$getComputerList = Get-EPMComputers
 
 # Group objects by ComputerName
 $groupedComputersByName = $getComputerList.Computers | Group-Object -Property ComputerName
@@ -445,4 +543,42 @@ foreach ($groupComputer in $groupedComputersByName) {
         }
     }
 }
+
+
+## Processing Endpoints (New API)
+Write-Log "Working on Endpoints." INFO
+
+$getEndpointsList = Get-EPMEndpoints
+
+# Group objects by ComputerName
+$groupedEndpointsByName = $getEndpointsList.endpoints | Group-Object -Property name
+$duplicateEndpointsCount = $getEndpointsList | Where-Object {$_.Count -gt 1} | Measure-Object | Select-Object -ExpandProperty Count
+
+Write-Log "Identified $duplicateEndpointsCount duplicated devices." INFO
+
+# Iterate through each group
+foreach ($groupEndpoints in $groupedEndpointsByName) {
+    # Select multiple device having the same computer name.
+    if ($groupEndpoints.Count -gt 1) {
+        # Sort objects in the group by LastSeen in ascending order
+        $sorted = $groupEndpoints.Group | Sort-Object -Property LastSeen -Descending
+
+        # Output the ComputerName and oldest AgentId(s) starting from the array position 1 (order by descending)
+        Write-Log "Duplicated Device: $($sorted[0].ComputerName), found $($groupEndpoints.Count) items" WARN
+        for ($i = 1; $i -lt $sorted.Count; $i++) {
+            if ($delete) {
+                Write-Log "+ - Deleting $($sorted[$i].Id)..." WARN
+                $deleteEndpointFilter = @{
+                    "filter" = "id EQ $($sorted[$i].Id)"
+                } | ConvertTo-Json
+
+                Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/delete" -Method 'POST' -Headers $sessionHeader -Body $deleteEndpointFilter
+            } else {
+                Write-Log "+ - To be deleted: $($sorted[$i].id)" WARN
+            }
+
+        }
+    }
+}
+
 

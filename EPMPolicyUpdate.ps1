@@ -48,7 +48,7 @@ param (
     [switch]$EnableAudit
 )
 
-# Function to log messages to console and file
+## Write-Host Wrapper and log management
 function Write-Log {
     param (
         [Parameter(Mandatory = $true)]
@@ -62,29 +62,36 @@ function Write-Log {
         [string]$ForegroundColor
     )
     
+    $expSeverity = $severity
+    $exceedingChars = 5-$severity.Length
+    
+    while ($exceedingChars -ne 0) {
+        $expSeverity = $expSeverity + " "
+        $exceedingChars--
+    }
+
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logMessage = "$timestamp [$severity] - $message"
+    $logMessage = "$timestamp [$expSeverity] $message"
 
     switch ($severity) {
         "INFO" {
             if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
                 $ForegroundColor = "Green"
             }
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
         "WARN" {
             if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
                 $ForegroundColor = "Yellow"
             }
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
         "ERROR" {
             if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
                 $ForegroundColor = "Red"
             }
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
     }
+
+    Write-Host $logMessage -ForegroundColor $ForegroundColor
 
     if ($log) {
         Add-Content -Path $logFilePath -Value $logMessage
@@ -96,11 +103,8 @@ function Write-Box {
         [string]$title
     )
     
-    # Calculate the length of the title
-    $titleLength = $title.Length
-
     # Create the top and bottom lines
-    $line = "-" * $titleLength
+    $line = "-" * $title.Length
 
     # Print the box
     Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
@@ -108,7 +112,7 @@ function Write-Box {
     Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
 }
 
-function Invoke-EPMRestMethod  {
+## Invoke-RestMethod Wrapper
 <#
 .SYNOPSIS
     Invokes a REST API method with automatic retry logic in case of transient failures.
@@ -129,177 +133,371 @@ function Invoke-EPMRestMethod  {
 .PARAMETER Headers
     Headers to include in the API request.
 #>
+function Invoke-EPMRestMethod {
     param (
         [string]$URI,
         [string]$Method,
-        [object]$Body,
-        [hashtable]$Headers
+        [object]$Body = $null,
+        [hashtable]$Headers = @{},
+        [int]$MaxRetries = 3
+    #    [int]$RetryDelay = 120
     )
 
-    $apiDelaySeconds = 120
-    $maxRetries = 3
     $retryCount = 0
 
-    while ($retryCount -lt $maxRetries) {
+    while ($retryCount -lt $MaxRetries) {
         try {
             $response = Invoke-RestMethod -Uri $Uri -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
             return $response
         }
         catch {
-            # Convert Error message to Powershell Object
+            $ErrorDetailsMessage = $null
+
+            # Extract API error details if available
             if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
-                $ErrorDetailsMessage = $_.ErrorDetails.Message | ConvertFrom-Json
-            }
-            else {
-                throw "API call failed. $_"
+                try {
+                    $ErrorDetailsMessage = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction SilentlyContinue
+                }
+                catch {
+                    Write-Log "Failed to parse error message as JSON. Raw message: $($_.ErrorDetails.Message)" WARN
+                }
             }
 
-            # Error: EPM00000AE - Too many calls per 2 minute(s). The limit is 10
-            if ( $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
-                Write-Log $ErrorDetailsMessage.ErrorMessage ERROR
-                Write-Log "Retrying in $apiDelaySeconds seconds..." WARN
-                Start-Sleep -Seconds $apiDelaySeconds
+            # Handle rate limit error (EPM00000AE)
+            if ($ErrorDetailsMessage -and $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
+                # Regex pattern to find numbers followed by "minute(s)"
+                $pattern = "\d+\s+minute"
+                $match = [regex]::Match($ErrorDetailsMessage.ErrorMessage, $pattern)
+                if ($match.Success) {
+                    $minutes = [int]($match.Value -replace '\s+minute', '')
+                    [int]$RetryDelay = $minutes * 60
+                }
+
+                Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
+                Start-Sleep -Seconds $RetryDelay
                 $retryCount++
-            }
-            else {
-                throw "API call failed. ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
+            } else {
+                # Handle Body possible filter error 
+                if ($ErrorDetailsMessage.ErrorCode -eq "EPM000002E" -and $null -ne $Body) {
+                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
+                    Write-Log "Please verify the filter body if present, as it could be the cause of this error code." ERROR
+                    throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
+                } else {
+                    # Log error only if it's NOT the handled EPM00000AE error
+                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
+                    throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
+                }
             }
         }
     }
 
-    # If all retries fail, handle accordingly
-    throw "API call failed after $RetryCount retries."
+    # If all retries fail, log and throw an error
+    Write-Log "API call failed after $MaxRetries retries. URI: $URI" ERROR
+    throw "API call failed after $MaxRetries retries."
 }
 
+## EPM RestAPI Wrappers
+<#
+.SYNOPSIS
+Connects to the EPM (Enterprise Password Vault) using the provided credentials and tenant information.
+
+.DESCRIPTION
+This function performs authentication with the EPM API to obtain the manager URL and authentication details.
+
+.PARAMETER credential
+The credential object containing the username and password.
+
+.PARAMETER epmTenant
+The EPM tenant name.
+
+.OUTPUTS
+A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
+
+#>
 function Connect-EPM {
-    <#
-    .SYNOPSIS
-    Connects to the EPM (Enterprise Password Vault) using the provided credentials and tenant information.
-
-    .DESCRIPTION
-    This function performs authentication with the EPM API to obtain the manager URL and authentication details.
-
-    .PARAMETER credential
-    The credential object containing the username and password.
-
-    .PARAMETER epmTenant
-    The EPM tenant name.
-
-    .OUTPUTS
-    A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
-
-    #>
     param (
+        [Parameter(Mandatory = $true)]
         [pscredential]$credential,  # Credential object containing the username and password
+
+        [Parameter(Mandatory = $true)]
         [string]$epmTenant          # EPM tenant name
     )
 
     # Convert credential information to JSON for authentication
     $authBody = @{
-        Username = $credential.UserName
-        Password = $credential.GetNetworkCredential().Password
+        Username      = $credential.UserName
+        Password      = $credential.GetNetworkCredential().Password
         ApplicationID = "Powershell"
-    } | ConvertTo-Json
+    } | ConvertTo-Json -Depth 3
 
     $authHeaders = @{
         "Content-Type" = "application/json"
     }
 
-    $response = Invoke-EPMRestMethod -URI "https://$epmTenant.epm.cyberark.com/EPM/API/Auth/EPM/Logon" -Method 'POST' -Headers $authHeaders -Body $authBody
+    try {
+        # Write-Log "Attempting to connect to EPM tenant: $epmTenant" INFO
+        $response = Invoke-EPMRestMethod -URI "https://$epmTenant.epm.cyberark.com/EPM/API/Auth/EPM/Logon" -Method 'POST' -Headers $authHeaders -Body $authBody
 
-    # Return a custom object with connection information
-    [PSCustomObject]@{
-        managerURL = $($response.ManagerURL)
-        auth       = $($response.EPMAuthenticationResult)
+        # Ensure the response contains the expected fields
+        if (-not $response -or -not $response.ManagerURL -or -not $response.EPMAuthenticationResult) {
+            throw "EPM authentication failed: Missing expected response fields."
+        }
+
+        # Write-Log "Successfully connected to EPM tenant: $epmTenant" INFO
+
+        # Return a custom object with connection information
+        return [PSCustomObject]@{
+            managerURL = $response.ManagerURL
+            auth       = $response.EPMAuthenticationResult
+        }
+    }
+    catch {
+        Write-Log "Failed to connect to EPM tenant: $epmTenant. Error: $_" ERROR
+        throw "Error connecting to EPM: $_"
     }
 }
 
+<#
+.SYNOPSIS
+Retrieves the ID and name of an EPM set based on the provided parameters.
+
+.DESCRIPTION
+This function interacts with the EPM API to retrieve information about sets based on the specified parameters.
+
+.PARAMETER managerURL
+The URL of the EPM manager.
+
+.PARAMETER Headers
+The authorization headers.
+
+.PARAMETER setName
+The name of the EPM set to retrieve.
+
+.OUTPUTS
+A custom object with the properties "setId" and "setName" representing the EPM set information.
+#>
 function Get-EPMSetID {
-    <#
-    .SYNOPSIS
-    Retrieves the ID and name of an EPM set based on the provided parameters.
-
-    .DESCRIPTION
-    This function interacts with the EPM API to retrieve information about sets based on the specified parameters.
-
-    .PARAMETER managerURL
-    The URL of the EPM manager.
-
-    .PARAMETER authToken
-    The authorization token for authentication.
-
-    .PARAMETER setName
-    The name of the EPM set to retrieve.
-
-    .OUTPUTS
-    A custom object with the properties "setId" and "setName" representing the EPM set information.
-
-    #>
     param (
+        [Parameter(Mandatory = $true)]
         [string]$managerURL,
+
+        [Parameter(Mandatory = $true)]
         [hashtable]$Headers,
+
         [string]$setName
     )
 
-    $sets = Invoke-EPMRestMethod -URI "$managerURL/EPM/API/Sets" -Method 'GET' -Headers $Headers
-    
-    $setId = $null
+    # Retrieve list of sets
+    try {
+        #Write-Log "Retrieving EPM Sets from: $managerURL" INFO
+        $sets = Invoke-EPMRestMethod -URI "$managerURL/EPM/API/Sets" -Method 'GET' -Headers $Headers
 
-    # Check if $SetName is empty
-    if ([string]::IsNullOrEmpty($setName)) {
+        if (-not $sets -or -not $sets.Sets) {
+            throw "No sets retrieved from EPM."
+        }
+    }
+    catch {
+        Write-Log "Failed to retrieve EPM Sets. Error: $_" ERROR
+        throw "Could not retrieve EPM sets."
+    }
 
-        # Repeat until a valid set number is entered
-        do {
-            # List the available sets with numbers
-            Write-Box "Available Sets:" INFO
-            $numberSets = 0
-            foreach ($set in $sets.Sets) {
-                Write-Log "$($numberSets + 1). $($set.Name)" INFO DarkCyan
-                $numberSets++
+    #$setId = $null
+
+    # If setName is provided, search for it directly
+    if (-not [string]::IsNullOrEmpty($setName)) {
+        $selectedSet = $sets.Sets | Where-Object { $_.Name -eq $setName } | Select-Object -First 1
+
+        if ($selectedSet) {
+            return [PSCustomObject]@{
+                setId   = $selectedSet.Id
+                setName = $selectedSet.Name
             }
-        
-            # Ask the user to choose a set by number
-            $chosenSetNumber = Read-Host "Enter the number of the set you want to choose"
-        
-            # Validate the chosen set number
-            try {
-                $chosenSetNumber = [int]$chosenSetNumber
-        
-                if ($chosenSetNumber -lt 1 -or $chosenSetNumber -gt $numberSets) {
-                    Write-Log "Invalid set number. Please enter a number between 1 and $numberSets." ERROR
-                } else {
-                    # Set chosenSet based on the user's selection
-                    $chosenSet = $sets.Sets[$chosenSetNumber - 1]
-                    $setId = $chosenSet.Id
-                    $setName = $chosenSet.Name
+        } else {
+            Write-Log "Error: Set '$setName' not found in EPM." ERROR
+            throw "Invalid Set Name: $setName"
+        }
+    }
+
+    # If no setName is provided, prompt the user to select one
+    #Write-Log "No set name provided. Listing available sets for selection..." INFO
+
+    if ($sets.Sets.Count -eq 0) {
+        Write-Log "No sets available in EPM." ERROR
+        throw "No sets found. Cannot proceed."
+    }
+
+    Write-Box "Available Sets:" INFO
+
+    for ($i = 0; $i -lt $sets.Sets.Count; $i++) {
+        Write-Log "$($i + 1). $($sets.Sets[$i].Name)" INFO DarkCyan
+    }
+
+    # Prompt user for input with max retries
+    $maxRetries = 3
+    for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+        $chosenSetNumber = Read-Host "Enter the number of the set you want to choose"
+
+        try {
+            $chosenSetNumber = [int]$chosenSetNumber
+
+            if ($chosenSetNumber -ge 1 -and $chosenSetNumber -le $sets.Sets.Count) {
+                $chosenSet = $sets.Sets[$chosenSetNumber - 1]
+                return [PSCustomObject]@{
+                    setId   = $chosenSet.Id
+                    setName = $chosenSet.Name
                 }
-            } catch {
-                Write-Log "Invalid input. Please enter a valid number." ERROR
-            }
-        } until ($setId)
-    }
-    
-    else {
-        # List the sets with numbers
-        foreach ($set in $sets.Sets) {
-            # Check if setname matches with the configured set
-            if ($set.Name -eq $SetName) {
-                $setId = $set.Id
-                break  # Exit the loop once the set is found
+            } else {
+                Write-Log "Invalid selection. Please enter a number between 1 and $($sets.Sets.Count)." ERROR
             }
         }
-        if ([string]::IsNullOrEmpty($setId)) {
-            Write-Log "$SetName : Invalid Set" ERROR
-            return
+        catch {
+            Write-Log "Invalid input. Please enter a valid number." ERROR
         }
     }
 
-    # Return a custom object with set information
-    [PSCustomObject]@{
-        setId   = $setId
-        setName = $setName
-    }
+    throw "Maximum attempts reached. Exiting set selection."
 }
+
+<#
+.SYNOPSIS
+    Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
+
+.DESCRIPTION
+    This function acts as a wrapper for the CyberArk EPM REST API to get computers.
+    It automatically manages pagination by making multiple API calls if the total number
+    of computers exceeds the API's maximum limit (5000). The function merges all
+    computers into a single PSCustomObject for easy management.
+
+.PARAMETER limit
+    The maximum number of computers to retrieve per API call. The default is 5000,
+    which is the maximum allowed by the CyberArk EPM API.
+
+.EXAMPLE
+    Get-EPMTotalCount -limit 500
+
+.OUTPUTS
+    This function returns an object containing the merged computers and metadata.
+    The object has the following properties:
+        - Computers: An array of all policy objects.
+        - TotalCount: The total number of policies on the server.
+
+.NOTES
+    This function requires a valid session header and manager URL to be accessible
+    in the execution context. It uses Invoke-EPMRestMethod.
+#>
+Function Get-EPMComputers {
+        param (
+        [int]$limit = 5000  # Set limit to the max size if not declared
+    )
+
+    $mergeComputers = [PSCustomObject]@{
+        Computers = @()
+        TotalCount = 0
+    }
+
+    $offset = 0             # Offset
+    $iteration = 1          # Define the number of iteraction, used to increase the offset
+    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
+
+    while ($offset -lt $total) {
+        $getComputers = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers?offset=$offset&limit=$limit" -Method 'GET' -Headers $sessionHeader
+        
+        $mergeComputers.Computers += $getComputers.Computers    # Merge the current computer list
+        $mergeComputers.TotalCount = $getComputers.TotalCount   # Update the TotalCount
+
+        $total = $getComputers.TotalCount   # Update the total with the real total
+        $offset = $limit  * $iteration
+        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+    }
+    return $mergeComputers
+}
+
+<#
+.SYNOPSIS
+    Retrieves a list of EPM policies from a CyberArk EPM server, handling pagination automatically.
+
+.DESCRIPTION
+    This function acts as a wrapper for the CyberArk EPM REST API to get policies.
+    It automatically manages pagination by making multiple API calls if the total number
+    of policies exceeds the API's maximum limit (1000). The function merges all
+    policies into a single PSCustomObject for easy management.
+
+.PARAMETER limit
+    The maximum number of policies to retrieve per API call. The default is 1000,
+    which is the maximum allowed by the CyberArk EPM API.
+
+.PARAMETER sortBy
+    The field by which to sort the policies. Common values include "Updated", "Name",
+    and "PolicyType". The default is "Updated".
+
+.PARAMETER sortDir
+    The sorting direction. Valid values are "asc" (ascending) and "desc" (descending).
+    The default is "desc".
+
+.PARAMETER policyFilter
+    A hashtable containing filter criteria for the policies. The keys and values
+    must match the JSON format expected by the EPM API's search endpoint.
+    Example: @{ "filter" = "PolicyType IN 11,36,37,38" }.
+
+.EXAMPLE
+    Get-EPMPolicies -limit 500 -sortBy "Name"
+
+.EXAMPLE
+    $myFilter = @{
+        "filter" = "PolicyType IN 11,36"
+    }
+    Get-EPMPolicies -policyFilter $myFilter
+
+.OUTPUTS
+    This function returns an object containing the merged policies and metadata.
+    The object has the following properties:
+        - Policies: An array of all policy objects.
+        - ActiveCount: The count of active policies.
+        - TotalCount: The total number of policies on the server.
+        - FilteredCount: The total number of policies that match the applied filter.
+
+.NOTES
+    This function requires a valid session header and manager URL to be accessible
+    in the execution context. It uses Invoke-EPMRestMethod.
+#>
+Function Get-EPMPolicies {
+    param (
+        [int]$limit = 1000,         # Set limit to the max size if not declared
+        [string]$sortBy = "Updated",
+        [string]$sortDir = "desc",
+        [hashtable]$policyFilter
+    )
+
+    $mergePolicies = [PSCustomObject]@{
+        Policies = @()
+        ActiveCount = 0
+        TotalCount = 0
+        FilteredCount = 0
+    }
+
+    if ($null -ne $policiesFilter) {
+        $policyFilterJSON = $policyFilter | ConvertTo-Json
+    }
+
+    $offset = 0             # Offset
+    $iteration = 1          # Define the number of iteraction, used to increase the offset
+    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
+
+    while ($offset -lt $total) {
+        $getPolicies = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search?offset=$offset&limit=$limit&sortBy=$sortBy&sortDir=$sortDir" -Method 'POST' -Headers $sessionHeader -Body $policyFilterJSON
+        
+        $mergePolicies.Policies += $getPolicies.Policies            # Merge the current computer list
+        $mergePolicies.ActiveCount = $getPolicies.ActiveCount       # Update the ActiveCount
+        $mergePolicies.TotalCount = $getPolicies.TotalCount         # Update the TotalCount
+        $mergePolicies.FilteredCount = $getPolicies.FilteredCount   # Update the FilteredCount
+
+        $total = $getPolicies.FilteredCount   # Update the total with the real total
+        $offset = $limit * $iteration
+        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+    }
+    return $mergePolicies
+}
+
 
 ### Begin Script ###
 
@@ -340,15 +538,16 @@ $sessionHeader = @{
 # Get SetId
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
+Write-Log "Entering SET: $($set.setName)..." INFO -ForegroundColor Blue
 
 if ($EnableAudit) {
     # Retrieve Policies
     # Filter only advanced Windows Policy
     $policiesSearchFilter = @{
         "filter" = "PolicyType EQ ADV_WIN"
-    } | ConvertTo-Json
+    }
 
-    $policySearch = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search?limit=1000" -Method 'POST' -Headers $sessionHeader -Body $policiesSearchFilter
+    $policySearch = Get-EPMPolicies -policyFilter $policiesSearchFilter
 
     # Set the Counter
     $policyCounter = 1 
@@ -358,29 +557,33 @@ if ($EnableAudit) {
     # Process each policy
     foreach ($policy in $policySearch.Policies) {
 
-        Write-Log "Processing $policyCounter of $($policySearch.FilteredCount): $($policy.PolicyName)" INFO
+        Write-Log "Processing $policyCounter of $($policySearch.FilteredCount): '$($policy.PolicyName)'" INFO
 
         # Filter only the actions: Block, Elevate, Elevate If Necessary
         if ($policy.Action -eq 1 -or $policy.Action -eq 3 -or $policy.Action -eq 4) {
         
-            # Retrive the policy and save in temp file
+            # Retrive the policy
             $getPolicyDetails = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/$($policy.PolicyId)" -Method 'GET' -Headers $sessionHeader
                 
             $Audit = $getPolicyDetails.Policy.Audit
             if ($Audit -ne $true) {
                 Write-Log "$($policy.PolicyName): Audit disabled" INFO
+                
                 $getPolicyDetails.Policy.Audit = $true
                 Write-Log "$($policy.PolicyName): Enabling Audit" INFO
+
                 $updatePolicyJson = $getPolicyDetails.Policy | ConvertTo-Json -Depth 10
+
+                # Update policy
                 $updatePolicy = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/$($policy.PolicyId)" -Method 'PUT' -Headers $sessionHeader -Body ([System.Text.Encoding]::UTF8.GetBytes($updatePolicyJson)) # to handle special char
-                Write-Log "$($policy.PolicyName): updated correctly - audit enabled" INFO
+
+                Write-Log "$($policy.PolicyName): updated correctly - audit enabled." INFO
             } else {
-                Write-Log "$($policy.PolicyName): Nothing to do, Policy Audit enabled" INFO
+                Write-Log "$($policy.PolicyName): Nothing to do, Policy Audit enabled." INFO
             }
         } else {
-            Write-Log "$($policy.PolicyName): Policy Action Allow not in scope" WARN
+            Write-Log "$($policy.PolicyName): Policy Action 'Allow' not in scope." WARN
         }
-
         $policyCounter++
     }
 }
@@ -514,5 +717,5 @@ if ($RemoveImportedFlag) {
             $counter++
         }
     }
-    Write-Log "Processing Application Groups..." INFO
+    Write-Log "... Done Application Groups..." INFO
 }

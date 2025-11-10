@@ -22,7 +22,7 @@
     Company: CyberArk
     Version: 2
     Created: 05/2023
-    Last Modified: 03/2025
+    Last Modified: 09/2025
 #>
 
 param (
@@ -43,7 +43,7 @@ param (
     [string]$logFolder 
 )
 
-# Function to log messages to console and file
+## Write-Host Wrapper and log management
 function Write-Log {
     param (
         [Parameter(Mandatory = $true)]
@@ -98,11 +98,8 @@ function Write-Box {
         [string]$title
     )
     
-    # Calculate the length of the title
-    $titleLength = $title.Length
-
     # Create the top and bottom lines
-    $line = "-" * $titleLength
+    $line = "-" * $title.Length
 
     # Print the box
     Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
@@ -110,6 +107,7 @@ function Write-Box {
     Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
 }
 
+## Invoke-RestMethod Wrapper
 <#
 .SYNOPSIS
     Invokes a REST API method with automatic retry logic in case of transient failures.
@@ -136,20 +134,18 @@ function Invoke-EPMRestMethod {
         [string]$Method,
         [object]$Body = $null,
         [hashtable]$Headers = @{},
-        [int]$MaxRetries = 3,
-        [int]$RetryDelay = 120
+        [int]$MaxRetries = 3
+    #    [int]$RetryDelay = 120
     )
 
     $retryCount = 0
 
     while ($retryCount -lt $MaxRetries) {
         try {
-            # Write-Log "Attempt #$($retryCount + 1): Calling API: $URI with Method: $Method" INFO
             $response = Invoke-RestMethod -Uri $Uri -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
             return $response
         }
         catch {
-            #$errorMessage = $_.Exception.Message
             $ErrorDetailsMessage = $null
 
             # Extract API error details if available
@@ -164,6 +160,14 @@ function Invoke-EPMRestMethod {
 
             # Handle rate limit error (EPM00000AE)
             if ($ErrorDetailsMessage -and $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
+                # Regex pattern to find numbers followed by "minute(s)"
+                $pattern = "\d+\s+minute"
+                $match = [regex]::Match($ErrorDetailsMessage.ErrorMessage, $pattern)
+                if ($match.Success) {
+                    $minutes = [int]($match.Value -replace '\s+minute', '')
+                    [int]$RetryDelay = $minutes * 60
+                }
+
                 Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
                 Start-Sleep -Seconds $RetryDelay
                 $retryCount++
@@ -187,8 +191,7 @@ function Invoke-EPMRestMethod {
     throw "API call failed after $MaxRetries retries."
 }
 
-# EPM RestAPI Wrappers
-
+## EPM RestAPI Wrappers
 <#
 .SYNOPSIS
 Connects to the EPM (Enterprise Password Vault) using the provided credentials and tenant information.
@@ -406,6 +409,67 @@ Function Get-EPMComputers {
 
 <#
 .SYNOPSIS
+    Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
+
+.DESCRIPTION
+    This function acts as a wrapper for the CyberArk EPM REST API to get computers.
+    It automatically manages pagination by making multiple API calls if the total number
+    of computers exceeds the API's maximum limit (5000). The function merges all
+    computers into a single PSCustomObject for easy management.
+
+.PARAMETER limit
+    The maximum number of computers to retrieve per API call. The default is 5000,
+    which is the maximum allowed by the CyberArk EPM API.
+
+.EXAMPLE
+    Get-EPMTotalCount -limit 500
+
+.OUTPUTS
+    This function returns an object containing the merged computers and metadata.
+    The object has the following properties:
+        - Computers: An array of all policy objects.
+        - TotalCount: The total number of policies on the server.
+
+.NOTES
+    This function requires a valid session header and manager URL to be accessible
+    in the execution context. It uses Invoke-EPMRestMethod.
+#>
+Function Get-EPMEndpoints {
+    param (
+        [int]$limit = 1000,     #Set limit to the max size if not declared
+        [hashtable]$filter      #Set the search body
+    )
+
+    $mergeEndpoints = [PSCustomObject]@{
+        endpoints = @()
+        filteredCount = 0
+        returnedCount = 0
+    }
+
+    if ($null -ne $filter) {
+        $filterJSON = $filter | ConvertTo-Json
+    }
+
+    $offset = 0             # Offset
+    $iteration = 1          # Define the number of iteraction, used to increase the offset
+    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
+
+    while ($offset -lt $total) {
+        $getEndpoints = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/search?offset=$offset&limit=$limit" -Method 'POST' -Headers $sessionHeader -Body $filterJSON
+        
+        $mergeEndpoints.endpoints += $getEndpoints.endpoints    # Merge the current computer list
+        $mergeEndpoints.filteredCount = $getEndpoints.filteredCount   # Update the filteredCount (the total device based on the filter)
+        $mergeEndpoints.returnedCount = $getEndpoints.returnedCount   # Update the returnedCount
+
+        $total = $getComputers.filteredCount   # Update the total with the real total
+        $offset = $limit  * $iteration
+        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+    }
+    return $mergeEndpoints
+}
+
+<#
+.SYNOPSIS
     Retrieves a list of EPM policies from a CyberArk EPM server, handling pagination automatically.
 
 .DESCRIPTION
@@ -528,6 +592,8 @@ $sessionHeader = @{
 
 # Get SetId
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
+
+Write-Log "Entering SET: $($set.setName)..." INFO -ForegroundColor Blue
 
 Write-Log $login.managerURL INFO
 Write-Log $set.SetName INFO

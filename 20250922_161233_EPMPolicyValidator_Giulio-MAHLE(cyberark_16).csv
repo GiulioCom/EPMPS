@@ -1,0 +1,7 @@
+﻿"PolicyName","Type","PolicyAction","ApplicationName","ApplicationType","TotalWeight"
+,,,,,
+"RUN_APP_ ShopfloorMachines_ Bat Files","Advanced Windows","Elevate","104344_ip.bat","Script","20"
+"RAS_APP_InsightExplorer_C","Advanced Windows","Elevate if necessary","in-sight explorer.exe","EXE","62,5"
+"RUN_APP_MySQLWorkbench_N","Advanced Windows","Elevate","MySQLWorkbench.exe","EXE","45"
+"RUN_APP_UniClient_C","Advanced Windows","Elevate","uniclient.exe","EXE","15"
+"RUN_APP_UniClient_C","Advanced Windows","Elevate","协卡助手","EXE","65"

@@ -1,8 +1,13 @@
 <#
 .SYNOPSIS
-    
+    Adds computers to CyberArk EPM policies based on a CSV file.
 
 .DESCRIPTION
+    This script automates the process of assigning EPM policies to specific computers. It reads a CSV file
+    that maps computer names to policy names. For each computer in the file, it verifies the existence of
+    both the computer and the specified policies within a given EPM set and tenant. If a valid policy
+    is found, the script updates the policy to include the computer. The script also handles
+    user-based policies and tracks managed computers to avoid re-processing.
 
 .PARAMETER username
     The EPM username (e.g., user@domain).
@@ -13,8 +18,17 @@
 .PARAMETER tenant
     The EPM tenant name (e.g., eu, uk).
 
-.PARAMETER destinationFolder
+.PARAMETER policyFile
+    The full path to the input CSV file. The file must contain two columns:
+        1. The Computer Name (e.g., WIN10X64-1).
+        2. A semicolon-separated list of Policy Names to be applied (e.g., [ICT] Script;[LSEG] - Shell).
+    
+    Example CSV format:
+    WIN10X64-1,[ICT] Scrip;[LSEG] - Shell;PM-Allow Edit Enviroment Variable
+    WIN11-1,[ICT] Script
 
+.EXAMPLE
+    .\EPMAddComputertoPolicy.ps1 -username "admin@epm.com" -setName "Default Set" -tenant "eu" -policyFile "C:\temp\policy_assignments.csv"
 
 .NOTES
     File: EPMAddComputertoPolicy.ps1
@@ -22,8 +36,15 @@
     Company: CyberArk
     Version: 2
     Created: 05/2023
-    Last Modified: 07/2025
-    # Adding file to store the computer already managed
+    Last Modified: 09/2025
+    
+    Version History:
+    07/2025:
+    - Added a feature to store and track managed computers to prevent duplicate processing.
+
+    09/2025:
+    - Extended functionality to manage policies type "users".
+    - Improved the underlying Get-Computer and Get-Policies functions for better performance and reliability.
 #>
 
 param (
@@ -45,7 +66,6 @@ param (
 
     [Parameter(Mandatory=$true)]
     [string]$policyFile
-
 )
 
 # Function to log messages to console and file
@@ -103,11 +123,8 @@ function Write-Box {
         [string]$title
     )
     
-    # Calculate the length of the title
-    $titleLength = $title.Length
-
     # Create the top and bottom lines
-    $line = "-" * $titleLength
+    $line = "-" * $title.Length
 
     # Print the box
     Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan

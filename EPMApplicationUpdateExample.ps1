@@ -3,7 +3,7 @@
     
 
 .DESCRIPTION
-Demo Script update application properties massively, in this example script enable child process on each definition in the Allow Application Group 
+    Demo Script update application properties massively, in this example script enable child process on each definition in the Allow Application Group 
 
 .PARAMETER username
     The EPM username (e.g., user@domain).

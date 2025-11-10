@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-    Move Computers from one SET to another
+    Get Endpoint details, new resAPI POC
 
 .DESCRIPTION
-    Move Computers from one SET to another reading the input from csv having the list of computer,setName
+    Used to exzatract FQDN name
 
 .PARAMETER username
     The EPM username (e.g., user@domain).
@@ -14,20 +14,16 @@
 .PARAMETER tenant
     The EPM tenant name (e.g., eu, uk).
 
-.PARAMETER delete
-    Flag to enabled computer deletion
+.PARAMETER destinationFolder
+
 
 .NOTES
-    File: EPMMoveComputers.ps1
+    File: EPMGetEndpointsDetails.ps1
     Author: Giulio Compagnone
     Company: CyberArk
     Version: 0.1
-    Created: 02/2025
+    Created: 09/2025
     Last Modified: 09/2025
-    - 26/09/2025: Improve managent fo more than 5000 device
-
-.EXAMPLE
-    .\EPMMoveComputers.ps1 -username user@domain -tenant eu -set "Set Name" -computerList "file" -destSetName "dest Set Name" -log
 #>
 
 param (
@@ -41,17 +37,17 @@ param (
     [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch")]
     [string]$tenant,
 
-    [Parameter(Mandatory = $true, HelpMessage="CSV file list of computers")]
-    [string]$computerList,
-
-    [Parameter(Mandatory = $true, HelpMessage="Destination Set")]
-    [string]$destSetName,
-
     [Parameter(HelpMessage = "Enable logging to file and console")]
     [switch]$log,
 
     [Parameter(HelpMessage = "Specify the log file path")]
-    [string]$logFolder
+    [string]$logFolder,
+
+    [Parameter(HelpMessage = "Specify if Endpoints details are needed")]
+    [switch]$details,
+
+    [Parameter(HelpMessage = "Export output in CSV file")]
+    [string]$exportCSVPath
 )
 
 ## Write-Host Wrapper and log management
@@ -396,14 +392,20 @@ function Get-EPMSetID {
     This function requires a valid session header and manager URL to be accessible
     in the execution context. It uses Invoke-EPMRestMethod.
 #>
-Function Get-EPMComputers {
-        param (
-        [int]$limit = 5000  # Set limit to the max size if not declared
+Function Get-EPMEndpoints {
+    param (
+        [int]$limit = 1000,         #Set limit to the max size if not declared
+        [hashtable]$filter    #Set the search body
     )
 
-    $mergeComputers = [PSCustomObject]@{
-        Computers = @()
-        TotalCount = 0
+    $mergeEndpoints = [PSCustomObject]@{
+        endpoints = @()
+        filteredCount = 0
+        returnedCount = 0
+    }
+
+    if ($null -ne $filter) {
+        $filterJSON = $filter | ConvertTo-Json
     }
 
     $offset = 0             # Offset
@@ -411,17 +413,105 @@ Function Get-EPMComputers {
     $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
 
     while ($offset -lt $total) {
-        $getComputers = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers?offset=$offset&limit=$limit" -Method 'GET' -Headers $sessionHeader
+        $getEndpoints = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/search?offset=$offset&limit=$limit" -Method 'POST' -Headers $sessionHeader -Body $filterJSON
         
-        $mergeComputers.Computers += $getComputers.Computers    # Merge the current computer list
-        $mergeComputers.TotalCount = $getComputers.TotalCount   # Update the TotalCount
+        $mergeEndpoints.endpoints += $getEndpoints.endpoints    # Merge the current computer list
+        $mergeEndpoints.filteredCount = $getEndpoints.filteredCount   # Update the filteredCount (the total device based on the filter)
+        $mergeEndpoints.returnedCount = $getEndpoints.returnedCount   # Update the returnedCount
 
-        $total = $getComputers.TotalCount   # Update the total with the real total
+        $total = $getComputers.filteredCount   # Update the total with the real total
         $offset = $limit  * $iteration
         $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
     }
-    return $mergeComputers
+    return $mergeEndpoints
 }
+
+<#
+.SYNOPSIS
+    Retrieves a list of EPM policies from a CyberArk EPM server, handling pagination automatically.
+
+.DESCRIPTION
+    This function acts as a wrapper for the CyberArk EPM REST API to get policies.
+    It automatically manages pagination by making multiple API calls if the total number
+    of policies exceeds the API's maximum limit (1000). The function merges all
+    policies into a single PSCustomObject for easy management.
+
+.PARAMETER limit
+    The maximum number of policies to retrieve per API call. The default is 1000,
+    which is the maximum allowed by the CyberArk EPM API.
+
+.PARAMETER sortBy
+    The field by which to sort the policies. Common values include "Updated", "Name",
+    and "PolicyType". The default is "Updated".
+
+.PARAMETER sortDir
+    The sorting direction. Valid values are "asc" (ascending) and "desc" (descending).
+    The default is "desc".
+
+.PARAMETER policyFilter
+    A hashtable containing filter criteria for the policies. The keys and values
+    must match the JSON format expected by the EPM API's search endpoint.
+    Example: @{ "filter" = "PolicyType IN 11,36,37,38" }.
+
+.EXAMPLE
+    Get-EPMPolicies -limit 500 -sortBy "Name"
+
+.EXAMPLE
+    $myFilter = @{
+        "filter" = "PolicyType IN 11,36"
+    }
+    Get-EPMPolicies -policyFilter $myFilter
+
+.OUTPUTS
+    This function returns an object containing the merged policies and metadata.
+    The object has the following properties:
+        - Policies: An array of all policy objects.
+        - ActiveCount: The count of active policies.
+        - TotalCount: The total number of policies on the server.
+        - FilteredCount: The total number of policies that match the applied filter.
+
+.NOTES
+    This function requires a valid session header and manager URL to be accessible
+    in the execution context. It uses Invoke-EPMRestMethod.
+#>
+Function Get-EPMPolicies {
+    param (
+        [int]$limit = 1000,         # Set limit to the max size if not declared
+        [string]$sortBy = "Updated",
+        [string]$sortDir = "desc",
+        [hashtable]$policyFilter
+    )
+
+    $mergePolicies = [PSCustomObject]@{
+        Policies = @()
+        ActiveCount = 0
+        TotalCount = 0
+        FilteredCount = 0
+    }
+
+    if ($null -ne $policiesFilter) {
+        $policyFilterJSON = $policyFilter | ConvertTo-Json
+    }
+
+    $offset = 0             # Offset
+    $iteration = 1          # Define the number of iteraction, used to increase the offset
+    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
+
+    while ($offset -lt $total) {
+        $getPolicies = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search?offset=$offset&limit=$limit&sortBy=$sortBy&sortDir=$sortDir" -Method 'POST' -Headers $sessionHeader -Body $policyFilterJSON
+        
+        $mergePolicies.Policies += $getPolicies.Policies            # Merge the current computer list
+        $mergePolicies.ActiveCount = $getPolicies.ActiveCount       # Update the ActiveCount
+        $mergePolicies.TotalCount = $getPolicies.TotalCount         # Update the TotalCount
+        $mergePolicies.FilteredCount = $getPolicies.FilteredCount   # Update the FilteredCount
+
+        $total = $getPolicies.FilteredCount   # Update the total with the real total
+        $offset = $limit * $iteration
+        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+    }
+    return $mergePolicies
+}
+
 
 ### Begin Script ###
 
@@ -442,14 +532,10 @@ $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
 $logFileName = "$timestamp`_$scriptName.log"
 $logFilePath = Join-Path $logFolder $logFileName
+##
 
 Write-Box "$scriptName"
-
-# Check if the computer list file exists
-if (-Not (Test-Path -Path $computerList -PathType Leaf)) {
-    Write-Log "The specified file '$computerList' does not exist." ERROR
-    exit 1
-}
+##
 
 # Request EPM Credentials
 $credential = Get-Credential -UserName $username -Message "Enter password for $username"
@@ -460,7 +546,6 @@ $login = Connect-EPM -credential $credential -epmTenant $tenant
 # Create a session header with the authorization token
 $sessionHeader = @{
     "Authorization" = "basic $($login.auth)"
-    "Content-Type" = "application/json"
 }
 
 # Get SetId
@@ -468,99 +553,25 @@ $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -se
 
 Write-Log "Entering SET: $($set.setName)..." INFO -ForegroundColor Blue
 
-# Read the list of computer names
-$computerNamesFile = Get-Content -Path $computerList
+$fileCSVEndpoints = Join-Path $exportCSVPath "$($set.setName)_Endpoints.csv"
 
-# Get Destination SET data
-$destSet = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $destSetName
+Write-Log "Getting Endpoints List from set '$($set.setName)'" INFO
+$getEndpointsList = Get-EPMEndpoints
 
-# Get computers list
-#$getComputerList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers?limit=5000" -Method 'GET' -Headers $sessionHeader
-$getComputerList = Get-EPMTotalCount
-
-<#
-$getComputerList = @'
-[
-    {
-        "AgentId": "c15764f3-d9ae-4ee0-83e9-f1f5806f91ca",
-        "AgentVersion": "24.2.0.1855",
-        "ComputerName": "WIN11-1",
-        "ComputerType": "Desktop",
-        "Platform": "Windows",
-        "InstallTime": "2024-03-14T16:27:09.257",
-        "Status": "Disconnected",
-        "LastSeen": "2024-04-11T10:56:35.38",
-        "LoggedIn": ""
-    },
-    {
-        "AgentId": "d5f92e1c-bf1b-48f3-9eae-7c5a3e8e642e",
-        "AgentVersion": "24.2.0.1855",
-        "ComputerName": "WIN11-2",
-        "ComputerType": "Desktop",
-        "Platform": "Windows",
-        "InstallTime": "2024-03-15T12:45:09.257",
-        "Status": "Connected",
-        "LastSeen": "2024-04-11T09:56:35.38",
-        "LoggedIn": "user1"
-    },
-    {
-        "AgentId": "e6b14235-2f11-4c8e-bcf2-9e3489776a3c",
-        "AgentVersion": "24.2.0.1855",
-        "ComputerName": "WIN11-1",
-        "ComputerType": "Desktop",
-        "Platform": "Windows",
-        "InstallTime": "2024-03-20T08:27:09.257",
-        "Status": "Disconnected",
-        "LastSeen": "2024-04-10T10:56:35.37",
-        "LoggedIn": ""
-    },
-    {
-        "AgentId": "e6b14234-2f11-4c8e-bcf2-9e3489776a3c",
-        "AgentVersion": "24.2.0.1855",
-        "ComputerName": "WIN11-1",
-        "ComputerType": "Desktop",
-        "Platform": "Windows",
-        "InstallTime": "2024-03-20T08:27:09.257",
-        "Status": "Disconnected",
-        "LastSeen": "2024-04-10T10:56:34.37",
-        "LoggedIn": ""
+if ($details) {
+    foreach ($endpoint in $getEndpointsList.endpoints) {
+        $policyFilter = @{
+            "filter" = "inventoryType IN Network"
+        }  | ConvertTo-Json
+        $endpointDetails = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/$($endpoint.id)/search" -Method 'POST' -Headers $sessionHeader -Body $filter
+        Write-Log "$($endpointDetails.Name): FQDN is: $($endpointDetails.inventory.network.fullComputerName)" INFO
     }
-]
-'@ | ConvertFrom-Json
-#>
+} else {
+    # Export Endpoints in CSV
+    Write-Log "Saving Endpoints CSV file in '$fileCSVEndpoints'" INFO
+    $getEndpointsList.endpoints | Export-Csv -Path $fileCSVEndpoints -NoTypeInformation
 
-# Initialize the mapping for the received computer details from console
-$consoleComputersList = @{}
-foreach ($compData in $getComputerList.Computers) {
-    $consoleComputersList[$compData.ComputerName] = $compData.AgentId
 }
 
-$computerIds = @()
 
-foreach ($computerName in $computerNamesFile) {
-    # Find the computer in $getComputerList
-    if ($consoleComputersList.ContainsKey($computerName)) {
-        $computerIds += $consoleComputersList[$computerName]
-        Write-Log "Computer found: $computerName (AgentId: $($consoleComputersList[$computerName]))" INFO
-    } else {
-        Write-Log "Computer '$computerName' from Set '$setName' not found in the system." ERROR
-    }
 
-    # Stop if the array reaches 500 entries
-    if ($computerIds.Count -ge 500) {
-        Write-Log "Limit reached: 500 computers processed. Stopping further processing." WARN
-        break
-    }
-}
-
-# Move Computer
-
-# Prepare Body
-$moveComputerBody = @{
-    "computerIds" = $computerIds
-    "destSetId"   = $destSet.setId
-} | ConvertTo-Json -Depth 10  # Convert to JSON for API usage
-
-$moveComputer = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers/RedirectAgents" -Method 'POST' -Headers $sessionHeader -Body $moveComputerBody
-
-Write-Log "Computer moved to Set $destSeName"

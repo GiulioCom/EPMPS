@@ -84,10 +84,76 @@ param (
     [switch]$pause,
 
     [Parameter(HelpMessage = "Output only for not compliant definitions")]
-    [switch]$notCompliant
+    [switch]$notCompliant,
 
+    [Parameter(HelpMessage = "Export result in CSV file")]
+    [switch]$exportCSV
 )
-function Invoke-EPMRestMethod  {
+## Write-Host Wrapper and log management
+function Write-Log {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$message,
+        
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("INFO", "WARN", "ERROR")]
+        [string]$severity,
+
+        [ValidateSet("Black", "DarkBlue", "DarkGreen", "DarkCyan", "DarkRed", "DarkMagenta", "DarkYellow", "Gray", "DarkGray", "Blue", "Green", "Cyan", "Red", "Magenta", "Yellow", "White")]
+        [string]$ForegroundColor
+    )
+    
+    $expSeverity = $severity
+    $exceedingChars = 5-$severity.Length
+    
+    while ($exceedingChars -ne 0) {
+        $expSeverity = $expSeverity + " "
+        $exceedingChars--
+    }
+
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logMessage = "$timestamp [$expSeverity] $message"
+
+    switch ($severity) {
+        "INFO" {
+            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
+                $ForegroundColor = "Green"
+            }
+        }
+        "WARN" {
+            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
+                $ForegroundColor = "Yellow"
+            }
+        }
+        "ERROR" {
+            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
+                $ForegroundColor = "Red"
+            }
+        }
+    }
+
+    Write-Host $logMessage -ForegroundColor $ForegroundColor
+
+    if ($log) {
+        Add-Content -Path $logFilePath -Value $logMessage
+    }
+}
+
+function Write-Box {
+    param (
+        [string]$title
+    )
+    
+    # Create the top and bottom lines
+    $line = "-" * $title.Length
+
+    # Print the box
+    Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
+    Write-Log "| $title |" -severity INFO -ForegroundColor Cyan
+    Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
+}
+
+## Invoke-RestMethod Wrapper
 <#
 .SYNOPSIS
     Invokes a REST API method with automatic retry logic in case of transient failures.
@@ -108,225 +174,360 @@ function Invoke-EPMRestMethod  {
 .PARAMETER Headers
     Headers to include in the API request.
 #>
+function Invoke-EPMRestMethod {
     param (
         [string]$URI,
         [string]$Method,
-        [object]$Body,
-        [hashtable]$Headers
+        [object]$Body = $null,
+        [hashtable]$Headers = @{},
+        [int]$MaxRetries = 3,
+        [int]$RetryDelay = 120
     )
 
-    $apiDelaySeconds = 120
-    $maxRetries = 3
     $retryCount = 0
 
-    while ($retryCount -lt $maxRetries) {
+    while ($retryCount -lt $MaxRetries) {
         try {
+            # Write-Log "Attempt #$($retryCount + 1): Calling API: $URI with Method: $Method" INFO
             $response = Invoke-RestMethod -Uri $Uri -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
             return $response
         }
         catch {
-            # Convert Error message to Powershell Object
+            #$errorMessage = $_.Exception.Message
+            $ErrorDetailsMessage = $null
+
+            # Extract API error details if available
             if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
-                $ErrorDetailsMessage = $_.ErrorDetails.Message | ConvertFrom-Json
-            }
-            else {
-                throw "API call failed. $_"
+                try {
+                    $ErrorDetailsMessage = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction SilentlyContinue
+                }
+                catch {
+                    Write-Log "Failed to parse error message as JSON. Raw message: $($_.ErrorDetails.Message)" WARN
+                }
             }
 
-            # Error: EPM00000AE - Too many calls per 2 minute(s). The limit is 10
-            if ( $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
-                Write-Host $ErrorDetailsMessage.ErrorMessage
-                Write-Host "Retrying in $apiDelaySeconds seconds..."
-                Start-Sleep -Seconds $apiDelaySeconds
+            # Handle rate limit error (EPM00000AE)
+            if ($ErrorDetailsMessage -and $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
+                Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
+                Start-Sleep -Seconds $RetryDelay
                 $retryCount++
-            }
-            else {
-                throw "API call failed. ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
+            } else {
+                # Handle Body possible filter error 
+                if ($ErrorDetailsMessage.ErrorCode -eq "EPM000002E" -and $null -ne $Body) {
+                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
+                    Write-Log "Please verify the filter body if present, as it could be the cause of this error code." ERROR
+                    throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
+                } else {
+                    # Log error only if it's NOT the handled EPM00000AE error
+                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
+                    throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
+                }
             }
         }
     }
 
-    # If all retries fail, handle accordingly
-    throw "API call failed after $RetryCount retries."
+    # If all retries fail, log and throw an error
+    Write-Log "API call failed after $MaxRetries retries. URI: $URI" ERROR
+    throw "API call failed after $MaxRetries retries."
 }
 
+## EPM RestAPI Wrappers
+<#
+.SYNOPSIS
+Connects to the EPM (Enterprise Password Vault) using the provided credentials and tenant information.
+
+.DESCRIPTION
+This function performs authentication with the EPM API to obtain the manager URL and authentication details.
+
+.PARAMETER credential
+The credential object containing the username and password.
+
+.PARAMETER epmTenant
+The EPM tenant name.
+
+.OUTPUTS
+A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
+
+#>
 function Connect-EPM {
-    <#
-    .SYNOPSIS
-    Connects to the EPM (Enterprise Password Vault) using the provided credentials and tenant information.
-
-    .DESCRIPTION
-    This function performs authentication with the EPM API to obtain the manager URL and authentication details.
-
-    .PARAMETER credential
-    The credential object containing the username and password.
-
-    .PARAMETER epmTenant
-    The EPM tenant name.
-
-    .OUTPUTS
-    A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
-
-    #>
     param (
+        [Parameter(Mandatory = $true)]
         [pscredential]$credential,  # Credential object containing the username and password
+
+        [Parameter(Mandatory = $true)]
         [string]$epmTenant          # EPM tenant name
     )
 
     # Convert credential information to JSON for authentication
     $authBody = @{
-        Username = $credential.UserName
-        Password = $credential.GetNetworkCredential().Password
+        Username      = $credential.UserName
+        Password      = $credential.GetNetworkCredential().Password
         ApplicationID = "Powershell"
-    } | ConvertTo-Json
+    } | ConvertTo-Json -Depth 3
 
     $authHeaders = @{
         "Content-Type" = "application/json"
     }
 
-    $response = Invoke-EPMRestMethod -URI "https://$epmTenant.epm.cyberark.com/EPM/API/Auth/EPM/Logon" -Method 'POST' -Headers $authHeaders -Body $authBody
+    try {
+        # Write-Log "Attempting to connect to EPM tenant: $epmTenant" INFO
+        $response = Invoke-EPMRestMethod -URI "https://$epmTenant.epm.cyberark.com/EPM/API/Auth/EPM/Logon" -Method 'POST' -Headers $authHeaders -Body $authBody
 
-    # Return a custom object with connection information
-    [PSCustomObject]@{
-        managerURL = $($response.ManagerURL)
-        auth       = $($response.EPMAuthenticationResult)
+        # Ensure the response contains the expected fields
+        if (-not $response -or -not $response.ManagerURL -or -not $response.EPMAuthenticationResult) {
+            throw "EPM authentication failed: Missing expected response fields."
+        }
+
+        # Write-Log "Successfully connected to EPM tenant: $epmTenant" INFO
+
+        # Return a custom object with connection information
+        return [PSCustomObject]@{
+            managerURL = $response.ManagerURL
+            auth       = $response.EPMAuthenticationResult
+        }
+    }
+    catch {
+        Write-Log "Failed to connect to EPM tenant: $epmTenant. Error: $_" ERROR
+        throw "Error connecting to EPM: $_"
     }
 }
 
+<#
+.SYNOPSIS
+Retrieves the ID and name of an EPM set based on the provided parameters.
+
+.DESCRIPTION
+This function interacts with the EPM API to retrieve information about sets based on the specified parameters.
+
+.PARAMETER managerURL
+The URL of the EPM manager.
+
+.PARAMETER Headers
+The authorization headers.
+
+.PARAMETER setName
+The name of the EPM set to retrieve.
+
+.OUTPUTS
+A custom object with the properties "setId" and "setName" representing the EPM set information.
+#>
 function Get-EPMSetID {
-    <#
-    .SYNOPSIS
-    Retrieves the ID and name of an EPM set based on the provided parameters.
-
-    .DESCRIPTION
-    This function interacts with the EPM API to retrieve information about sets based on the specified parameters.
-
-    .PARAMETER managerURL
-    The URL of the EPM manager.
-
-    .PARAMETER authToken
-    The authorization token for authentication.
-
-    .PARAMETER setName
-    The name of the EPM set to retrieve.
-
-    .OUTPUTS
-    A custom object with the properties "setId" and "setName" representing the EPM set information.
-
-    #>
     param (
+        [Parameter(Mandatory = $true)]
         [string]$managerURL,
+
+        [Parameter(Mandatory = $true)]
         [hashtable]$Headers,
+
         [string]$setName
     )
 
-    $sets = Invoke-EPMRestMethod -URI "$managerURL/EPM/API/Sets" -Method 'GET' -Headers $Headers
-    
-    $setId = $null
+    # Retrieve list of sets
+    try {
+        #Write-Log "Retrieving EPM Sets from: $managerURL" INFO
+        $sets = Invoke-EPMRestMethod -URI "$managerURL/EPM/API/Sets" -Method 'GET' -Headers $Headers
 
-    # Check if $SetName is empty
-    if ([string]::IsNullOrEmpty($setName)) {
+        if (-not $sets -or -not $sets.Sets) {
+            throw "No sets retrieved from EPM."
+        }
+    }
+    catch {
+        Write-Log "Failed to retrieve EPM Sets. Error: $_" ERROR
+        throw "Could not retrieve EPM sets."
+    }
 
-        # Repeat until a valid set number is entered
-        do {
-            # List the available sets with numbers
-            Write-Host "Available Sets:"
-            $numberSets = 0
-            foreach ($set in $sets.Sets) {
-                Write-Host "$($numberSets + 1). $($set.Name)"
-                $numberSets++
+    # If setName is provided, search for it directly
+    if (-not [string]::IsNullOrEmpty($setName)) {
+        $selectedSet = $sets.Sets | Where-Object { $_.Name -eq $setName } | Select-Object -First 1
+
+        if ($selectedSet) {
+            return [PSCustomObject]@{
+                setId   = $selectedSet.Id
+                setName = $selectedSet.Name
             }
-        
-            # Ask the user to choose a set by number
-            $chosenSetNumber = Read-Host "Enter the number of the set you want to choose"
-        
-            # Validate the chosen set number
-            try {
-                $chosenSetNumber = [int]$chosenSetNumber
-        
-                if ($chosenSetNumber -lt 1 -or $chosenSetNumber -gt $numberSets) {
-                    Write-Error "Invalid set number. Please enter a number between 1 and $numberSets."
-                } else {
-                    # Set chosenSet based on the user's selection
-                    $chosenSet = $sets.Sets[$chosenSetNumber - 1]
-                    $setId = $chosenSet.Id
-                    $setName = $chosenSet.Name
+        } else {
+            Write-Log "Error: Set '$setName' not found in EPM." ERROR
+            throw "Invalid Set Name: $setName"
+        }
+    }
+
+    # If no setName is provided, prompt the user to select one
+
+    if ($sets.Sets.Count -eq 0) {
+        Write-Log "No sets available in EPM." ERROR
+        throw "No sets found. Cannot proceed."
+    }
+
+    Write-Box "Available Sets:" INFO
+
+    for ($i = 0; $i -lt $sets.Sets.Count; $i++) {
+        Write-Log "$($i + 1). $($sets.Sets[$i].Name)" INFO DarkCyan
+    }
+
+    # Prompt user for input with max retries
+    $maxRetries = 3
+    for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+        $chosenSetNumber = Read-Host "Enter the number of the set you want to choose"
+
+        try {
+            $chosenSetNumber = [int]$chosenSetNumber
+
+            if ($chosenSetNumber -ge 1 -and $chosenSetNumber -le $sets.Sets.Count) {
+                $chosenSet = $sets.Sets[$chosenSetNumber - 1]
+                return [PSCustomObject]@{
+                    setId   = $chosenSet.Id
+                    setName = $chosenSet.Name
                 }
-            } catch {
-                Write-Error "Invalid input. Please enter a valid number."
-            }
-        } until ($setId)
-    }
-    
-    else {
-        # List the sets with numbers
-        foreach ($set in $sets.Sets) {
-            # Check if setname matches with the configured set
-            if ($set.Name -eq $SetName) {
-                $setId = $set.Id
-                break  # Exit the loop once the set is found
+            } else {
+                Write-Log "Invalid selection. Please enter a number between 1 and $($sets.Sets.Count)." ERROR
             }
         }
-        if ([string]::IsNullOrEmpty($setId)) {
-            Write-Error "$SetName : Invalid Set"
-            return
+        catch {
+            Write-Log "Invalid input. Please enter a valid number." ERROR
         }
     }
 
-    # Return a custom object with set information
-    [PSCustomObject]@{
-        setId   = $setId
-        setName = $setName
-    }
+    throw "Maximum attempts reached. Exiting set selection."
 }
 
-# Function to log messages to console and file
-function Write-Log {
-    param (
-        [string]$message,
+<#
+.SYNOPSIS
+    Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
+
+.DESCRIPTION
+    This function acts as a wrapper for the CyberArk EPM REST API to get computers.
+    It automatically manages pagination by making multiple API calls if the total number
+    of computers exceeds the API's maximum limit (5000). The function merges all
+    computers into a single PSCustomObject for easy management.
+
+.PARAMETER limit
+    The maximum number of computers to retrieve per API call. The default is 5000,
+    which is the maximum allowed by the CyberArk EPM API.
+
+.EXAMPLE
+    Get-EPMTotalCount -limit 500
+
+.OUTPUTS
+    This function returns an object containing the merged computers and metadata.
+    The object has the following properties:
+        - Computers: An array of all policy objects.
+        - TotalCount: The total number of policies on the server.
+
+.NOTES
+    This function requires a valid session header and manager URL to be accessible
+    in the execution context. It uses Invoke-EPMRestMethod.
+#>
+Function Get-EPMComputers {
+        param (
+        [int]$limit = 5000  # Set limit to the max size if not declared
+    )
+
+    $mergeComputers = [PSCustomObject]@{
+        Computers = @()
+        TotalCount = 0
+    }
+
+    $offset = 0             # Offset
+    $iteration = 1          # Define the number of iteraction, used to increase the offset
+    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
+
+    while ($offset -lt $total) {
+        $getComputers = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers?offset=$offset&limit=$limit" -Method 'GET' -Headers $sessionHeader
         
-        [ValidateSet("INFO", "WARN", "ERROR")]
-        [string]$severity = "INFO",
+        $mergeComputers.Computers += $getComputers.Computers    # Merge the current computer list
+        $mergeComputers.TotalCount = $getComputers.TotalCount   # Update the TotalCount
 
-        [ValidateSet("Black", "DarkBlue", "DarkGreen", "DarkCyan", "DarkRed", "DarkMagenta", "DarkYellow", "Gray", "DarkGray", "Blue", "Green", "Cyan", "Red", "Magenta", "Yellow", "White")]
-        [string]$ForegroundColor
-    )
-    
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logMessage = "$timestamp [$severity] - $message"
-
-    switch ($severity) {
-        "INFO" {
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
-        }
-        "WARN" {
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
-        }
-        "ERROR" {
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
-        }
+        $total = $getComputers.TotalCount   # Update the total with the real total
+        $offset = $limit  * $iteration
+        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
     }
-
-    if ($log) {
-        Add-Content -Path $logFilePath -Value $logMessage
-    }
+    return $mergeComputers
 }
 
-function Write-Box {
+<#
+.SYNOPSIS
+    Retrieves a list of EPM policies from a CyberArk EPM server, handling pagination automatically.
+
+.DESCRIPTION
+    This function acts as a wrapper for the CyberArk EPM REST API to get policies.
+    It automatically manages pagination by making multiple API calls if the total number
+    of policies exceeds the API's maximum limit (1000). The function merges all
+    policies into a single PSCustomObject for easy management.
+
+.PARAMETER limit
+    The maximum number of policies to retrieve per API call. The default is 1000,
+    which is the maximum allowed by the CyberArk EPM API.
+
+.PARAMETER sortBy
+    The field by which to sort the policies. Common values include "Updated", "Name",
+    and "PolicyType". The default is "Updated".
+
+.PARAMETER sortDir
+    The sorting direction. Valid values are "asc" (ascending) and "desc" (descending).
+    The default is "desc".
+
+.PARAMETER policyFilter
+    A hashtable containing filter criteria for the policies. The keys and values
+    must match the JSON format expected by the EPM API's search endpoint.
+    Example: @{ "filter" = "PolicyType IN 11,36,37,38" }.
+
+.EXAMPLE
+    Get-EPMPolicies -limit 500 -sortBy "Name"
+
+.EXAMPLE
+    $myFilter = @{
+        "filter" = "PolicyType IN 11,36"
+    }
+    Get-EPMPolicies -policyFilter $myFilter
+
+.OUTPUTS
+    This function returns an object containing the merged policies and metadata.
+    The object has the following properties:
+        - Policies: An array of all policy objects.
+        - ActiveCount: The count of active policies.
+        - TotalCount: The total number of policies on the server.
+        - FilteredCount: The total number of policies that match the applied filter.
+
+.NOTES
+    This function requires a valid session header and manager URL to be accessible
+    in the execution context. It uses Invoke-EPMRestMethod.
+#>
+Function Get-EPMPolicies {
     param (
-        [string]$title
+        [int]$limit = 1000,         # Set limit to the max size if not declared
+        [string]$sortBy = "Updated",
+        [string]$sortDir = "desc",
+        [hashtable]$policyFilter
     )
-    
-    # Calculate the length of the title
-    $titleLength = $title.Length
 
-    # Create the top and bottom lines
-    $line = "-" * $titleLength
+    $mergePolicies = [PSCustomObject]@{
+        Policies = @()
+        ActiveCount = 0
+        TotalCount = 0
+        FilteredCount = 0
+    }
 
-    # Print the box
-    Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
-    Write-Log "| $title |" -severity INFO -ForegroundColor Cyan
-    Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
+    if ($null -ne $policiesFilter) {
+        $policyFilterJSON = $policyFilter | ConvertTo-Json
+    }
+
+    $offset = 0             # Offset
+    $iteration = 1          # Define the number of iteraction, used to increase the offset
+    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
+
+    while ($offset -lt $total) {
+        $getPolicies = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search?offset=$offset&limit=$limit&sortBy=$sortBy&sortDir=$sortDir" -Method 'POST' -Headers $sessionHeader -Body $policyFilterJSON
+        
+        $mergePolicies.Policies += $getPolicies.Policies            # Merge the current computer list
+        $mergePolicies.ActiveCount = $getPolicies.ActiveCount       # Update the ActiveCount
+        $mergePolicies.TotalCount = $getPolicies.TotalCount         # Update the TotalCount
+        $mergePolicies.FilteredCount = $getPolicies.FilteredCount   # Update the FilteredCount
+
+        $total = $getPolicies.FilteredCount   # Update the total with the real total
+        $offset = $limit * $iteration
+        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+    }
+    return $mergePolicies
 }
 
 function Evaluate-Patterns {
@@ -553,7 +754,7 @@ function Process-Application{
         }
         default {
             # Default action if none of the conditions match
-            Write-Log "Application Type '$appTypeName' not supported." -severity WARN -ForegroundColor Yellow
+            Write-Log "Application Type '$appTypeName' not supported." WARN
             $unspportedAppType = $true
         }
     }
@@ -574,10 +775,12 @@ function Process-Application{
         }
     
         # Calculate Total value
+        $totalWeight = ($matchedConditions | Measure-Object -Property Weight -Sum).Sum
+<#        
         foreach ($condition in $matchedConditions) {
             $totalWeight += $condition.Weight
         }
-    
+#>    
         # Evaluate global pattern, such as child process
         switch ($appTypeName) {
             { ($_ -eq "EXE") -or ($_ -eq "Script") -or ($_ -eq "DLL") } {
@@ -637,6 +840,19 @@ function Process-Application{
         
         # Define the application name for better output
         $applicationName = $null
+
+        # Define the priority order for pattern names
+        $priorityPatterns = @("FILE_NAME", "ORIGINAL_FILE_NAME", "PUBLISHER")
+
+        foreach ($pattern in $priorityPatterns) {
+            $matchingCondition = $matchedConditions | Where-Object { $_.PatternName -eq $pattern }
+
+            if ($matchingCondition) {
+                $applicationName = $Application.patterns.$($pattern).content
+                break
+            }
+        }
+<#
         foreach ($condition in $matchedConditions) {
             if ($condition.Weight -ge 15) {
                 switch ($condition.PatternName) {
@@ -658,11 +874,11 @@ function Process-Application{
                 }
             }
         }
-        
+#>        
         if (-not $applicationName) {
             # If none of the conditions matched, assign $Application.id
             $applicationName = $Application.id
-        }          
+        }      
         
         If ($totalWeight -ge $threshold) {
             if (!$notCompliant) {
@@ -690,14 +906,19 @@ function Process-Application{
             }
         }
     }
-    
+
     if ($pause) {
         Write-Host "Press Enter to continue..."
         $null = Read-Host
     }
+
+    return [PSCustomObject]@{
+        ApplicationName = $applicationName
+        ApplicationType = $appTypeName
+        TotalWeight     = $totalWeight
+    }
 }
 
-function Get-PolicyInfo {
 <#
 .SYNOPSIS
 Retrieves information about policies from a management system using REST API calls.
@@ -731,6 +952,7 @@ Information about policies and their associations.
 Get-PolicyInfo -managerURL "https://example.com" -Headers @{ "Authorization" = "Bearer token" } -setID "123456" -policyName "PolicyName" -feature "Application Groups"
 This command retrieves information about policies associated with the specified policy name within application groups.
 #>
+function Get-PolicyInfo {
     param (
         [string]$managerURL,
         [hashtable]$Headers,
@@ -809,11 +1031,11 @@ This command retrieves information about policies associated with the specified 
         43 = "Predefined App Groups Win"
     }
 
-    # Define script supported Application Group
+    # Define supported Application Group
     $allowedApplicationGroupType = @(14, 43, 15, 16)
     $supportedApplicationGroupTypes = $allowedApplicationGroupType | Where-Object { $applicationGroupType.ContainsKey($_) } | ForEach-Object { $applicationGroupType[$_] }
 
-    # Define script supported Policy Type
+    # Define supported Policy Type
     $allowedPolicyType = @(11, 18, 12, 13)
     $supportedPolicyTypes = $allowedPolicyType | Where-Object { $policyType.ContainsKey($_) } | ForEach-Object { $policyType[$_] }
     
@@ -823,66 +1045,87 @@ This command retrieves information about policies associated with the specified 
 
     # Retrieve policy list based on the feature type
     if ($feature -eq "Application Groups") {
-        # Retrieve application groups and filter by policy name
         # Search AppGroup
-        foreach ($appGroup in $appGroupList.Policies) {
-            if ($appGroup.PolicyName -eq $policyName) {
-                # Filter by Allowed Application Groups
-                if ($allowedApplicationGroupType -contains $appGroup.PolicyType) {
-                    # Get Application Group Details
-                    $appGroupDetails = Invoke-EPMRestMethod -Uri "$policiesURI/ApplicationGroups/$($appGroup.PolicyId)" -Method 'GET' -Headers $Headers    
+        $appGroup = $appGroupList.Policies | Where-Object { $_.PolicyName -eq $policyName } | ForEach-Object {
+            if ($allowedApplicationGroupType -contains $appGroup.PolicyType) {
+                # Get Application Group Details
+                $appGroupDetails = Invoke-EPMRestMethod -Uri "$policiesURI/ApplicationGroups/$($appGroup.PolicyId)" -Method 'GET' -Headers $Headers
 
-                    # Search policy where the app ID is included
-                    foreach ($policy in $policiesList.Policies) {
+                # Search policy where the app ID is included
+                $matchingPolicies = $policiesList.Policies | Where-Object { 
+                    $_.ReferencedApplicationGroups.Where({ $_.Id -eq $appGroup.PolicyId -and $_.ReferenceType -eq 1 }).Count -gt 0
+                } 
+                if ($matchingPolicies) {
+                    foreach ($policy in $matchingPolicies) {
+                        $policyTypeName = $policyType[$policy.PolicyType]
+                        $policyAction = $actionMapping[$policy.Action]
+                        Write-Log "Application group '$($appGroup.PolicyName)' was found in policy '$($policy.PolicyName)', categorized as '$policyTypeName' with action '$policyAction'." -severity INFO -ForegroundColor Green
 
-                        foreach ($refAppGroups in $policy.ReferencedApplicationGroups) {
-                            if ($refAppGroups.Id -eq $appGroup.PolicyId) {
-                                $policyTypeName = $policyType[$policy.PolicyType]
-                                $policyAction = $actionMapping[$policy.Action]
-                                Write-Log "The application group '$($appGroup.PolicyName)' - $($appGroup.Description)" -severity INFO -ForegroundColor Green
-                                Write-Log "Was found in the '$($policy.PolicyName)' policy - $($policy.Description)" -severity INFO -ForegroundColor Green
-                                Write-Log "Categorized as '$policyTypeName' with the action set to '$policyAction'" -severity INFO -ForegroundColor Green
+                        # Filter by Allowed Policies
+                        if ($allowedPolicyType -contains $policy.PolicyType) {
+                            if ($appGroupDetails.Policy.Applications -gt 0) {
+                                foreach ($application in $appGroupDetails.Policy.Applications) {
+                                    $result = Process-Application -Application $application -PolicyType $($policy.PolicyType) -action $($policy.Action)
 
-                                # Filter by Allowed Policies
-                                if ($allowedPolicyType -contains $policy.PolicyType) {
-                                    foreach ($application in $appGroupDetails.Policy.Applications) {
-                                        Process-Application -Application $application -PolicyType $($policy.PolicyType) -action $($policy.Action)
+                                    if ($exportCSV) {
+                                        $exportCSVData = [PSCustomObject]@{
+                                            PolicyName      = $policyDetails.Policy.Name
+                                            Type            = $policyType[$policyDetails.Policy.PolicyType]
+                                            PolicyAction    = $actionMapping[$policyDetails.Policy.Action]
+                                            ApplicationName = $result.ApplicationName
+                                            ApplicationType = $result.ApplicationType
+                                            TotalWeight     = $result.totalWeight
+                                        }
+                                        $exportCSVData | Export-Csv -Path $exportCSVFilePath -Append -NoTypeInformation -Encoding UTF8
                                     }
-                                } else {
-                                    Write-Log "Policy '$($policy.PolicyName)' not supported. The supported policy types are: $($supportedPolicyTypes -join ', ')" -severity WARN -ForegroundColor Yellow
                                 }
+                            } else {
+                                Write-Log "Application Group '$($appGroup.PolicyName)' is empty." WARN
                             }
+                        } else {
+                            Write-Log "Policy '$($policy.PolicyName)' not supported. The supported policy types are: $($supportedPolicyTypes -join ', ')" WARN
                         }
                     }
-                } else {
-                    Write-Log "Application Group '$($appGroup.PolicyName)' not supported. The supported application group type are $($supportedApplicationGroupTypes -join ', ')" -severity WARN -ForegroundColor Yellow
-                }    
-            }
+                }
+            } else {
+                Write-Log "Application Group '$($appGroup.PolicyName)' not supported. The supported application group type are $($supportedApplicationGroupTypes -join ', ')" WARN
+            }    
         }
     } else {
         #Search policy
-        $policyFound = $false
-        foreach ($policy in $policiesList.Policies) {
-            if ($policy.PolicyName -eq $policyName) {
-                $policyTypeName = $policyType[$policy.PolicyType]
-                $policyAction = $actionMapping[$policy.Action]
-                Write-Log "Policy '$policyName' - $($policy.Description) was found" -severity INFO -ForegroundColor Green
-                Write-Log "Categorized as '$policyTypeName' with the action set to '$policyAction'" -severity INFO -ForegroundColor Green
+       # $policyFound = $false
+        $policy = $policiesList.Policies | Where-Object { $_.PolicyName -eq $policyName } | ForEach-Object {
+            $policyTypeName = $policyType[$policy.PolicyType]
+            $policyAction = $actionMapping[$policy.Action]
+            Write-Log "Policy '$policyName' was found, categorized as '$policyTypeName' with action '$policyAction'" INFO
 
-                # Filter by Allowed Policies type
-                if ($allowedPolicyType -contains $policy.PolicyType) {
-                    $policyFound = $true
-                    $policyDetails = Invoke-EPMRestMethod -Uri "$policiesURI/Server/$($policy.PolicyId)" -Method 'GET' -Headers $sessionHeader
-                    foreach ($application in $policyDetails.Policy.Applications) {
-                        Process-Application -Application $application -PolicyType $($policy.PolicyType) -action $($policy.Action)
+            # Filter by Allowed Policies type
+            if ($allowedPolicyType -contains $policy.PolicyType) {
+              #  $policyFound = $true
+                $policyDetails = Invoke-EPMRestMethod -Uri "$policiesURI/Server/$($policy.PolicyId)" -Method 'GET' -Headers $sessionHeader
+                foreach ($application in $policyDetails.Policy.Applications) {
+                    $result = Process-Application -Application $application -PolicyType $($policy.PolicyType) -action $($policy.Action)
+                    if ($exportCSV) {
+                        $exportCSVData = [PSCustomObject]@{
+                            PolicyName      = $policyDetails.Policy.Name
+                            Type            = $policyType[$policyDetails.Policy.PolicyType]
+                            PolicyAction    = $actionMapping[$policyDetails.Policy.Action]
+                            ApplicationName = $result.ApplicationName
+                            ApplicationType = $result.ApplicationType
+                            TotalWeight     = $result.totalWeight
+                        }
+                        $exportCSVData | Export-Csv -Path $exportCSVFilePath -Append -NoTypeInformation -Encoding UTF8
                     }
                 }
+            } else {
+                Write-Log "Policy '$PolicyName' not supported. The supported policy types are: $($supportedPolicyTypes -join ', ')" WARN
             }
         }
+        #}
         
-        if ($policyFound -eq $false) {
-            Write-Log "Policy '$PolicyName' not supported. The supported policy types are: $($supportedPolicyTypes -join ', ')" -severity WARN -ForegroundColor Yellow
-        }
+    #    if ($policyFound -eq $false) {
+    #        Write-Log "Policy '$PolicyName' not supported. The supported policy types are: $($supportedPolicyTypes -join ', ')" -severity WARN -ForegroundColor Yellow
+    #    }
     }
 }
 
@@ -903,26 +1146,9 @@ $sessionHeader = @{
 # Get SetId
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
-
-<#
-if ($PSBoundParameters.ContainsKey('log')) {
-    $writeLog = $true
-    if ($log = "") {
-        $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
-        $logFolder = Join-Path $scriptDirectory "log"
-    }
-    # Ensure the log folder exists
-    if (-not (Test-Path $logFolder)) {
-        New-Item -Path $logFolder -ItemType Directory -Force
-    }
-}
-#>
-
-
-
 # Set default log folder if not provided
+$scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 if (-not $PSBoundParameters.ContainsKey('logFolder')) {
-    $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
     $logFolder = Join-Path $scriptDirectory "log"
 }
 
@@ -936,6 +1162,28 @@ $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
 $logFileName = "$timestamp`_$scriptName.log"
 $logFilePath = Join-Path $logFolder $logFileName
+
+# Prepare Export CSV file
+# Set the path for the CSV file.
+$exportCSVFileName = "$scriptName`_$($set.SetName)`_$timestamp.csv"
+$exportCSVFilePath = Join-Path $scriptDirectory $exportCSVFileName
+if ($exportCSV) {
+    $header = [PSCustomObject]@{
+        PolicyName      = $null
+        PolicyType      = $null
+        PolicyAction    = $null
+        ApplicationName = $null
+        ApplicationType = $null
+        TotalWeight     = $null
+    }
+
+    if (-not (Test-Path $exportCSVFilePath)) {
+        $header | Export-Csv -Path $exportCSVFilePath -NoTypeInformation -Encoding UTF8
+        Write-Log "Export CSV file initialized in '$exportCSVFilePath'." INFO
+    } else {
+        Write-Log "File '$exportCSVFilePath' already exists. Skipping initialization." INFO
+    }    
+}
 
 Write-Box "$scriptName"
 Write-Box "Analyzing Set $($set.setName)"
@@ -951,13 +1199,13 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
             $appGroupsFilter = @{
                 "filter" = "PolicyGroupType EQ 10" # Application Group -> Custom Application Group, Predefined App Group, Predefined Trusted Source 
             }  | ConvertTo-Json
-            $appGroupList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/ApplicationGroups/Search" -Method 'POST' -Headers $sessionHeader -Body $appGroupsFilter
+            $appGroupList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/ApplicationGroups/Search?limit=1000" -Method 'POST' -Headers $sessionHeader -Body $appGroupsFilter
             
             # Get Policies
             $policiesFilter = @{
                 "filter" = "PolicyGroupType EQ 3" # Application -> Groups: Advanced, Predefined Policy, Trust
             }  | ConvertTo-Json    
-            $policiesList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search" -Method 'POST' -Headers $sessionHeader -Body $policiesFilter
+            $policiesList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search?limit=1000" -Method 'POST' -Headers $sessionHeader -Body $policiesFilter
 
             Write-Log "Analzying Application Groups..." -severity INFO -ForegroundColor DarkCyan
             Write-Log "Retrieved $($appGroupList.FilteredCount) Application Groups..." -severity INFO -ForegroundColor DarkCyan
@@ -965,7 +1213,7 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
             $appGroupsCounter = 1
 
             foreach ($appGroup in $appGroupList.Policies) {
-                Write-Log "Analyzing $appGroupsCounter of $($appGroupList.FilteredCount) Application Group - $($appGroup.PolicyName)" -severity INFO -ForegroundColor DarkCyan
+                Write-Log "Analyzing $appGroupsCounter of $($appGroupList.FilteredCount) Application Group - '$($appGroup.PolicyName)'" -severity INFO -ForegroundColor DarkCyan
                 Get-PolicyInfo -managerURL $($login.managerURL) -Headers $sessionHeader -setId $($set.setId) -policyName $($appGroup.PolicyName) -feature "Application Groups" -appGroupList $appGroupList -policiesList $policiesList
                 $appGroupsCounter++
             }
@@ -989,7 +1237,7 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
                 Write-Log "Scanning by Application Group: $($name)" -severity INFO -ForegroundColor DarkCyan
 
                 # Get the Application Group
-                $appGroupList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/ApplicationGroups/Search" -Method 'POST' -Headers $sessionHeader
+                $appGroupList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/ApplicationGroups/Search?limit=1000" -Method 'POST' -Headers $sessionHeader
 
                 # Get the Policies
                 $policiesFilter = @{
@@ -1005,12 +1253,12 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
                 $appGroupsFilter = @{
                     "filter" = "PolicyGroupType EQ 10" # Application Group -> Custom Application Group, Predefined App Group, Predefined Trusted Source 
                 }  | ConvertTo-Json
-                $appGroupList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/ApplicationGroups/Search" -Method 'POST' -Headers $sessionHeader -Body $appGroupsFilter
+                $appGroupList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/ApplicationGroups/Search?limit=1000" -Method 'POST' -Headers $sessionHeader -Body $appGroupsFilter
                 
                 $policiesFilter = @{
                     "filter" = "PolicyGroupType EQ 3" # Application -> Groups: Advanced, Predefined Policy, Trust
                 }  | ConvertTo-Json    
-                $policiesList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search" -Method 'POST' -Headers $sessionHeader -Body $policiesFilter
+                $policiesList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search?limit=1000" -Method 'POST' -Headers $sessionHeader -Body $policiesFilter
 
                 $appGroupsCounter = 1
                 # Get Application Groups
@@ -1028,7 +1276,7 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
                 Write-Log "Scanning by Policy: $name" -severity INFO -ForegroundColor DarkCyan
 
                 # Get the Application Group
-                $appGroupList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/ApplicationGroups/Search" -Method 'POST' -Headers $sessionHeader
+                $appGroupList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/ApplicationGroups/Search?limit=1000" -Method 'POST' -Headers $sessionHeader
 
                 # Get the Policies
                 $policiesFilter = @{
@@ -1045,7 +1293,7 @@ if ($PSBoundParameters.ContainsKey('ScanPolicies')) {
                 $policiesFilter = @{
                     "filter" = "PolicyGroupType EQ 3" # Application -> Groups: Advanced, Predefined Policy, Trust
                 }  | ConvertTo-Json    
-                $policiesList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search" -Method 'POST' -Headers $sessionHeader -Body $policiesFilter
+                $policiesList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search?limit=1000" -Method 'POST' -Headers $sessionHeader -Body $policiesFilter
 
                 $policyCounter = 1
                 

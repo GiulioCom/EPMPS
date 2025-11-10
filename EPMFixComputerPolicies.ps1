@@ -1,9 +1,8 @@
 <#
 .SYNOPSIS
-    Move Computers from one SET to another
+    Fix Computer object in the policy, updating the ID or removing the object
 
 .DESCRIPTION
-    Move Computers from one SET to another reading the input from csv having the list of computer,setName
 
 .PARAMETER username
     The EPM username (e.g., user@domain).
@@ -18,16 +17,11 @@
     Flag to enabled computer deletion
 
 .NOTES
-    File: EPMMoveComputers.ps1
+    File: EPMDuplicateComputer.ps1
     Author: Giulio Compagnone
     Company: CyberArk
     Version: 0.1
-    Created: 02/2025
-    Last Modified: 09/2025
-    - 26/09/2025: Improve managent fo more than 5000 device
-
-.EXAMPLE
-    .\EPMMoveComputers.ps1 -username user@domain -tenant eu -set "Set Name" -computerList "file" -destSetName "dest Set Name" -log
+    Created: 11/2025
 #>
 
 param (
@@ -41,17 +35,14 @@ param (
     [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch")]
     [string]$tenant,
 
-    [Parameter(Mandatory = $true, HelpMessage="CSV file list of computers")]
-    [string]$computerList,
-
-    [Parameter(Mandatory = $true, HelpMessage="Destination Set")]
-    [string]$destSetName,
-
     [Parameter(HelpMessage = "Enable logging to file and console")]
     [switch]$log,
 
     [Parameter(HelpMessage = "Specify the log file path")]
-    [string]$logFolder
+    [string]$logFolder,
+
+    [Parameter(HelpMessage="Delete duplicated Endpoint")]
+    [switch]$delete = $false
 )
 
 ## Write-Host Wrapper and log management
@@ -171,16 +162,11 @@ function Invoke-EPMRestMethod {
 
             # Handle rate limit error (EPM00000AE)
             if ($ErrorDetailsMessage -and $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
-                # Define a regex pattern to find numbers followed by "minute(s)"
+                # Regex pattern to find numbers followed by "minute(s)"
                 $pattern = "\d+\s+minute"
-
-                # Search for the pattern in the error message
                 $match = [regex]::Match($ErrorDetailsMessage.ErrorMessage, $pattern)
-
-                # If a match is found, extract the number
                 if ($match.Success) {
                     $minutes = [int]($match.Value -replace '\s+minute', '')
-                    # Convert minutes to seconds and update the RetryDelay variable
                     [int]$RetryDelay = $minutes * 60
                 }
 
@@ -369,6 +355,44 @@ function Get-EPMSetID {
     throw "Maximum attempts reached. Exiting set selection."
 }
 
+Function Get-EPMPolicies {
+    param (
+        [int]$limit = 1000,         # Set limit to the max size if not declared
+        [string]$sortBy = "Updated",
+        [string]$sortDir = "desc",
+        [hashtable]$policyFilter
+    )
+
+    $mergePolicies = [PSCustomObject]@{
+        Policies = @()
+        ActiveCount = 0
+        TotalCount = 0
+        FilteredCount = 0
+    }
+
+    if ($null -ne $policiesFilter) {
+        $policyFilterJSON = $policyFilter | ConvertTo-Json
+    }
+
+    $offset = 0             # Offset
+    $iteration = 1          # Define the number of iteraction, used to increase the offset
+    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
+
+    while ($offset -lt $total) {
+        $getPolicies = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search?offset=$offset&limit=$limit&sortBy=$sortBy&sortDir=$sortDir" -Method 'POST' -Headers $sessionHeader -Body $policyFilterJSON
+        
+        $mergePolicies.Policies += $getPolicies.Policies            # Merge the current computer list
+        $mergePolicies.ActiveCount = $getPolicies.ActiveCount       # Update the ActiveCount
+        $mergePolicies.TotalCount = $getPolicies.TotalCount         # Update the TotalCount
+        $mergePolicies.FilteredCount = $getPolicies.FilteredCount   # Update the FilteredCount
+
+        $total = $getPolicies.FilteredCount   # Update the total with the real total
+        $offset = $limit * $iteration
+        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+    }
+    return $mergePolicies
+}
+
 <#
 .SYNOPSIS
     Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
@@ -423,6 +447,117 @@ Function Get-EPMComputers {
     return $mergeComputers
 }
 
+<#
+.SYNOPSIS
+    Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
+
+.DESCRIPTION
+    This function acts as a wrapper for the CyberArk EPM REST API to get computers.
+    It automatically manages pagination by making multiple API calls if the total number
+    of computers exceeds the API's maximum limit (5000). The function merges all
+    computers into a single PSCustomObject for easy management.
+
+.PARAMETER limit
+    The maximum number of computers to retrieve per API call. The default is 5000,
+    which is the maximum allowed by the CyberArk EPM API.
+
+.EXAMPLE
+    Get-EPMTotalCount -limit 500
+
+.OUTPUTS
+    This function returns an object containing the merged computers and metadata.
+    The object has the following properties:
+        - Computers: An array of all policy objects.
+        - TotalCount: The total number of policies on the server.
+
+.NOTES
+    This function requires a valid session header and manager URL to be accessible
+    in the execution context. It uses Invoke-EPMRestMethod.
+#>
+Function Get-EPMEndpoints {
+    param (
+        [int]$limit = 1000,         #Set limit to the max size if not declared
+        [hashtable]$filter    #Set the search body
+    )
+
+    $mergeEndpoints = [PSCustomObject]@{
+        endpoints = @()
+        filteredCount = 0
+        returnedCount = 0
+    }
+
+    if ($null -ne $filter) {
+        $filterJSON = $filter | ConvertTo-Json
+    }
+
+    $offset = 0             # Offset
+    $iteration = 1          # Define the number of iteraction, used to increase the offset
+    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
+
+    while ($offset -lt $total) {
+        $getEndpoints = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/search?offset=$offset&limit=$limit" -Method 'POST' -Headers $sessionHeader -Body $filterJSON
+        
+        $mergeEndpoints.endpoints += $getEndpoints.endpoints    # Merge the current computer list
+        $mergeEndpoints.filteredCount = $getEndpoints.filteredCount   # Update the filteredCount (the total device based on the filter)
+        $mergeEndpoints.returnedCount = $getEndpoints.returnedCount   # Update the returnedCount
+
+        $total = $getComputers.filteredCount   # Update the total with the real total
+        $offset = $limit  * $iteration
+        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+    }
+    return $mergeEndpoints
+}
+
+function Get-NormalizedComputerMap {
+    param (
+        # The full list of computer objects (e.g., $getComputerList.Computers)
+        [Parameter(Mandatory = $true)]
+        [array]$ComputerList
+    )
+
+    $computerMap = @{}
+    $groupedComputers = $ComputerList | Group-Object -Property ComputerName
+
+    foreach ($group in $groupedComputers) {
+        
+        # Sort the group by LastSeen (newest first) and pick the top one.
+        # This ensures you always select the object for the *currently active* AgentId.
+        $latestComputer = $group.Group | Sort-Object -Property LastSeen -Descending | Select-Object -First 1
+
+        # Key: ComputerName
+        # Value: AgentId
+        $computerMap[$latestComputer.ComputerName] = $latestComputer.AgentId
+    }
+
+    # Return the completed map
+    return $computerMap
+}
+
+function Get-NormalizedEndpointMap {
+    param (
+        # The full list of computer objects (e.g., $getComputerList.Endpoints)
+        [Parameter(Mandatory = $true)]
+        [array]$ComputerList
+    )
+
+    $endpointsMap = @{}
+    $groupedEndpoints = $endpointsList | Group-Object -Property ComputerName
+
+    foreach ($group in $groupedEndpoints) {
+        
+        # Sort the group by LastSeen (newest first) and pick the top one.
+        # This ensures you always select the object for the *currently active* AgentId.
+        $latestEndpoint = $group.Group | Sort-Object -Property lastDisconnected -Descending | Select-Object -First 1
+
+        # Key: ComputerName
+        # Value: AgentId
+        $endpointsMap[$latestEndpoint.name] = $latestEndpoint.id
+    }
+
+    # Return the completed map
+    return $endpointsMap
+}
+
 ### Begin Script ###
 
 ## Prepare log folder and file
@@ -442,14 +577,10 @@ $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
 $logFileName = "$timestamp`_$scriptName.log"
 $logFilePath = Join-Path $logFolder $logFileName
+##
 
 Write-Box "$scriptName"
-
-# Check if the computer list file exists
-if (-Not (Test-Path -Path $computerList -PathType Leaf)) {
-    Write-Log "The specified file '$computerList' does not exist." ERROR
-    exit 1
-}
+##
 
 # Request EPM Credentials
 $credential = Get-Credential -UserName $username -Message "Enter password for $username"
@@ -460,107 +591,171 @@ $login = Connect-EPM -credential $credential -epmTenant $tenant
 # Create a session header with the authorization token
 $sessionHeader = @{
     "Authorization" = "basic $($login.auth)"
-    "Content-Type" = "application/json"
 }
 
 # Get SetId
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
-Write-Log "Entering SET: $($set.setName)..." INFO -ForegroundColor Blue
-
-# Read the list of computer names
-$computerNamesFile = Get-Content -Path $computerList
-
-# Get Destination SET data
-$destSet = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $destSetName
-
-# Get computers list
-#$getComputerList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers?limit=5000" -Method 'GET' -Headers $sessionHeader
-$getComputerList = Get-EPMTotalCount
+Write-Box "$($set.setName)"
 
 <#
-$getComputerList = @'
-[
-    {
-        "AgentId": "c15764f3-d9ae-4ee0-83e9-f1f5806f91ca",
-        "AgentVersion": "24.2.0.1855",
-        "ComputerName": "WIN11-1",
-        "ComputerType": "Desktop",
-        "Platform": "Windows",
-        "InstallTime": "2024-03-14T16:27:09.257",
-        "Status": "Disconnected",
-        "LastSeen": "2024-04-11T10:56:35.38",
-        "LoggedIn": ""
-    },
-    {
-        "AgentId": "d5f92e1c-bf1b-48f3-9eae-7c5a3e8e642e",
-        "AgentVersion": "24.2.0.1855",
-        "ComputerName": "WIN11-2",
-        "ComputerType": "Desktop",
-        "Platform": "Windows",
-        "InstallTime": "2024-03-15T12:45:09.257",
-        "Status": "Connected",
-        "LastSeen": "2024-04-11T09:56:35.38",
-        "LoggedIn": "user1"
-    },
-    {
-        "AgentId": "e6b14235-2f11-4c8e-bcf2-9e3489776a3c",
-        "AgentVersion": "24.2.0.1855",
-        "ComputerName": "WIN11-1",
-        "ComputerType": "Desktop",
-        "Platform": "Windows",
-        "InstallTime": "2024-03-20T08:27:09.257",
-        "Status": "Disconnected",
-        "LastSeen": "2024-04-10T10:56:35.37",
-        "LoggedIn": ""
-    },
-    {
-        "AgentId": "e6b14234-2f11-4c8e-bcf2-9e3489776a3c",
-        "AgentVersion": "24.2.0.1855",
-        "ComputerName": "WIN11-1",
-        "ComputerType": "Desktop",
-        "Platform": "Windows",
-        "InstallTime": "2024-03-20T08:27:09.257",
-        "Status": "Disconnected",
-        "LastSeen": "2024-04-10T10:56:34.37",
-        "LoggedIn": ""
-    }
-]
-'@ | ConvertFrom-Json
+
+How this will work!!!!!!!
+
+New EPM Console: c8de84c7-3075-467c-90a0-23be883c0972
+Old EPM Console: 68130e8b-8c99-44a8-83de-7b1e1a979798 (alive)
+		e6332c3f-a6d8-423f-97d8-fd8b4bc3b861 (disconnected - OLD! - same in the policy!)
+
+Get Encpoints:
+      "id": "c8de84c7-3075-467c-90a0-23be883c0972",
+      "legacyId": "68130e8b-8c99-44a8-83de-7b1e1a979798",
+
+Old Get computer: e6332c3f-a6d8-423f-97d8-fd8b4bc3b861
+
+
+
+Registry: {68130E8B-8C99-44A8-83DE-7B1E1A979798}
+
+Policy: "e6332c3f-a6d8-423f-97d8-fd8b4bc3b861"
+Policy contain the old cputer objet.
+The procedure has to consider the use case:
+Duplicated ID
+
+
+Get Computers
+Clean duplicated!
+Store in a map computer name and  ID
+
+No needed at the moment, until won't be the official solution.
+-Get Endpoints
+-Clean duplicated!
+-Store in a map computer name and  ID and legacy ID
+
+Get the policy list where "IsAppliedToAllComputers": false
+Get policy details (one by one)
+Access Executors and filter only by "ExecutorType": 1
+Search the computer in the List -> 
+- Verify if it exist
+- - If exist Check the ID is the same 
+- - - If is the same: Good!
+- - - If not the same: replace the ID in the policy with the correct one from the map
+- - If not exist -> Delete the objet in the policy (consider to check if the policy is applied to no one after the removal and disable the policy, then prefix the description with the reson)
+
 #>
 
-# Initialize the mapping for the received computer details from console
-$consoleComputersList = @{}
-foreach ($compData in $getComputerList.Computers) {
-    $consoleComputersList[$compData.ComputerName] = $compData.AgentId
+$getComputerList = Get-EPMComputers
+$uniqueComputerMap = Get-NormalizedComputerMap -ComputerList $getComputerList.Computers
+
+$getPolicies = Get-EPMPolicies
+
+foreach ($policy in $getPolicies.Policies){
+    if ($policy.IsAppliedToAllComputers -eq $false){
+        Write-Log "Checking policy $($policy.Name)"
+        $getPolicy = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/$($policy.PolicyId)" -Method 'GET' -Headers $sessionHeader
+        
+        $policyWasModified = $false
+        
+        $validatedExecutors = $getPolicy.Executors | Where-Object {
+            $executorItem = $_
+            $computerName = $_.ComputerName
+            $idInExecutor = $_.AgentId
+            $correctAgentId = $uniqueComputerMap[$computerName]
+
+            if (-not $correctAgentId) {
+                Write-Log "Computer '$computerName' not found in computer list. Removing from executor." WARN
+                $policyWasModified = $true
+            } else {
+                if (($correctAgentId -ne $idInExecutor)) {
+                    Write-Log "ID mismatch for '$computerName'. Stale ID: '$idInExecutor', Correct ID: '$correctAgentId'. Updating..." INFO
+                    $executorItem.AgentId = $correctAgentId
+                    $policyWasModified = $true
+                }
+                return $executorItem
+            }
+        }
+
+        if ($policyWasModified -eq $true -or ($getPolicy.Executors.Count -ne $validatedExecutors.Count)) {
+            $getPolicy.Executors = $validatedExecutors
+            if ($validatedExecutors.Count -eq 0) {
+                $getPolicy.IsAppliedToAllComputers = $true
+                $getPolicy.IsActive = $false
+            }
+            # Update policy
+        }
+    }
 }
 
-$computerIds = @()
 
-foreach ($computerName in $computerNamesFile) {
-    # Find the computer in $getComputerList
-    if ($consoleComputersList.ContainsKey($computerName)) {
-        $computerIds += $consoleComputersList[$computerName]
-        Write-Log "Computer found: $computerName (AgentId: $($consoleComputersList[$computerName]))" INFO
-    } else {
-        Write-Log "Computer '$computerName' from Set '$setName' not found in the system." ERROR
-    }
 
-    # Stop if the array reaches 500 entries
-    if ($computerIds.Count -ge 500) {
-        Write-Log "Limit reached: 500 computers processed. Stopping further processing." WARN
-        break
+<#
+
+## Processing My Computer (Old API)
+Write-Log "Working on 'My Computer'." INFO
+$getComputerList = Get-EPMComputers
+
+# Group objects by ComputerName
+$groupedComputersByName = $getComputerList.Computers | Group-Object -Property ComputerName
+$duplicateComputerCount = $groupedComputersByName | Where-Object {$_.Count -gt 1} | Measure-Object | Select-Object -ExpandProperty Count
+
+Write-Log "Identified $duplicateComputerCount duplicated devices." INFO
+
+# Iterate through each group
+foreach ($groupComputer in $groupedComputersByName) {
+    # Select multiple device having the same computer name.
+    if ($groupComputer.Count -gt 1) {
+        # Sort objects in the group by LastSeen in ascending order
+        $sorted = $groupComputer.Group | Sort-Object -Property LastSeen -Descending
+
+        # Output the ComputerName and oldest AgentId(s) starting from the array position 1 (order by descending)
+        Write-Log "Duplicated Device: $($sorted[0].ComputerName), found $($groupComputer.Count) items" WARN
+        for ($i = 1; $i -lt $sorted.Count; $i++) {
+            if ($delete) {
+                Write-Log "+ - Deleting $($sorted[$i].AgentId)..." WARN
+                Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers/$($sorted[$i].AgentId)" -Method 'DELETE' -Headers $sessionHeader
+            } else {
+                Write-Log "+ - To be deleted: $($sorted[$i].AgentId)" WARN
+            }
+
+        }
     }
 }
 
-# Move Computer
 
-# Prepare Body
-$moveComputerBody = @{
-    "computerIds" = $computerIds
-    "destSetId"   = $destSet.setId
-} | ConvertTo-Json -Depth 10  # Convert to JSON for API usage
+## Processing Endpoints (New API)
+Write-Log "Working on Endpoints." INFO
 
-$moveComputer = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers/RedirectAgents" -Method 'POST' -Headers $sessionHeader -Body $moveComputerBody
+$getEndpointsList = Get-EPMEndpoints
 
-Write-Log "Computer moved to Set $destSeName"
+# Group objects by ComputerName
+$groupedEndpointsByName = $getEndpointsList.endpoints | Group-Object -Property name
+$duplicateEndpointsCount = $getEndpointsList | Where-Object {$_.Count -gt 1} | Measure-Object | Select-Object -ExpandProperty Count
+
+Write-Log "Identified $duplicateEndpointsCount duplicated devices." INFO
+
+# Iterate through each group
+foreach ($groupEndpoints in $groupedEndpointsByName) {
+    # Select multiple device having the same computer name.
+    if ($groupEndpoints.Count -gt 1) {
+        # Sort objects in the group by LastSeen in ascending order
+        $sorted = $groupEndpoints.Group | Sort-Object -Property LastSeen -Descending
+
+        # Output the ComputerName and oldest AgentId(s) starting from the array position 1 (order by descending)
+        Write-Log "Duplicated Device: $($sorted[0].ComputerName), found $($groupEndpoints.Count) items" WARN
+        for ($i = 1; $i -lt $sorted.Count; $i++) {
+            if ($delete) {
+                Write-Log "+ - Deleting $($sorted[$i].Id)..." WARN
+                $deleteEndpointFilter = @{
+                    "filter" = "id EQ $($sorted[$i].Id)"
+                } | ConvertTo-Json
+
+                Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/delete" -Method 'POST' -Headers $sessionHeader -Body $deleteEndpointFilter
+            } else {
+                Write-Log "+ - To be deleted: $($sorted[$i].id)" WARN
+            }
+
+        }
+    }
+}
+
+
+#>
