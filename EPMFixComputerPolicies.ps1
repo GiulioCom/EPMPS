@@ -680,82 +680,9 @@ foreach ($policy in $getPolicies.Policies){
                 $getPolicy.IsAppliedToAllComputers = $true
                 $getPolicy.IsActive = $false
             }
-            # Update policy
+            $updatePolicyJSON = $getPolicy.Policy | ConvertTo-Json -Depth 10
+            $updatePolicy = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/$($policy.PolicyId)" -Method 'PUT' -Headers $sessionHeader -Body $updatePolicyJSON
+            Write-Log "- Policy '$($policy)' updated correctly." INFO
         }
     }
 }
-
-
-
-<#
-
-## Processing My Computer (Old API)
-Write-Log "Working on 'My Computer'." INFO
-$getComputerList = Get-EPMComputers
-
-# Group objects by ComputerName
-$groupedComputersByName = $getComputerList.Computers | Group-Object -Property ComputerName
-$duplicateComputerCount = $groupedComputersByName | Where-Object {$_.Count -gt 1} | Measure-Object | Select-Object -ExpandProperty Count
-
-Write-Log "Identified $duplicateComputerCount duplicated devices." INFO
-
-# Iterate through each group
-foreach ($groupComputer in $groupedComputersByName) {
-    # Select multiple device having the same computer name.
-    if ($groupComputer.Count -gt 1) {
-        # Sort objects in the group by LastSeen in ascending order
-        $sorted = $groupComputer.Group | Sort-Object -Property LastSeen -Descending
-
-        # Output the ComputerName and oldest AgentId(s) starting from the array position 1 (order by descending)
-        Write-Log "Duplicated Device: $($sorted[0].ComputerName), found $($groupComputer.Count) items" WARN
-        for ($i = 1; $i -lt $sorted.Count; $i++) {
-            if ($delete) {
-                Write-Log "+ - Deleting $($sorted[$i].AgentId)..." WARN
-                Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers/$($sorted[$i].AgentId)" -Method 'DELETE' -Headers $sessionHeader
-            } else {
-                Write-Log "+ - To be deleted: $($sorted[$i].AgentId)" WARN
-            }
-
-        }
-    }
-}
-
-
-## Processing Endpoints (New API)
-Write-Log "Working on Endpoints." INFO
-
-$getEndpointsList = Get-EPMEndpoints
-
-# Group objects by ComputerName
-$groupedEndpointsByName = $getEndpointsList.endpoints | Group-Object -Property name
-$duplicateEndpointsCount = $getEndpointsList | Where-Object {$_.Count -gt 1} | Measure-Object | Select-Object -ExpandProperty Count
-
-Write-Log "Identified $duplicateEndpointsCount duplicated devices." INFO
-
-# Iterate through each group
-foreach ($groupEndpoints in $groupedEndpointsByName) {
-    # Select multiple device having the same computer name.
-    if ($groupEndpoints.Count -gt 1) {
-        # Sort objects in the group by LastSeen in ascending order
-        $sorted = $groupEndpoints.Group | Sort-Object -Property LastSeen -Descending
-
-        # Output the ComputerName and oldest AgentId(s) starting from the array position 1 (order by descending)
-        Write-Log "Duplicated Device: $($sorted[0].ComputerName), found $($groupEndpoints.Count) items" WARN
-        for ($i = 1; $i -lt $sorted.Count; $i++) {
-            if ($delete) {
-                Write-Log "+ - Deleting $($sorted[$i].Id)..." WARN
-                $deleteEndpointFilter = @{
-                    "filter" = "id EQ $($sorted[$i].Id)"
-                } | ConvertTo-Json
-
-                Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/delete" -Method 'POST' -Headers $sessionHeader -Body $deleteEndpointFilter
-            } else {
-                Write-Log "+ - To be deleted: $($sorted[$i].id)" WARN
-            }
-
-        }
-    }
-}
-
-
-#>

@@ -27,6 +27,7 @@
     01/2024 - Initial Version
     12/2024 - Adding Logs
     12/2024 - Improve last date management
+    11/2025 - Update core functions
 
 .EXAMPLE
     1. .\EPMCreateJIT.ps1 -username "user@domain" -setName "MySet" -tenant "eu"
@@ -58,6 +59,7 @@ param (
     [string]$lastEventFolder
 )
 
+## Write-Host Wrapper and log management
 function Write-Log {
     param (
         [Parameter(Mandatory = $true)]
@@ -71,29 +73,36 @@ function Write-Log {
         [string]$ForegroundColor
     )
     
+    $expSeverity = $severity
+    $exceedingChars = 5-$severity.Length
+    
+    while ($exceedingChars -ne 0) {
+        $expSeverity = $expSeverity + " "
+        $exceedingChars--
+    }
+
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logMessage = "$timestamp [$severity] - $message"
+    $logMessage = "$timestamp [$expSeverity] $message"
 
     switch ($severity) {
         "INFO" {
             if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
                 $ForegroundColor = "Green"
             }
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
         "WARN" {
             if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
                 $ForegroundColor = "Yellow"
             }
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
         "ERROR" {
             if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
                 $ForegroundColor = "Red"
             }
-            Write-Host $logMessage -ForegroundColor $ForegroundColor
         }
     }
+
+    Write-Host $logMessage -ForegroundColor $ForegroundColor
 
     if ($log) {
         Add-Content -Path $logFilePath -Value $logMessage
@@ -105,16 +114,258 @@ function Write-Box {
         [string]$title
     )
     
-    # Calculate the length of the title
-    $titleLength = $title.Length
-
     # Create the top and bottom lines
-    $line = "-" * $titleLength
+    $line = "-" * $title.Length
 
     # Print the box
     Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
     Write-Log "| $title |" -severity INFO -ForegroundColor Cyan
     Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
+}
+
+## Invoke-RestMethod Wrapper
+<#
+.SYNOPSIS
+    Invokes a REST API method with automatic retry logic in case of transient failures.
+
+.DESCRIPTION
+    This function is designed to make REST API calls with automatic retries in case of specific errors, such as rate limiting.
+    It provides a robust way to handle transient failures and ensures that the API call is retried a specified number of times.
+
+.PARAMETER URI
+    The Uniform Resource Identifier (URI) for the REST API endpoint.
+
+.PARAMETER Method
+    The HTTP method (e.g., GET, POST, PUT, DELETE) for the API call.
+
+.PARAMETER Body
+    The request body data to be sent in the API call (can be null for certain methods).
+
+.PARAMETER Headers
+    Headers to include in the API request.
+#>
+function Invoke-EPMRestMethod {
+    param (
+        [string]$URI,
+        [string]$Method,
+        [object]$Body = $null,
+        [hashtable]$Headers = @{},
+        [int]$MaxRetries = 3
+    )
+
+    $retryCount = 0
+
+    while ($retryCount -lt $MaxRetries) {
+        try {
+            $response = Invoke-RestMethod -Uri $Uri -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
+            return $response
+        }
+        catch {
+            $ErrorDetailsMessage = $null
+
+            # Extract API error details if available
+            if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+                try {
+                    $ErrorDetailsMessage = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction SilentlyContinue
+                }
+                catch {
+                    Write-Log "Failed to parse error message as JSON. Raw message: $($_.ErrorDetails.Message)" WARN
+                }
+            }
+
+            # Handle rate limit error (EPM00000AE)
+            if ($ErrorDetailsMessage -and $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
+                # Regex pattern to find numbers followed by "minute(s)"
+                $pattern = "\d+\s+minute"
+                $match = [regex]::Match($ErrorDetailsMessage.ErrorMessage, $pattern)
+                if ($match.Success) {
+                    $minutes = [int]($match.Value -replace '\s+minute', '')
+                    [int]$RetryDelay = $minutes * 60
+                }
+
+                Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
+                Start-Sleep -Seconds $RetryDelay
+                $retryCount++
+            } else {
+                # Handle Body possible filter error 
+                if ($ErrorDetailsMessage.ErrorCode -eq "EPM000002E" -and $null -ne $Body) {
+                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
+                    Write-Log "Please verify the filter body if present, as it could be the cause of this error code." ERROR
+                    throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
+                } else {
+                    # Log error only if it's NOT the handled EPM00000AE error
+                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
+                    throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
+                }
+            }
+        }
+    }
+
+    # If all retries fail, log and throw an error
+    Write-Log "API call failed after $MaxRetries retries. URI: $URI" ERROR
+    throw "API call failed after $MaxRetries retries."
+}
+
+## EPM RestAPI Wrappers
+<#
+.SYNOPSIS
+Connects to the EPM (Enterprise Password Vault) using the provided credentials and tenant information.
+
+.DESCRIPTION
+This function performs authentication with the EPM API to obtain the manager URL and authentication details.
+
+.PARAMETER credential
+The credential object containing the username and password.
+
+.PARAMETER epmTenant
+The EPM tenant name.
+
+.OUTPUTS
+A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
+
+#>
+function Connect-EPM {
+    param (
+        [Parameter(Mandatory = $true)]
+        [pscredential]$credential,  # Credential object containing the username and password
+
+        [Parameter(Mandatory = $true)]
+        [string]$epmTenant          # EPM tenant name
+    )
+
+    # Convert credential information to JSON for authentication
+    $authBody = @{
+        Username      = $credential.UserName
+        Password      = $credential.GetNetworkCredential().Password
+        ApplicationID = "Powershell"
+    } | ConvertTo-Json -Depth 3
+
+    $authHeaders = @{
+        "Content-Type" = "application/json"
+    }
+
+    try {
+        # Write-Log "Attempting to connect to EPM tenant: $epmTenant" INFO
+        $response = Invoke-EPMRestMethod -URI "https://$epmTenant.epm.cyberark.com/EPM/API/Auth/EPM/Logon" -Method 'POST' -Headers $authHeaders -Body $authBody
+
+        # Ensure the response contains the expected fields
+        if (-not $response -or -not $response.ManagerURL -or -not $response.EPMAuthenticationResult) {
+            throw "EPM authentication failed: Missing expected response fields."
+        }
+
+        # Write-Log "Successfully connected to EPM tenant: $epmTenant" INFO
+
+        # Return a custom object with connection information
+        return [PSCustomObject]@{
+            managerURL = $response.ManagerURL
+            auth       = $response.EPMAuthenticationResult
+        }
+    }
+    catch {
+        Write-Log "Failed to connect to EPM tenant: $epmTenant. Error: $_" ERROR
+        throw "Error connecting to EPM: $_"
+    }
+}
+
+<#
+.SYNOPSIS
+Retrieves the ID and name of an EPM set based on the provided parameters.
+
+.DESCRIPTION
+This function interacts with the EPM API to retrieve information about sets based on the specified parameters.
+
+.PARAMETER managerURL
+The URL of the EPM manager.
+
+.PARAMETER Headers
+The authorization headers.
+
+.PARAMETER setName
+The name of the EPM set to retrieve.
+
+.OUTPUTS
+A custom object with the properties "setId" and "setName" representing the EPM set information.
+#>
+function Get-EPMSetID {
+    param (
+        [Parameter(Mandatory = $true)]
+        [string]$managerURL,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Headers,
+
+        [string]$setName
+    )
+
+    # Retrieve list of sets
+    try {
+        #Write-Log "Retrieving EPM Sets from: $managerURL" INFO
+        $sets = Invoke-EPMRestMethod -URI "$managerURL/EPM/API/Sets" -Method 'GET' -Headers $Headers
+
+        if (-not $sets -or -not $sets.Sets) {
+            throw "No sets retrieved from EPM."
+        }
+    }
+    catch {
+        Write-Log "Failed to retrieve EPM Sets. Error: $_" ERROR
+        throw "Could not retrieve EPM sets."
+    }
+
+    #$setId = $null
+
+    # If setName is provided, search for it directly
+    if (-not [string]::IsNullOrEmpty($setName)) {
+        $selectedSet = $sets.Sets | Where-Object { $_.Name -eq $setName } | Select-Object -First 1
+
+        if ($selectedSet) {
+            return [PSCustomObject]@{
+                setId   = $selectedSet.Id
+                setName = $selectedSet.Name
+            }
+        } else {
+            Write-Log "Error: Set '$setName' not found in EPM." ERROR
+            throw "Invalid Set Name: $setName"
+        }
+    }
+
+    # If no setName is provided, prompt the user to select one
+    #Write-Log "No set name provided. Listing available sets for selection..." INFO
+
+    if ($sets.Sets.Count -eq 0) {
+        Write-Log "No sets available in EPM." ERROR
+        throw "No sets found. Cannot proceed."
+    }
+
+    Write-Box "Available Sets:" INFO
+
+    for ($i = 0; $i -lt $sets.Sets.Count; $i++) {
+        Write-Log "$($i + 1). $($sets.Sets[$i].Name)" INFO DarkCyan
+    }
+
+    # Prompt user for input with max retries
+    $maxRetries = 3
+    for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+        $chosenSetNumber = Read-Host "Enter the number of the set you want to choose"
+
+        try {
+            $chosenSetNumber = [int]$chosenSetNumber
+
+            if ($chosenSetNumber -ge 1 -and $chosenSetNumber -le $sets.Sets.Count) {
+                $chosenSet = $sets.Sets[$chosenSetNumber - 1]
+                return [PSCustomObject]@{
+                    setId   = $chosenSet.Id
+                    setName = $chosenSet.Name
+                }
+            } else {
+                Write-Log "Invalid selection. Please enter a number between 1 and $($sets.Sets.Count)." ERROR
+            }
+        }
+        catch {
+            Write-Log "Invalid input. Please enter a valid number." ERROR
+        }
+    }
+
+    throw "Maximum attempts reached. Exiting set selection."
 }
 
 function Resolve-Folder {
@@ -160,200 +411,6 @@ function Remove-InvalidCharacters {
     return $sanitizedString
 }
 
-function Invoke-EPMRestMethod  {
-    <#
-    .SYNOPSIS
-        Invokes a REST API method with automatic retry logic in case of transient failures.
-    
-    .DESCRIPTION
-        This function is designed to make REST API calls with automatic retries in case of specific errors, such as rate limiting.
-        It provides a robust way to handle transient failures and ensures that the API call is retried a specified number of times.
-    
-    .PARAMETER URI
-        The Uniform Resource Identifier (URI) for the REST API endpoint.
-    
-    .PARAMETER Method
-        The HTTP method (e.g., GET, POST, PUT, DELETE) for the API call.
-    
-    .PARAMETER Body
-        The request body data to be sent in the API call (can be null for certain methods).
-    
-    .PARAMETER Headers
-        Headers to include in the API request.
-    #>
-        param (
-            [string]$URI,
-            [string]$Method,
-            [object]$Body,
-            [hashtable]$Headers
-        )
-    
-        $apiDelaySeconds = 120
-        $maxRetries = 3
-        $retryCount = 0
-    
-        while ($retryCount -lt $maxRetries) {
-            try {
-                $response = Invoke-RestMethod -Uri $Uri -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
-                return $response
-            }
-            catch {
-                # Convert Error message to Powershell Object
-                if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
-                    $ErrorDetailsMessage = $_.ErrorDetails.Message | ConvertFrom-Json
-                }
-                else {
-                    throw "API call failed. $_"
-                }
-    
-                # Error: EPM00000AE - Too many calls per 2 minute(s). The limit is 10
-                if ( $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
-                    Write-Log $ErrorDetailsMessage.ErrorMessage ERROR
-                    Write-Log "Retrying in $apiDelaySeconds seconds..." WARN
-                    Start-Sleep -Seconds $apiDelaySeconds
-                    $retryCount++
-                }
-                else {
-                    throw "API call failed. ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
-                }
-            }
-        }
-    
-        # If all retries fail, handle accordingly
-        throw "API call failed after $RetryCount retries."
-    }
-    
-
-    function Connect-EPM {
-    <#
-    .SYNOPSIS
-    Connects to the EPM (Enterprise Password Vault) using the provided credentials and tenant information.
-
-    .DESCRIPTION
-    This function performs authentication with the EPM API to obtain the manager URL and authentication details.
-
-    .PARAMETER credential
-    The credential object containing the username and password.
-
-    .PARAMETER epmTenant
-    The EPM tenant name.
-
-    .OUTPUTS
-    A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
-
-    #>
-    param (
-        [pscredential]$credential,  # Credential object containing the username and password
-        [string]$epmTenant          # EPM tenant name
-    )
-
-    # Convert credential information to JSON for authentication
-    $authBody = @{
-        Username = $credential.UserName
-        Password = $credential.GetNetworkCredential().Password
-        ApplicationID = "Powershell"
-    } | ConvertTo-Json
-
-    $authHeaders = @{
-        "Content-Type" = "application/json"
-    }
-
-    $response = Invoke-EPMRestMethod -URI "https://$epmTenant.epm.cyberark.com/EPM/API/Auth/EPM/Logon" -Method 'POST' -Headers $authHeaders -Body $authBody
-
-    # Return a custom object with connection information
-    [PSCustomObject]@{
-        managerURL = $($response.ManagerURL)
-        auth       = $($response.EPMAuthenticationResult)
-    }
-}
-    
-function Get-EPMSetID {
-    <#
-    .SYNOPSIS
-    Retrieves the ID and name of an EPM set based on the provided parameters.
-
-    .DESCRIPTION
-    This function interacts with the EPM API to retrieve information about sets based on the specified parameters.
-
-    .PARAMETER managerURL
-    The URL of the EPM manager.
-
-    .PARAMETER authToken
-    The authorization token for authentication.
-
-    .PARAMETER setName
-    The name of the EPM set to retrieve.
-
-    .OUTPUTS
-    A custom object with the properties "setId" and "setName" representing the EPM set information.
-
-    #>
-    param (
-        [string]$managerURL,
-        [hashtable]$Headers,
-        [string]$setName
-    )
-
-    $sets = Invoke-EPMRestMethod -URI "$managerURL/EPM/API/Sets" -Method 'GET' -Headers $Headers
-    
-    $setId = $null
-
-    # Check if $SetName is empty
-    if ([string]::IsNullOrEmpty($setName)) {
-
-        # Repeat until a valid set number is entered
-        do {
-            # List the available sets with numbers
-            Write-Box "Available Sets:" INFO
-            $numberSets = 0
-            foreach ($set in $sets.Sets) {
-                Write-Log "$($numberSets + 1). $($set.Name)" INFO DarkCyan
-                $numberSets++
-            }
-        
-            # Ask the user to choose a set by number
-            $chosenSetNumber = Read-Host "Enter the number of the set you want to choose"
-        
-            # Validate the chosen set number
-            try {
-                $chosenSetNumber = [int]$chosenSetNumber
-        
-                if ($chosenSetNumber -lt 1 -or $chosenSetNumber -gt $numberSets) {
-                    Write-Log "Invalid set number. Please enter a number between 1 and $numberSets." ERROR
-                } else {
-                    # Set chosenSet based on the user's selection
-                    $chosenSet = $sets.Sets[$chosenSetNumber - 1]
-                    $setId = $chosenSet.Id
-                    $setName = $chosenSet.Name
-                }
-            } catch {
-                Write-Log "Invalid input. Please enter a valid number." ERROR
-            }
-        } until ($setId)
-    }
-    
-    else {
-        # List the sets with numbers
-        foreach ($set in $sets.Sets) {
-            # Check if setname matches with the configured set
-            if ($set.Name -eq $SetName) {
-                $setId = $set.Id
-                break  # Exit the loop once the set is found
-            }
-        }
-        if ([string]::IsNullOrEmpty($setId)) {
-            Write-Log "$SetName : Invalid Set" ERROR
-            return
-        }
-    }
-
-    # Return a custom object with set information
-    [PSCustomObject]@{
-        setId   = $setId
-        setName = $setName
-    }
-}
-
 function Add-msToTimestamp {
     param (
         [string]$timestamp
@@ -363,7 +420,7 @@ function Add-msToTimestamp {
         
         $datePart = $Matches['Date']
         $milliseconds = $Matches['Milliseconds']
-        $zone = $Matches['Zone']
+        #$zone = $Matches['Zone']
 
         # Ensure milliseconds are always three digits
         $milliseconds = if ($null -eq $milliseconds) { "000" } else { $milliseconds.PadRight(3, '0') }
@@ -411,7 +468,6 @@ $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -se
 
 # Last event tracking setup
 $resolvedLastEventFolder = Resolve-Folder -ProvidedFolder $lastEventFolder -DefaultSubFolder "EPMJIT_lastEvents"
-# Create or update last event file
 $lastEventFile = Join-Path $resolvedLastEventFolder "lastEvents.txt"
 
 # Set the last events, by default 1 month
@@ -445,20 +501,21 @@ $eventsFilter = @{
     "filter" = "eventDate GE $lastEventTimestamp AND eventType IN ManualRequest"
 }  | ConvertTo-Json
 
-$events = Invoke-EPMRestMethod -URI "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Events/Search?limit=1000&sortDir=asc" -Method 'POST' -Headers $sessionHeader -Body $eventsFilter
+$GetEvents = Invoke-EPMRestMethod -URI "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Events/Search?limit=1000&sortDir=asc" -Method 'POST' -Headers $sessionHeader -Body $eventsFilter
 
-Write-Log $($events | Convertto-Json -Depth 10) INFO
+# Write-Log $($GetEvents | Convertto-Json -Depth 10) INFO
 
-if ($events.filteredCount -gt 0) {
-    Write-Log "Found $($events.filteredCount) Manual Request from $lastEventTimestamp" INFO
+if ($GetEvents.filteredCount -gt 0) {
+    Write-Log "Found $($GetEvents.filteredCount) Manual Request from $lastEventTimestamp" INFO
 
-    foreach ($event in $events.events) {
+    foreach ($EPMEvent in $GetEvents.events) {
 
         # Create JIT policy
-        Write-Log "Processing $count of $($events.filteredCount) Manual Request for $($event.userName) on $($event.computerName)" INFO
+        Write-Log "Processing $count of $($GetEvents.filteredCount) Manual Request for '$($EPMEvent.userName)' on '$($EPMEvent.computerName)' - Justification '$($EPMEvent.justification)'" INFO
         
         $policyDetails = @{
-            "Name" = "JIT $($event.userName) on $($event.computerName)"
+            "Name" = "JIT $($EPMEvent.userName) on $($EPMEvent.computerName)"
+            "Description" =  $($EPMEvent.justification)
             "IsActive" = $true
             "IsAppliedToAllComputers" = $false
             "PolicyType" = 40
@@ -468,15 +525,15 @@ if ($events.filteredCount -gt 0) {
             "Audit" = $true
             "Executors" = @(
                 @{
-                    "Id" = "$($event.agentId)"
-                    "Name" = "$($event.computerName)"
+                    "Id" = "$($EPMEvent.agentId)"
+                    "Name" = "$($EPMEvent.computerName)"
                     "ExecutorType" = 1
                 }
             )
             "Accounts" = @(
                 @{
-                    "SamName" = "$($event.userName)"
-                    "DisplayName" = "$($event.userName)"
+                    "SamName" = "$($EPMEvent.userName)"
+                    "DisplayName" = "$($EPMEvent.userName)"
                     "AccountType" = 1
                 }
             )
@@ -487,18 +544,18 @@ if ($events.filteredCount -gt 0) {
                     "DisplayName" = "Administrators"
                 }
             )
-        }  | ConvertTo-Json
+        } | ConvertTo-Json
 
         $createJIT = Invoke-EPMRestMethod -URI "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server" -Method 'POST' -Headers $sessionHeader -Body $policyDetails
         if ($createJIT.id) {
             Write-Log "$($createJIT.Name) policy created" INFO
         } else {
-            Write-Log "Error creating policy for $($event.userName) on $($event.computerName)" ERROR
+            Write-Log "Error creating policy for $($EPMEvent.userName) on $($EPMEvent.computerName)" ERROR
         }
         
         # Update lastevents file
-        $newfirstEventDate = Add-msToTimestamp -timestamp $event.firstEventDate
-        Write-Log "The last event date $($event.firstEventDate), save last event date $newfirstEventDate in $lastEventFile" INFO
+        $newfirstEventDate = Add-msToTimestamp -timestamp $EPMEvent.firstEventDate
+        Write-Log "The last event date $($EPMEvent.firstEventDate), save last event date $newfirstEventDate in $lastEventFile" INFO
         $newfirstEventDate | Set-Content -Path $lastEventFile -Force
     }
 } else {
