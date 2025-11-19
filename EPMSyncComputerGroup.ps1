@@ -1,11 +1,8 @@
 <#
 .SYNOPSIS
-    Create JIT (Just-in-Time) policies based on manual request events.
+    Sync computer group by reading a CSV file.
 
 .DESCRIPTION
-    1. Retrieve events from EPM that occurred after the last stored timestamp.
-    2. Create JIT policies in EPM based on the retrieved events.
-    3. Update the log file with the latest event timestamp.
 
 .PARAMETER username
     The EPM username (e.g., user@domain).
@@ -16,26 +13,26 @@
 .PARAMETER tenant
     The EPM tenant name (e.g., eu, uk).
 
-.NOTES
-    File: EPMCreateJIT.ps1
-    Author: Giulio Compagnone
-    Company: CyberArk
-    Version: 0.4 - POC
-    Date: 01/2024
-
-.RELEASE NOTES
-    01/2024 - Initial Version
-    12/2024 - Adding Logs
-    12/2024 - Improve last date management
-    11/2025 - Update core functions - Minor update
+.PARAMETER policyFile
+    The full path to the input CSV file. The file must contain two columns:
+        1. The Computer Name (e.g., WIN10X64-1).
+        2. A semicolon-separated list of EPM Groups (e.g., EarlyAdopter;PreProd).
+    
+    Example CSV format:
+    WIN10X64-1,EarlyAdopter;PreProd
+    WIN11-1,PreProd
 
 .EXAMPLE
-    1. .\EPMCreateJIT.ps1 -username "user@domain" -setName "MySet" -tenant "eu"
-        Check events in the set, no log created, lastEventFile stored in the script current folder \lastEvents
-    2. .\EPMCreateJIT.ps1 -username "user@domain" -setName "MySet" -tenant "eu" -log -logFolder "C:\Logs" -lastEventFolder "C:\Events"
-        Check events in the set, create log in the custom folder C:\Logs and last event file in C:\Events\
-    3. .\EPMCreateJIT.ps1 -username "user@domain" -setName "MySet" -tenant "eu" -log -lastEventFolder "C:\Events"
-        Check events in the set, create log in the "current script folder\log" and last event file in "C:\Events"
+    .\EPMsyncComputerGroup.ps1 -username "admin@epm.com" -setName "Default Set" -tenant "eu" -source "C:\temp\policy_assignments.csv"
+
+.NOTES
+    File: EPMAddComputertoPolicy.ps1
+    Author: Giulio Compagnone
+    Company: CyberArk
+    Version: 1
+    Created: 11/2025
+
+    TODO: the script only add computer in group or ADD new group. Future release the script will remove computer from group or remove groups and fullt sync the CSV fileprocessed
 #>
 
 param (
@@ -43,10 +40,10 @@ param (
     [string]$username,
 
     [Parameter(HelpMessage="Please enter valid EPM set name")]
-    [string]$setName = "",
+    [string]$setName,
 
     [Parameter(Mandatory = $true, HelpMessage="Please enter valid EPM tenant (eu, uk, ....)")]
-    [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch")]
+    [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch", "beta")]
     [string]$tenant,
 
     [Parameter(HelpMessage = "Enable logging to file and console")]
@@ -55,8 +52,8 @@ param (
     [Parameter(HelpMessage = "Specify the log file path")]
     [string]$logFolder,
 
-    [Parameter(HelpMessage = "Please provide the folder to store the last event date detail.")]
-    [string]$lastEventFolder
+    [Parameter(Mandatory=$true)]
+    [string]$source
 )
 
 ## Write-Host Wrapper and log management
@@ -151,6 +148,7 @@ function Invoke-EPMRestMethod {
         [object]$Body = $null,
         [hashtable]$Headers = @{},
         [int]$MaxRetries = 3
+    #    [int]$RetryDelay = 120
     )
 
     $retryCount = 0
@@ -368,89 +366,186 @@ function Get-EPMSetID {
     throw "Maximum attempts reached. Exiting set selection."
 }
 
-function Resolve-Folder {
+<#
+.SYNOPSIS
+    Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
+
+.DESCRIPTION
+    This function acts as a wrapper for the CyberArk EPM REST API to get computers.
+    It automatically manages pagination by making multiple API calls if the total number
+    of computers exceeds the API's maximum limit (5000). The function merges all
+    computers into a single PSCustomObject for easy management.
+
+.PARAMETER limit
+    The maximum number of computers to retrieve per API call. The default is 5000,
+    which is the maximum allowed by the CyberArk EPM API.
+
+.EXAMPLE
+    Get-EPMTotalCount -limit 500
+
+.OUTPUTS
+    This function returns an object containing the merged computers and metadata.
+    The object has the following properties:
+        - Computers: An array of all policy objects.
+        - TotalCount: The total number of policies on the server.
+
+.NOTES
+    This function requires a valid session header and manager URL to be accessible
+    in the execution context. It uses Invoke-EPMRestMethod.
+#>
+Function Get-EPMEndpoints {
     param (
-        [string]$ProvidedFolder,
-        [string]$DefaultSubFolder
+        [int]$limit = 1000,     #Set limit to the max size if not declared
+        [hashtable]$filter      #Set the search body
     )
 
-    # Determine the script directory or fallback to current directory
-    $scriptDirectory = if ($MyInvocation.MyCommand.Path) {
-        Split-Path -Parent $MyInvocation.MyCommand.Path
-    } else {
-        Get-Location
+    $mergeEndpoints = [PSCustomObject]@{
+        endpoints = @()
+        filteredCount = 0
+        returnedCount = 0
     }
 
-    # Use the provided folder or create a default subfolder
-    $resolvedFolder = if ($ProvidedFolder) {
-        $ProvidedFolder
-    } else {
-        Join-Path $scriptDirectory $DefaultSubFolder
+    if ($null -ne $filter) {
+        $filterJSON = $filter | ConvertTo-Json
     }
 
-    # Ensure the folder exists
-    if (-not (Test-Path $resolvedFolder)) {
-        New-Item -Path $resolvedFolder -ItemType Directory -Force | Out-Null
-    }
+    $offset = 0             # Offset
+    $iteration = 1          # Define the number of iteraction, used to increase the offset
+    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
 
-    return $resolvedFolder
-}
-
-function Remove-InvalidCharacters {
-    param (
-        [Parameter(Mandatory)]
-        [string]$InputString
-    )
-
-    # Define invalid characters for file names
-    $invalidCharacters = '[\\/:*?"<>|[\]]'
-
-    # Remove invalid characters
-    $sanitizedString = $InputString -replace $invalidCharacters, ''
-
-    return $sanitizedString
-}
-
-function Add-msToTimestamp {
-    param (
-        [string]$timestamp
-    )
-
-    if ($timestamp -match '^(?<Date>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(?<Milliseconds>\d+))?(?<Zone>Z)$') {
+    while ($offset -lt $total) {
+        $getEndpoints = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/search?offset=$offset&limit=$limit" -Method 'POST' -Headers $sessionHeader -Body $filterJSON
         
-        $datePart = $Matches['Date']
-        $milliseconds = $Matches['Milliseconds']
-        #$zone = $Matches['Zone']
+        $mergeEndpoints.endpoints += $getEndpoints.endpoints    # Merge the current computer list
+        $mergeEndpoints.filteredCount = $getEndpoints.filteredCount   # Update the filteredCount (the total device based on the filter)
+        $mergeEndpoints.returnedCount = $getEndpoints.returnedCount   # Update the returnedCount
 
-        # Ensure milliseconds are always three digits
-        $milliseconds = if ($null -eq $milliseconds) { "000" } else { $milliseconds.PadRight(3, '0') }
+        $total = $getComputers.filteredCount   # Update the total with the real total
+        $offset = $limit  * $iteration
+        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+    }
+    return $mergeEndpoints
+}
 
-        $datems = "$datePart.$milliseconds"
+## Script Functions
+<#
+.SYNOPSIS
+    Converts a CSV file of computer-to-group mappings into
+    PowerShell objects, one per group, with a list of associated computers.
+
+.DESCRIPTION
+    Reads a two-column, header-less CSV file.
+    Column 1: ComputerName
+    Column 2: Semicolon-separated list of EPM groups
+
+.PARAMETER Path
+    The full path to the input CSV file.
+
+.PARAMETER GroupLookup
+    (Optional) A pre-built hash table that maps [GroupName] to [GroupID].
+    If provided, the GroupId property will be populated.
+    If a group from the CSV is not found in this map, GroupId will be $null.
+
+.OUTPUTS
+    [PSCustomObject]
+    Streams objects to the pipeline, each with:
+    - EpmGroupName (string)
+    - GroupId (always $null, as a placeholder)
+    - Computers (array of strings)
+#>
+function ConvertTo-EpmGroupData {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true, Position=0)]
+        [ValidateScript({
+            if (-not (Test-Path -Path $_ -PathType Leaf)) {
+                throw "File not found: $_"
+            }
+            return $true
+        })]
+        [string]$Path,
+
+        [Parameter(Mandatory=$false)]
+        [System.Collections.IDictionary]$GroupLookup = $null
+    )
+
+    Write-Log "Starting EPM Group processing for file: $Path" INFO
+
+    $groupMap = @{}
+
+    $headers = 'ComputerName', 'GroupList'
+    $csvStream = Import-Csv -Path $Path -Header $headers
+
+    foreach ($row in $csvStream) {
+        $computer = $row.ComputerName.Trim()
+        if ([string]::IsNullOrWhiteSpace($computer)) {
+            Write-Log "Skipping row with empty computer name." WARN
+            continue
+        }
+        if ([string]::IsNullOrWhiteSpace($row.GroupList)) {
+            Write-Log "Skipping computer '$computer': no groups listed." WARN
+            continue
+        }
+
+        # Split the group list string into an array
+        $groups = $row.GroupList -split ';'
+
+        foreach ($group in $groups) {
+            $trimmedGroup = $group.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($trimmedGroup)) {
+                # Check if group exists
+                if (-not $groupMap.ContainsKey($trimmedGroup)) {
+                    # If not, create a new *List* for it.
+                    $groupMap[$trimmedGroup] = [System.Collections.Generic.List[string]]::new()
+                }
+                
+                # Add the computer to this group's list
+                $groupMap[$trimmedGroup].Add($computer)
+            }
+        }
+    }
+
+    Write-Log "Grouping complete. Found $($groupMap.Keys.Count) unique groups." INFO
+
+    foreach ($entry in $groupMap.GetEnumerator()) {
         
-        # Convert to integer and add 1 millisecond
-        $newDate = [datetime]::ParseExact($datems, "yyyy-MM-ddTHH:mm:ss.fff", $null).AddMilliseconds(1).ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-        return $newDate
-           
-    } else {
-        throw "Invalid timestamp format: $timestamp"
+        $groupId = $null
+        if ($null -ne $GroupLookup -and $GroupLookup.ContainsKey($entry.Key)) {
+            $groupId = $GroupLookup[$entry.Key]
+        }        
+        
+        # This object is written to the output stream
+        [PSCustomObject]@{
+            EpmGroupName = $entry.Key
+            GroupId      = $groupId
+            Computers    = $entry.Value # This is the [List[string]] we built
+        }
     }
 }
 
-# Logging setup
+### Begin Script ###
+
+## Prepare log folder and file
+# Set default log folder if not provided
+if (-not $PSBoundParameters.ContainsKey('logFolder')) {
+    $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $logFolder = Join-Path $scriptDirectory "log"
+}
+
+# Ensure the log folder exists
+if (-not (Test-Path $logFolder)) {
+    New-Item -Path $logFolder -ItemType Directory -Force
+}
+
+# Create log file name based on timestamp and script name
+$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
-if ($log) {
-    $resolvedLogFolder = Resolve-Folder -ProvidedFolder $logFolder -DefaultSubFolder "log"
-
-    # Create log file
-    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $logFileName = "$timestamp`_$scriptName.log"
-    $logFilePath = Join-Path $resolvedLogFolder $logFileName
-
-    Write-Log "Logging enabled. Log file: $logFilePath" INFO
-}
-## Log file done
+$logFileName = "$timestamp`_$scriptName.log"
+$logFilePath = Join-Path $logFolder $logFileName
+##
 
 Write-Box "$scriptName"
+##
 
 # Request EPM Credentials
 $credential = Get-Credential -UserName $username -Message "Enter password for $username"
@@ -461,106 +556,103 @@ $login = Connect-EPM -credential $credential -epmTenant $tenant
 # Create a session header with the authorization token
 $sessionHeader = @{
     "Authorization" = "basic $($login.auth)"
+    "Content-Type" = "application/json"
 }
 
 # Get SetId
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
-# Last event tracking setup
-$resolvedLastEventFolder = Resolve-Folder -ProvidedFolder $lastEventFolder -DefaultSubFolder "EPMJIT_lastEvents\$($set.setName)"
-$lastEventFile = Join-Path $resolvedLastEventFolder "lastEvent.txt"
+Write-Log "Entering SET: $($set.setName)..." INFO -ForegroundColor Blue
 
-# Set the last events, by default 1 month
-$lastEventTimestamp = (Get-Date).AddMonths(-1).ToString('yyyy-MM-ddTHH:mm:ss.ffZ')
-
-# Check if the file exists
-if (Test-Path $lastEventFile -PathType Leaf) {
-    Write-Log "Found last events file: $lastEventFile" INFO
-    # Read the first line from the file
-    $firstLine = Get-Content $lastEventFile -First 1
-
-    # Define a regex pattern for the timestamp format "2024-01-12T16:51:32.303Z"
-    $timestampPattern = '^(?<Date>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.)(?<Milliseconds>\d+)(?<Zone>Z)$'
-
-    # Check if the first line matches the timestamp pattern
-    if ($firstLine -match $timestampPattern) {
-        # Assign the timestamp to a variable
-        $lastEventTimestamp = $matches[0]
-
-        # Display the timestamp
-        Write-Log "Searching Manual Request events from $lastEventTimestamp" INFO
-    } else {
-        Write-Log "$firstLine does not match the expected timestamp format. Starting the event search from $lastEventTimestamp" WARN
-    }
-} else {
-    Write-Log "$($lastEventFile): The file does not exist. Starting the event search from $lastEventTimestamp" WARN
+# Check the source file
+if (-not (Test-Path $source)) {
+    Write-Log "The specified CSV file '$source' was not found." ERROR
+    exit 1
 }
 
-# Get Events
-$eventsFilter = @{
-    "filter" = "eventDate GE $lastEventTimestamp AND eventType IN ManualRequest"
-}  | ConvertTo-Json
+# Get Static Groups
+$compGroupFilter = @{
+    "filter" = "type EQ Static"
+} | ConvertTo-Json
+$getCompGroups = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/groups/search" -Method 'POST' -Headers $sessionHeader -Body $compGroupFilter
 
-$GetEvents = Invoke-EPMRestMethod -URI "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Events/Search?limit=1000&sortDir=asc" -Method 'POST' -Headers $sessionHeader -Body $eventsFilter
+$GroupNameToIdMap = @{} # Map of [GroupName] = GroupID
+foreach ($compGroup in $getCompGroups) {
+    $name = $compGroup.name
+    $id = $compGroup.id
+    $GroupNameToIdMap[$name] = $id
+}
 
-if ($GetEvents.filteredCount -gt 0) {
-    Write-Log "Found $($GetEvents.filteredCount) Manual Request from $lastEventTimestamp" INFO
+# Get Endpoints
+$getEndpoints = Get-EPMEndpoints
+$EndpointNameToIdMap = @{} # Map of [EndpointName] = EndpointID
 
-    $count = 1
-    $eventDate # store the event date. Value to be stored in the file once the foreach cycle stop
+foreach ($endpoint in $getEndpoints.endpoints) {
+    $name = $endpoint.name.Trim()
+    $id = $endpoint.id
+if ($EndpointNameToIdMap.ContainsKey($name)) {
+        # Duplicate name found. Temporary Solution.
+        # TO DO: Reuse the a function to hanlde dupkiated from otehr script
+        Write-Log "Duplicate endpoint name found: '$name'. The ID '$($EndpointNameToIdMap[$name])' will be used, ignoring ID '$id'." WARN
+    }
+    else {
+        $EndpointNameToIdMap[$name] = $id
+    }
+}
 
-    foreach ($EPMEvent in $GetEvents.events) {
-        Write-Log "Processing $count of $($GetEvents.filteredCount) Manual Request for '$($EPMEvent.userName)' on '$($EPMEvent.computerName)' - Justification '$($EPMEvent.justification)'" INFO
-        
-        $policyDetails = @{
-            "Name" = "JIT $($EPMEvent.userName) on $($EPMEvent.computerName)"
-            "Description" =  $($EPMEvent.justification)
-            "IsActive" = $true
-            "IsAppliedToAllComputers" = $false
-            "PolicyType" = 40
-            "Action" = 20
-            "Duration" = "1"
-            "KillRunningApps" = $true
-            "Audit" = $true
-            "Executors" = @(
-                @{
-                    "Id" = "$($EPMEvent.agentId)"
-                    "Name" = "$($EPMEvent.computerName)"
-                    "ExecutorType" = 1
-                }
-            )
-            "Accounts" = @(
-                @{
-                    "SamName" = "$($EPMEvent.userName)"
-                    "DisplayName" = "$($EPMEvent.userName)"
-                    "AccountType" = 1
-                }
-            )
-            "IncludeADComputerGroups" = @()
-            "TargetLocalGroups" = @(
-                @{
-                    "AccountType" = 0
-                    "DisplayName" = "Administrators"
-                }
-            )
-        } | ConvertTo-Json
+ConvertTo-EpmGroupData -Path $source -GroupLookup $GroupNameToIdMap | ForEach-Object {
+    
+    $GroupObject = $_
+    
+    Write-Log "Processing Group: $($GroupObject.EpmGroupName)" INFO
+    Write-Log "  Computers: ($($GroupObject.Computers -join ', '))" INFO
 
-        $createJIT = Invoke-EPMRestMethod -URI "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server" -Method 'POST' -Headers $sessionHeader -Body $policyDetails
-        if ($createJIT.id) {
-            Write-Log "$($createJIT.Name) policy created" INFO
+    # Convert ComputerName to Computer ID
+    $memberIDsList = @()
+    foreach ($computerName in $GroupObject.Computers) {
+        if ($EndpointNameToIdMap.ContainsKey($computerName)) {
+            $memberIDsList += $EndpointNameToIdMap[$computerName]
+
         } else {
-            Write-Log "Error creating policy for $($EPMEvent.userName) on $($EPMEvent.computerName)" ERROR
+            Write-Log "Computer '$computerName' not found in EPM inventory. Skipping for group '$($GroupObject.EpmGroupName)'." WARN
         }
-        
-        # Update lastevents file
-        $eventDate = Add-msToTimestamp -timestamp $EPMEvent.firstEventDate
-
-        $count++
+    }
+    
+    # Check if we have any valid IDs left to process
+    if ($memberIDsList.Count -eq 0) {
+        Write-Log "Skipping group '$($GroupObject.EpmGroupName)': No members found in EPM inventory." WARN
+        return # Skip to the next group
     }
 
-    Write-Log "The last event processed date $eventDate, storing in $lastEventFile" INFO
-    $eventDate | Set-Content -Path $lastEventFile -Force
-
-} else {
-    Write-Log "No new Manual Request from $lastEventTimestamp" INFO
+    # Prepare Body for Update Group
+    $memberIDs = @{
+        "membersIds" = $memberIDsList
+    } | ConvertTo-Json
+    
+    if ($null -eq $_.GroupId) {
+        # Group missing - Create New Group
+        Write-Log -Message "Group '$($GroupObject.EpmGroupName)' does not exist. Creating..." INFO
+       
+        $compGroupAdd = @{
+            "type" = "Static"
+            "name" = $($GroupObject.EpmGroupName)
+            "description" = "Created by script"
+        } | ConvertTo-Json
+        
+        $createCompGroups = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/Groups" -Method 'POST' -Headers $sessionHeader -Body $compGroupAdd
+        if ($null -eq $createCompGroups -or -not $createCompGroups.id) {
+            Write-Log "Group creation for '$($_.EpmGroupName)' failed. API returned no ID." ERROR
+            continue
+        }
+        Write-Log "Group '$($GroupObject.EpmGroupName)' created successfully with ID: $($createCompGroups.id)." INFO
+        
+        $addMembersIDs = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/Groups/$($createCompGroups.id)/members/ids" -Method 'POST' -Headers $sessionHeader -Body $memberIDs
+        Write-Log "Successfully added $($addMembersIDs.Count) members to new group '$($GroupObject.EpmGroupName)'." INFO    
+    }
+    else {
+        # Group present
+        Write-Log "Group '$($_.EpmGroupName)' (ID: $($_.GroupId)) exists. Updating members..." INFO
+        $addMembersIDs = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/Groups/$($GroupObject.GroupId)/members/ids" -Method 'POST' -Headers $sessionHeader -Body $memberIDs
+        Write-Log "Successfully added $($addMembersIDs.Count) members to new group '$($GroupObject.EpmGroupName)'." INFO    
+    }
 }
