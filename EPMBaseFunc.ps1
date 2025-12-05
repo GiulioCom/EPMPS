@@ -462,7 +462,7 @@ Function Get-EPMEndpoints {
         $mergeEndpoints.returnedCount = $getEndpoints.returnedCount   # Update the returnedCount
 
         $total = $getComputers.filteredCount   # Update the total with the real total
-        $offset = $limit  * $iteration
+        $offset = $limit * $iteration
         $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
     }
     return $mergeEndpoints
@@ -610,16 +610,28 @@ Write-Log $set.SetId INFO
 #Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search" -Method 'POST' -Headers $sessionHeader -Body $policyFilter
 
 
-$retryCount = 0
-do {
-    # All computers
-    $getComputerList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers" -Method 'GET' -Headers $sessionHeader
-    #$getComputerList | ConvertTo-Json
-    Write-Log $getComputerList INFO
-    $retryCount++
-} while ($retryCount -lt 20)
+#$retryCount = 0
+#do {
+#    # All computers
+#    $getComputerList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers" -Method 'GET' -Headers $sessionHeader
+#    #$getComputerList | ConvertTo-Json
+#    Write-Log $getComputerList INFO
+#    $retryCount++
+#} while ($retryCount -lt 20)
 
 # Disconnected Computers
 #$URLquery = "?`$filter=Status eq 'Disconnected'"
 #$getDisconnectedComputerList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers$URLQuery" -Method 'GET' -Headers $sessionHeader
 #$getDisconnectedComputerList | ConvertTo-Json
+
+$getComputerList = Get-EPMComputers
+
+$OutputPath = "EPM_Computers_List.csv"
+
+# Input is assumed to be the array property of the API result
+$ComputersArray = $getComputerList.Computers
+
+# 1. Pipeline the objects directly to the export cmdlet.
+$ComputersArray | Export-Csv -Path $OutputPath -NoTypeInformation
+
+Write-Host "Successfully exported $($ComputersArray.Count) computers to $OutputPath" -ForegroundColor Green

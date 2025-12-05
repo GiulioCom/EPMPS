@@ -686,13 +686,13 @@ function appCounter {
     }
     
 
-    <#    
+<#    
     $appCount = [PSCustomObject]@{
         Name  = $policy.Name
         Type  = $policy.Description
         Count = $policyTypeMap[$policy.PolicyType]
     }
-    #>
+#>
 
     $appGroupCounter = @()
     $policyCounter = @()
@@ -753,7 +753,7 @@ if (-not (Test-Path $EPMPoliciesExport)){
     $EPMPolicies = $EPMPoliciesContent | ConvertFrom-Json
 }
 
-
+<#
 $policiesTarget = @()
 $policiesApplication = @()
 $policiesProperties = @()
@@ -793,7 +793,7 @@ if ($policiesProperties.Count -gt 0) {
 } else {
     Write-Log "No Policies Target found to export to CSV." WARN
 }
-
+#>
 
 appCounter $EPMPolicies
 

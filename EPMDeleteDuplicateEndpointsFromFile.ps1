@@ -1,31 +1,3 @@
-<#
-.SYNOPSIS
-    Get Endpoint details, new resAPI POC
-
-.DESCRIPTION
-    Used to exzatract FQDN name
-
-.PARAMETER username
-    The EPM username (e.g., user@domain).
-
-.PARAMETER setName
-    The name of the EPM set.
-
-.PARAMETER tenant
-    The EPM tenant name (e.g., eu, uk).
-
-.PARAMETER destinationFolder
-
-
-.NOTES
-    File: EPMGetEndpointsDetails.ps1
-    Author: Giulio Compagnone
-    Company: CyberArk
-    Version: 0.1
-    Created: 09/2025
-    Last Modified: 09/2025
-#>
-
 param (
     [Parameter(Mandatory = $true, HelpMessage="Please enter valid EPM username (For example: user@domain)")]
     [string]$username,
@@ -43,11 +15,11 @@ param (
     [Parameter(HelpMessage = "Specify the log file path")]
     [string]$logFolder,
 
-    [Parameter(HelpMessage = "Specify if Endpoints details are needed")]
-    [switch]$details,
+    [Parameter(HelpMessage="Endpoints Report")]
+    [string]$EndpointReportCSV,
 
-    [Parameter(HelpMessage = "Export output in CSV file")]
-    [string]$exportCSVPath
+    [Parameter(HelpMessage="Delete duplicated Endpoint")]
+    [switch]$delete = $false
 )
 
 ## Write-Host Wrapper and log management
@@ -141,8 +113,8 @@ function Invoke-EPMRestMethod {
         [string]$Method,
         [object]$Body = $null,
         [hashtable]$Headers = @{},
-        [int]$MaxRetries = 3
-    #    [int]$RetryDelay = 120
+        [int]$MaxRetries = 3,
+        [int]$RetryDelay = 120 # Default value, in case of the returned message doesn't contain the limit info
     )
 
     $retryCount = 0
@@ -167,20 +139,16 @@ function Invoke-EPMRestMethod {
 
             # Handle rate limit error (EPM00000AE)
             if ($ErrorDetailsMessage -and $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
-                # Define a regex pattern to find numbers followed by "minute(s)"
+                # Regex pattern to find numbers followed by "minute(s)"
                 $pattern = "\d+\s+minute"
-
-                # Search for the pattern in the error message
                 $match = [regex]::Match($ErrorDetailsMessage.ErrorMessage, $pattern)
-
-                # If a match is found, extract the number
                 if ($match.Success) {
                     $minutes = [int]($match.Value -replace '\s+minute', '')
-                    # Convert minutes to seconds and update the RetryDelay variable
                     [int]$RetryDelay = $minutes * 60
+                    Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
                 }
 
-                Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
+                Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds (default)..." WARN
                 Start-Sleep -Seconds $RetryDelay
                 $retryCount++
             } else {
@@ -365,154 +333,6 @@ function Get-EPMSetID {
     throw "Maximum attempts reached. Exiting set selection."
 }
 
-<#
-.SYNOPSIS
-    Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
-
-.DESCRIPTION
-    This function acts as a wrapper for the CyberArk EPM REST API to get computers.
-    It automatically manages pagination by making multiple API calls if the total number
-    of computers exceeds the API's maximum limit (5000). The function merges all
-    computers into a single PSCustomObject for easy management.
-
-.PARAMETER limit
-    The maximum number of computers to retrieve per API call. The default is 5000,
-    which is the maximum allowed by the CyberArk EPM API.
-
-.EXAMPLE
-    Get-EPMTotalCount -limit 500
-
-.OUTPUTS
-    This function returns an object containing the merged computers and metadata.
-    The object has the following properties:
-        - Computers: An array of all policy objects.
-        - TotalCount: The total number of policies on the server.
-
-.NOTES
-    This function requires a valid session header and manager URL to be accessible
-    in the execution context. It uses Invoke-EPMRestMethod.
-#>
-Function Get-EPMEndpoints {
-    param (
-        [int]$limit = 1000,         #Set limit to the max size if not declared
-        [hashtable]$filter    #Set the search body
-    )
-
-    $mergeEndpoints = [PSCustomObject]@{
-        endpoints = @()
-        filteredCount = 0
-        returnedCount = 0
-    }
-
-    if ($null -ne $filter) {
-        $filterJSON = $filter | ConvertTo-Json
-    }
-
-    $offset = 0             # Offset
-    $iteration = 1          # Define the number of iteraction, used to increase the offset
-    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
-
-    while ($offset -lt $total) {
-        $getEndpoints = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/search?offset=$offset&limit=$limit" -Method 'POST' -Headers $sessionHeader -Body $filterJSON
-        
-        $mergeEndpoints.endpoints += $getEndpoints.endpoints    # Merge the current computer list
-        $mergeEndpoints.filteredCount = $getEndpoints.filteredCount   # Update the filteredCount (the total device based on the filter)
-        $mergeEndpoints.returnedCount = $getEndpoints.returnedCount   # Update the returnedCount
-
-        $total = $getComputers.filteredCount   # Update the total with the real total
-        $offset = $limit  * $iteration
-        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
-    }
-    return $mergeEndpoints
-}
-
-<#
-.SYNOPSIS
-    Retrieves a list of EPM policies from a CyberArk EPM server, handling pagination automatically.
-
-.DESCRIPTION
-    This function acts as a wrapper for the CyberArk EPM REST API to get policies.
-    It automatically manages pagination by making multiple API calls if the total number
-    of policies exceeds the API's maximum limit (1000). The function merges all
-    policies into a single PSCustomObject for easy management.
-
-.PARAMETER limit
-    The maximum number of policies to retrieve per API call. The default is 1000,
-    which is the maximum allowed by the CyberArk EPM API.
-
-.PARAMETER sortBy
-    The field by which to sort the policies. Common values include "Updated", "Name",
-    and "PolicyType". The default is "Updated".
-
-.PARAMETER sortDir
-    The sorting direction. Valid values are "asc" (ascending) and "desc" (descending).
-    The default is "desc".
-
-.PARAMETER policyFilter
-    A hashtable containing filter criteria for the policies. The keys and values
-    must match the JSON format expected by the EPM API's search endpoint.
-    Example: @{ "filter" = "PolicyType IN 11,36,37,38" }.
-
-.EXAMPLE
-    Get-EPMPolicies -limit 500 -sortBy "Name"
-
-.EXAMPLE
-    $myFilter = @{
-        "filter" = "PolicyType IN 11,36"
-    }
-    Get-EPMPolicies -policyFilter $myFilter
-
-.OUTPUTS
-    This function returns an object containing the merged policies and metadata.
-    The object has the following properties:
-        - Policies: An array of all policy objects.
-        - ActiveCount: The count of active policies.
-        - TotalCount: The total number of policies on the server.
-        - FilteredCount: The total number of policies that match the applied filter.
-
-.NOTES
-    This function requires a valid session header and manager URL to be accessible
-    in the execution context. It uses Invoke-EPMRestMethod.
-#>
-Function Get-EPMPolicies {
-    param (
-        [int]$limit = 1000,         # Set limit to the max size if not declared
-        [string]$sortBy = "Updated",
-        [string]$sortDir = "desc",
-        [hashtable]$policyFilter
-    )
-
-    $mergePolicies = [PSCustomObject]@{
-        Policies = @()
-        ActiveCount = 0
-        TotalCount = 0
-        FilteredCount = 0
-    }
-
-    if ($null -ne $policiesFilter) {
-        $policyFilterJSON = $policyFilter | ConvertTo-Json
-    }
-
-    $offset = 0             # Offset
-    $iteration = 1          # Define the number of iteraction, used to increase the offset
-    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
-
-    while ($offset -lt $total) {
-        $getPolicies = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search?offset=$offset&limit=$limit&sortBy=$sortBy&sortDir=$sortDir" -Method 'POST' -Headers $sessionHeader -Body $policyFilterJSON
-        
-        $mergePolicies.Policies += $getPolicies.Policies            # Merge the current computer list
-        $mergePolicies.ActiveCount = $getPolicies.ActiveCount       # Update the ActiveCount
-        $mergePolicies.TotalCount = $getPolicies.TotalCount         # Update the TotalCount
-        $mergePolicies.FilteredCount = $getPolicies.FilteredCount   # Update the FilteredCount
-
-        $total = $getPolicies.FilteredCount   # Update the total with the real total
-        $offset = $limit * $iteration
-        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
-    }
-    return $mergePolicies
-}
-
-
 ### Begin Script ###
 
 ## Prepare log folder and file
@@ -537,6 +357,7 @@ $logFilePath = Join-Path $logFolder $logFileName
 Write-Box "$scriptName"
 ##
 
+
 # Request EPM Credentials
 $credential = Get-Credential -UserName $username -Message "Enter password for $username"
 
@@ -548,29 +369,115 @@ $sessionHeader = @{
     "Authorization" = "basic $($login.auth)"
 }
 
+
 # Get SetId
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
-Write-Log "Entering SET: $($set.setName)..." INFO -ForegroundColor Blue
+Write-Box "$($set.setName)"
+#>
 
-$fileCSVEndpoints = Join-Path $exportCSVPath "$($set.setName)_Endpoints.csv"
+Write-Log "Importing data from $EndpointReportCSV..." INFO
+$Endpoints = Import-Csv -Path $EndpointReportCSV
 
-Write-Log "Getting Endpoints List from set '$($set.setName)'" INFO
-$getEndpointsList = Get-EPMEndpoints
+Write-Log "Searching for duplicated..." INFO
 
-if ($details) {
-    foreach ($endpoint in $getEndpointsList.endpoints) {
-        $policyFilter = @{
-            "filter" = "inventoryType IN Network"
-        }  | ConvertTo-Json
-        $endpointDetails = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/$($endpoint.id)/search" -Method 'POST' -Headers $sessionHeader -Body $filter
-        Write-Log "$($endpointDetails.Name): FQDN is: $($endpointDetails.inventory.network.fullComputerName)" INFO
+$DuplicatedEndpoints = [System.Collections.Generic.List[Object]]::new()
+$LatestEndpoints = @{} # Key = Computer Name (Endpoint.name), Value = Endpoint Object
+
+foreach ($Endpoint in $Endpoints) {
+    
+    $Name = $Endpoint.Computer
+    
+    $CurrentDate = $Endpoint."Last Seen" -as [DateTime]
+    if (-not $CurrentDate) { $CurrentDate = [DateTime]::MinValue }
+    
+    # Add a temporary property for easy comparison
+    $Endpoint | Add-Member -MemberType NoteProperty -Name "_ParsedDate" -Value $CurrentDate -Force
+
+    if ($LatestEndpoints.ContainsKey($Name)) {
+        $ExistingEndpoint = $LatestEndpoints[$Name]
+        
+        if ($Endpoint._ParsedDate -gt $ExistingEndpoint._ParsedDate) {
+            $DuplicatedEndpoints.Add($ExistingEndpoint)
+            $LatestEndpoints[$Name] = $Endpoint
+        }
+        else {
+            $DuplicatedEndpoints.Add($Endpoint)
+        }
     }
-} else {
-    # Export Endpoints in CSV
-    Write-Log "Saving Endpoints CSV file in '$fileCSVEndpoints'" INFO
-    $getEndpointsList.endpoints | Export-Csv -Path $fileCSVEndpoints -NoTypeInformation
+    else {
+        $LatestEndpoints[$Name] = $Endpoint
+    }
 }
 
+Write-Log "Identified $($DuplicatedEndpoints.Count) duplicated endpoints to remove." INFO
 
+$IdList = @()
+foreach ($Dup in $DuplicatedEndpoints) {
+    $EndpointInfoMessage = "$($Dup.Computer) - ID: $($Dup."New Agent Id") (LastSeen: $($Dup."Last Seen"), Version: $($Dup."Agent Version"))"
 
+    if ($Dup."New Agent Id" -eq "00000000-0000-0000-0000-000000000000") {
+        Write-Log "Agent not compatible with Endpoints. Use MyComputer: $EndpointInfoMessage" WARN
+    } else {
+        $IdList += [Uri]::EscapeDataString($Dup."New Agent Id")
+        Write-Log "To be deleted (batch): $EndpointInfoMessage" WARN
+    }
+}
+
+Write-Log "Identified $($IdList.Count) duplicated endpoints to remove." INFO
+
+if ($delete){
+    if ($IdList.Count -gt 0) {
+
+        # There is a limit to 10000 char for the filter string
+        # (https://docs.cyberark.com/epm/latest/en/content/webservices/endpoint-apis/delete-endpoint.htm#Bodyparameters)
+        # Considering the following data:
+        # GUID ID	36 characters
+        # Separator (,)	1 character
+        # Total per ID	37 characters
+        # Prefix (id IN )	6 characters
+
+        $MaxBatchSize = 250
+
+        for ($i = 0; $i -lt $IdList.Count; $i += $MaxBatchSize) {
+    
+            $Batch = $IdList[$i..($i + $MaxBatchSize - 1)]
+
+            if (-not $Batch) {
+                Write-Log "Error: Failed to slice batch starting at index $i. Skipping." ERROR
+                continue
+            }
+
+            $FilterString = "id IN " + ($Batch -join ",")
+
+            if ($FilterString.Length -gt 10000) {
+                Write-Log "FATAL ERROR: Calculated filter string length ($($FilterString.Length)) exceeded 10000 chars. ABORTING BATCH." ERROR
+            continue
+            }
+    
+            Write-Log "Processing batch starting with ID $($Batch[0]) (Count: $($Batch.Count), Length: $($FilterString.Length))." INFO
+    
+            $DeleteBody = @{
+                "filter" = $FilterString
+            } | ConvertTo-Json
+
+            try {
+                $Result = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/delete" -Method 'POST' -Headers $sessionHeader -Body $DeleteBody
+                $message = "Batch delete executed. Confirmed Deleted $($Result.appliedIds.Count) in a batch of $($Batch.Count)."
+
+                if ($Result.appliedIds.Count -lt $Batch.Count) {
+                    Write-Log $message ERROR
+                } else {
+                    Write-Log $message INFO
+                }
+            }
+            catch {
+                Write-Log "Batch deletion failed for starting ID $($Batch[0]): $($_.Exception.Message)" ERROR
+            }
+        }        
+    } else {
+        Write-Log "No Duplicated Endpoints" WARN
+    }
+} else {
+        Write-Log "Demo Mode - No deletion" WARN
+}

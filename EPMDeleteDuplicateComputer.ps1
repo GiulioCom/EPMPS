@@ -23,8 +23,10 @@
     Version: 0.1
     Created: 04/2024
     Update: 10/2025
-    -   Update API
-    -   Update base functions
+        -   Update API
+        -   Update base functions
+    Update: 11/2025
+        - Improve performance duplicate endpoints
 #>
 
 param (
@@ -139,8 +141,8 @@ function Invoke-EPMRestMethod {
         [string]$Method,
         [object]$Body = $null,
         [hashtable]$Headers = @{},
-        [int]$MaxRetries = 3
-    #    [int]$RetryDelay = 120
+        [int]$MaxRetries = 3,
+        [int]$RetryDelay = 120 # Default value, in case of the returned message doesn't contain the limit info
     )
 
     $retryCount = 0
@@ -171,9 +173,10 @@ function Invoke-EPMRestMethod {
                 if ($match.Success) {
                     $minutes = [int]($match.Value -replace '\s+minute', '')
                     [int]$RetryDelay = $minutes * 60
+                    Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
                 }
 
-                Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
+                Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds (default)..." WARN
                 Start-Sleep -Seconds $RetryDelay
                 $retryCount++
             } else {
@@ -441,8 +444,8 @@ Function Get-EPMComputers {
 #>
 Function Get-EPMEndpoints {
     param (
-        [int]$limit = 1000,         #Set limit to the max size if not declared
-        [hashtable]$filter    #Set the search body
+        [int]$limit = 1000,     #Set limit to the max size if not declared
+        [hashtable]$filter      #Set the search body
     )
 
     $mergeEndpoints = [PSCustomObject]@{
@@ -467,7 +470,7 @@ Function Get-EPMEndpoints {
         $mergeEndpoints.returnedCount = $getEndpoints.returnedCount   # Update the returnedCount
 
         $total = $getComputers.filteredCount   # Update the total with the real total
-        $offset = $limit  * $iteration
+        $offset = $limit * $iteration
         $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
     }
     return $mergeEndpoints
@@ -513,72 +516,131 @@ $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -se
 
 Write-Box "$($set.setName)"
 
+
+## Processing Endpoints (New API)
+Write-Log "Working on Endpoints." INFO
+$getEndpointsList = Get-EPMEndpoints
+
+Write-Log "Searching for duplicated..." INFO
+
+$DuplicatedEndpoints = [System.Collections.Generic.List[Object]]::new()
+$LatestEndpoints   = @{} # Key = Computer Name (Endpoint.name), Value = Endpoint Object
+
+foreach ($Endpoint in $getEndpointsList.endpoints) {
+    
+    $Name = $Endpoint.name
+    
+    $CurrentDate = $Endpoint.lastConnected -as [DateTime]
+    if (-not $CurrentDate) { $CurrentDate = [DateTime]::MinValue }
+    
+    # Add a temporary property for easy comparison
+    $Endpoint | Add-Member -MemberType NoteProperty -Name "_ParsedDate" -Value $CurrentDate -Force
+
+    if ($LatestEndpoints.ContainsKey($Name)) {
+        $ExistingEndpoint = $LatestEndpoints[$Name]
+        
+        if ($Endpoint._ParsedDate -gt $ExistingEndpoint._ParsedDate) {
+            $DuplicatedEndpoints.Add($ExistingEndpoint)
+            $LatestEndpoints[$Name] = $Endpoint
+        }
+        else {
+            $DuplicatedEndpoints.Add($Endpoint)
+        }
+    }
+    else {
+        $LatestEndpoints[$Name] = $Endpoint
+    }
+}
+
+Write-Log "Identified $($DuplicatedEndpoints.Count) duplicated endpoints to remove." INFO
+
+$EndpointDeletionUri = "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/delete"
+
+foreach ($DuplicatedEndpoint in $DuplicatedEndpoints) {
+    $SafeId = [Uri]::EscapeDataString($DuplicatedEndpoint.Id)
+
+    $EndpointInfoMessage = "$($DuplicatedAgent.ComputerName) - ID: $SafeId (LastSeen: $($DuplicatedAgent.LastSeen), Version: $($DuplicatedAgent.AgentVersion))"
+
+    if ($delete) {
+        Write-Log "Deleting $EndpointInfoMessage..." WARN
+        
+        # Build the JSON Body for the POST request
+        # NOTE: Using a filter on ID allows potential batching in the future if the API supports it.
+        $DeleteBody = @{
+            "filter" = "id EQ '$SafeId'" # ID needs to be quoted in the filter string
+        } | ConvertTo-Json
+
+        try {
+            # Delete API is a POST with a JSON body
+            Invoke-EPMRestMethod -Uri $EndpointDeletionUri -Method 'POST' -Headers $sessionHeader -Body $DeleteBody -ErrorAction Stop
+        }
+        catch {
+            # Always catch errors on external calls
+            Write-Log "Failed to delete $SafeId : $($_.Exception.Message)" ERROR
+        }
+    } 
+    else {
+        Write-Log "To be deleted $EndpointInfoMessage" WARN
+    }
+}
+
+
+
 ## Processing My Computer (Old API)
 Write-Log "Working on 'My Computer'." INFO
 $getComputerList = Get-EPMComputers
 
-# Group objects by ComputerName
-$groupedComputersByName = $getComputerList.Computers | Group-Object -Property ComputerName
-$duplicateComputerCount = $groupedComputersByName | Where-Object {$_.Count -gt 1} | Measure-Object | Select-Object -ExpandProperty Count
+Write-Log "Searching for duplicated..." INFO
 
-Write-Log "Identified $duplicateComputerCount duplicated devices." INFO
+$AgentsToDelete = [System.Collections.Generic.List[Object]]::new() #Generic List for deletion targets, faster than arrays
+$LatestAgents   = @{} # Key = ComputerName, Value = AgentObject
 
-# Iterate through each group
-foreach ($groupComputer in $groupedComputersByName) {
-    # Select multiple device having the same computer name.
-    if ($groupComputer.Count -gt 1) {
-        # Sort objects in the group by LastSeen in ascending order
-        $sorted = $groupComputer.Group | Sort-Object -Property LastSeen -Descending
+foreach ($Agent in $getComputerList.Computers) {
+    
+    $Name = $Agent.ComputerName
+    $CurrentDate = $Agent.LastSeen -as [DateTime]
+    if (-not $CurrentDate) { $CurrentDate = [DateTime]::MinValue }
+    
+    # Add a temporary property to the object so we don't have to convert it again later
+    $Agent | Add-Member -MemberType NoteProperty -Name "_ParsedDate" -Value $CurrentDate -Force
 
-        # Output the ComputerName and oldest AgentId(s) starting from the array position 1 (order by descending)
-        Write-Log "Duplicated Device: $($sorted[0].ComputerName), found $($groupComputer.Count) items" WARN
-        for ($i = 1; $i -lt $sorted.Count; $i++) {
-            if ($delete) {
-                Write-Log "+ - Deleting $($sorted[$i].AgentId)..." WARN
-                Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers/$($sorted[$i].AgentId)" -Method 'DELETE' -Headers $sessionHeader
-            } else {
-                Write-Log "+ - To be deleted: $($sorted[$i].AgentId)" WARN
-            }
-
+    if ($LatestAgents.ContainsKey($Name)) {
+        
+        $ExistingAgent = $LatestAgents[$Name]
+        
+        if ($Agent._ParsedDate -gt $ExistingAgent._ParsedDate) {
+            $AgentsToDelete.Add($ExistingAgent)
+            $LatestAgents[$Name] = $Agent
         }
+        else {
+            $AgentsToDelete.Add($Agent)
+        }
+    }
+    else {
+        $LatestAgents[$Name] = $Agent
     }
 }
 
+Write-Log "Identified $($AgentsToDelete.Count) duplicated devices to remove." INFO
 
-## Processing Endpoints (New API)
-Write-Log "Working on Endpoints." INFO
+foreach ($DuplicatedAgent in $AgentsToDelete) {
+    $SafeId = [Uri]::EscapeDataString($DuplicatedAgent.AgentId)
+    $TargetUri = "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers/$SafeId"
 
-$getEndpointsList = Get-EPMEndpoints
+    $CompInfoMessage = "$($DuplicatedAgent.ComputerName) - ID: $SafeId (LastSeen: $($DuplicatedAgent.LastSeen), Version: $($DuplicatedAgent.AgentVersion))"
 
-# Group objects by ComputerName
-$groupedEndpointsByName = $getEndpointsList.endpoints | Group-Object -Property name
-$duplicateEndpointsCount = $getEndpointsList | Where-Object {$_.Count -gt 1} | Measure-Object | Select-Object -ExpandProperty Count
-
-Write-Log "Identified $duplicateEndpointsCount duplicated devices." INFO
-
-# Iterate through each group
-foreach ($groupEndpoints in $groupedEndpointsByName) {
-    # Select multiple device having the same computer name.
-    if ($groupEndpoints.Count -gt 1) {
-        # Sort objects in the group by LastSeen in ascending order
-        $sorted = $groupEndpoints.Group | Sort-Object -Property LastSeen -Descending
-
-        # Output the ComputerName and oldest AgentId(s) starting from the array position 1 (order by descending)
-        Write-Log "Duplicated Device: $($sorted[0].ComputerName), found $($groupEndpoints.Count) items" WARN
-        for ($i = 1; $i -lt $sorted.Count; $i++) {
-            if ($delete) {
-                Write-Log "+ - Deleting $($sorted[$i].Id)..." WARN
-                $deleteEndpointFilter = @{
-                    "filter" = "id EQ $($sorted[$i].Id)"
-                } | ConvertTo-Json
-
-                Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/delete" -Method 'POST' -Headers $sessionHeader -Body $deleteEndpointFilter
-            } else {
-                Write-Log "+ - To be deleted: $($sorted[$i].id)" WARN
-            }
-
+    if ($delete) {
+        Write-Log "Deleting $CompInfoMessage..." WARN
+        
+        try {
+            # Using try/catch is critical for REST calls to handle 404/500 errors gracefully
+            Invoke-EPMRestMethod -Uri $TargetUri -Method 'DELETE' -Headers $sessionHeader -ErrorAction Stop
         }
+        catch {
+            Write-Log "Failed to delete $SafeId : $_" ERROR
+        }
+    } 
+    else {
+        Write-Log "To be deleted $CompInfoMessage" WARN
     }
 }
-
-
