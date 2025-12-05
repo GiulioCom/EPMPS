@@ -141,8 +141,7 @@ function Invoke-EPMRestMethod {
         [string]$Method,
         [object]$Body = $null,
         [hashtable]$Headers = @{},
-        [int]$MaxRetries = 3,
-        [int]$RetryDelay = 120 # Default value, in case of the returned message doesn't contain the limit info
+        [int]$MaxRetries = 3
     )
 
     $retryCount = 0
@@ -167,18 +166,28 @@ function Invoke-EPMRestMethod {
 
             # Handle rate limit error (EPM00000AE)
             if ($ErrorDetailsMessage -and $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
-                # Regex pattern to find numbers followed by "minute(s)"
-                $pattern = "\d+\s+minute"
-                $match = [regex]::Match($ErrorDetailsMessage.ErrorMessage, $pattern)
-                if ($match.Success) {
-                    $minutes = [int]($match.Value -replace '\s+minute', '')
-                    [int]$RetryDelay = $minutes * 60
-                    Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
+                $errorMessage = $ErrorDetailsMessage.ErrorMessage
+                
+                if ($errorMessage -like "*Limit of the API calls exceeded*") {
+                    Write-Log "Rate limit permanently exceeded. Please wait a while before running again." ERROR
+                    return
                 }
 
-                Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds (default)..." WARN
-                Start-Sleep -Seconds $RetryDelay
-                $retryCount++
+                $pattern = '(\d+)\s+minute' 
+                $match = [regex]::Match($errorMessage, $pattern)
+
+                if ($match.Success) {
+                    $minutes = [int]$match.Groups[1].Value
+                    [int]$RetryDelay = $minutes * 60
+                    
+                    Write-Log "$errorMessage - Retrying in $RetryDelay seconds (Attempt $($retryCount + 1))..." WARN
+
+                    Start-Sleep -Seconds $RetryDelay
+                    $retryCount++
+                } else {
+                    Write-Log "Rate limit error (EPM00000AE) encountered: $errorMessage." ERROR
+                    return
+                }
             } else {
                 # Handle Body possible filter error 
                 if ($ErrorDetailsMessage.ErrorCode -eq "EPM000002E" -and $null -ne $Body) {
@@ -469,7 +478,7 @@ Function Get-EPMEndpoints {
         $mergeEndpoints.filteredCount = $getEndpoints.filteredCount   # Update the filteredCount (the total device based on the filter)
         $mergeEndpoints.returnedCount = $getEndpoints.returnedCount   # Update the returnedCount
 
-        $total = $getComputers.filteredCount   # Update the total with the real total
+        $total = $getEndpoints.filteredCount   # Update the total with the real total
         $offset = $limit * $iteration
         $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
     }

@@ -167,6 +167,63 @@ function Invoke-EPMRestMethod {
 
             # Handle rate limit error (EPM00000AE)
             if ($ErrorDetailsMessage -and $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
+                $errorMessage = $ErrorDetailsMessage.ErrorMessage
+                
+                # 1. Check for the new, unrecoverable message pattern FIRST.
+                # We use a pattern matching the "Limit... exceeded" message.
+                if ($errorMessage -like "*Limit of the API calls exceeded*") {
+                    # This is the hard limit, inform the user and stop execution.
+                    Write-Log "API HARD LIMIT REACHED. Cannot proceed with retries. Error: '$errorMessage'" ERROR
+                    
+                    # Use Write-Error to signal the failure to the calling script/user.
+                    Write-Error "Rate limit permanently exceeded. Please wait a while before running again."
+                    
+                    # Security/Robustness: Exit the function/loop immediately.
+                    return # Use 'exit 1' if you need to terminate the entire script process with an error code
+                }
+
+                # 2. Handle the recoverable error that specifies a time delay.
+                # Define a regex pattern using a CAPTURE GROUP '()' to find and extract the number directly.
+                # Pattern: finds one or more digits (\d+) and captures them in group 1, followed by " minute".
+                $pattern = '(\d+)\s+minute' 
+
+                # Search for the pattern in the error message
+                $match = [regex]::Match($errorMessage, $pattern)
+
+                # If a match is found, extract the number from the capture group.
+                if ($match.Success) {
+                    # Minor Performance/Clarity: Directly access the captured group 1.
+                    $minutes = [int]$match.Groups[1].Value
+                    
+                    # Convert minutes to seconds and update the RetryDelay variable
+                    [int]$RetryDelay = $minutes * 60
+                    
+                    Write-Log "$errorMessage - Retrying in $RetryDelay seconds (Attempt $($retryCount + 1))..." WARN
+                    
+                    # Resource Optimization: Ensure Start-Sleep is only executed if a delay is necessary.
+                    Start-Sleep -Seconds $RetryDelay
+                    $retryCount++
+                }
+                else {
+                    # Handle the EPM00000AE error if it's not the hard limit AND doesn't specify a delay.
+                    # Fallback to a default retry strategy if under max attempts.
+                    if ($retryCount -lt $MaxRetries) {
+                        # Example of a default exponential backoff (e.g., 2^retryCount seconds)
+                        $defaultDelay = [Math]::Pow(2, $retryCount)
+                        [int]$RetryDelay = [int]($defaultDelay)
+                        Write-Log "Unknown EPM00000AE format. Retrying in $RetryDelay seconds (Attempt $($retryCount + 1))..." WARN
+                        Start-Sleep -Seconds $RetryDelay
+                        $retryCount++
+                    }
+                    else {
+                        Write-Error "Rate limit error (EPM00000AE) encountered, but no retry time specified and max retries reached."
+                        return
+                    }
+                }
+
+<#            
+            # Handle rate limit error (EPM00000AE)
+            if ($ErrorDetailsMessage -and $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
                 # Define a regex pattern to find numbers followed by "minute(s)"
                 $pattern = "\d+\s+minute"
 
@@ -183,6 +240,7 @@ function Invoke-EPMRestMethod {
                 Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
                 Start-Sleep -Seconds $RetryDelay
                 $retryCount++
+#>
             } else {
                 # Handle Body possible filter error 
                 if ($ErrorDetailsMessage.ErrorCode -eq "EPM000002E" -and $null -ne $Body) {
@@ -419,8 +477,8 @@ Function Get-EPMEndpoints {
         $mergeEndpoints.filteredCount = $getEndpoints.filteredCount   # Update the filteredCount (the total device based on the filter)
         $mergeEndpoints.returnedCount = $getEndpoints.returnedCount   # Update the returnedCount
 
-        $total = $getComputers.filteredCount   # Update the total with the real total
-        $offset = $limit  * $iteration
+        $total = $getEndpoints.filteredCount   # Update the total with the real total
+        $offset = $limit * $iteration
         $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
     }
     return $mergeEndpoints
