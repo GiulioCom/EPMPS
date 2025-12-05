@@ -528,9 +528,9 @@ $LatestEndpoints   = @{} # Key = Computer Name (Endpoint.name), Value = Endpoint
 
 foreach ($Endpoint in $getEndpointsList.endpoints) {
     
-    $Name = $Endpoint.name
+    $Name = $Endpoint.Computer
     
-    $CurrentDate = $Endpoint.lastConnected -as [DateTime]
+    $CurrentDate = $Endpoint.lastDisconnected -as [DateTime]
     if (-not $CurrentDate) { $CurrentDate = [DateTime]::MinValue }
     
     # Add a temporary property for easy comparison
@@ -554,37 +554,75 @@ foreach ($Endpoint in $getEndpointsList.endpoints) {
 
 Write-Log "Identified $($DuplicatedEndpoints.Count) duplicated endpoints to remove." INFO
 
-$EndpointDeletionUri = "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/delete"
+$IdList = @()
+foreach ($Dup in $DuplicatedEndpoints) {
+    $EndpointInfoMessage = "$($Dup.name) - ID: $($Dup.id) (LastSeen: $($Dup.lastDisconnected), Version: $($Dup.version))"
 
-foreach ($DuplicatedEndpoint in $DuplicatedEndpoints) {
-    $SafeId = [Uri]::EscapeDataString($DuplicatedEndpoint.Id)
-
-    $EndpointInfoMessage = "$($DuplicatedAgent.ComputerName) - ID: $SafeId (LastSeen: $($DuplicatedAgent.LastSeen), Version: $($DuplicatedAgent.AgentVersion))"
-
-    if ($delete) {
-        Write-Log "Deleting $EndpointInfoMessage..." WARN
-        
-        # Build the JSON Body for the POST request
-        # NOTE: Using a filter on ID allows potential batching in the future if the API supports it.
-        $DeleteBody = @{
-            "filter" = "id EQ '$SafeId'" # ID needs to be quoted in the filter string
-        } | ConvertTo-Json
-
-        try {
-            # Delete API is a POST with a JSON body
-            Invoke-EPMRestMethod -Uri $EndpointDeletionUri -Method 'POST' -Headers $sessionHeader -Body $DeleteBody -ErrorAction Stop
-        }
-        catch {
-            # Always catch errors on external calls
-            Write-Log "Failed to delete $SafeId : $($_.Exception.Message)" ERROR
-        }
-    } 
-    else {
-        Write-Log "To be deleted $EndpointInfoMessage" WARN
+    if ($Dup.id -eq "00000000-0000-0000-0000-000000000000") {
+        Write-Log "Agent not compatible with Endpoints. Use MyComputer: $EndpointInfoMessage" WARN
+    } else {
+        $IdList += [Uri]::EscapeDataString($Dup.id)
+        Write-Log "To be deleted (batch): $EndpointInfoMessage" WARN
     }
 }
 
+Write-Log "Identified $($IdList.Count) duplicated endpoints to remove." INFO
 
+if ($delete){
+    if ($IdList.Count -gt 0) {
+
+        # There is a limit to 10000 char for the filter string
+        # (https://docs.cyberark.com/epm/latest/en/content/webservices/endpoint-apis/delete-endpoint.htm#Bodyparameters)
+        # Considering the following data:
+        # GUID ID	36 characters
+        # Separator (,)	1 character
+        # Total per ID	37 characters
+        # Prefix (id IN )	6 characters
+
+        $MaxBatchSize = 250
+
+        for ($i = 0; $i -lt $IdList.Count; $i += $MaxBatchSize) {
+    
+            $Batch = $IdList[$i..($i + $MaxBatchSize - 1)]
+
+            if (-not $Batch) {
+                Write-Log "Error: Failed to slice batch starting at index $i. Skipping." ERROR
+                continue
+            }
+
+            $FilterString = "id IN " + ($Batch -join ",")
+
+            if ($FilterString.Length -gt 10000) {
+                Write-Log "FATAL ERROR: Calculated filter string length ($($FilterString.Length)) exceeded 10000 chars. ABORTING BATCH." ERROR
+            continue
+            }
+    
+            Write-Log "Processing batch starting with ID $($Batch[0]) (Count: $($Batch.Count), Length: $($FilterString.Length))." INFO
+    
+            $DeleteBody = @{
+                "filter" = $FilterString
+            } | ConvertTo-Json
+
+            try {
+                $Result = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/delete" -Method 'POST' -Headers $sessionHeader -Body $DeleteBody
+                $message = "Batch delete executed. Confirmed Deleted $($Result.appliedIds.Count) in a batch of $($Batch.Count)."
+
+                if ($Result.appliedIds.Count -lt $Batch.Count) {
+                    Write-Log $message ERROR
+                } else {
+                    Write-Log $message INFO
+                }
+            }
+            catch {
+                Write-Log "Batch deletion failed for starting ID $($Batch[0]): $($_.Exception.Message)" ERROR
+            }
+        }        
+    } else {
+        Write-Log "No Duplicated Endpoints" WARN
+    }
+} else {
+        Write-Log "Demo Mode - No deletion" WARN
+}
 
 ## Processing My Computer (Old API)
 Write-Log "Working on 'My Computer'." INFO

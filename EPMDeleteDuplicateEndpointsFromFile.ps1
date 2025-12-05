@@ -386,7 +386,7 @@ $LatestEndpoints = @{} # Key = Computer Name (Endpoint.name), Value = Endpoint O
 
 foreach ($Endpoint in $Endpoints) {
     
-    $Name = $Endpoint.Computer
+    $Name = $Endpoint.name
     
     $CurrentDate = $Endpoint."Last Seen" -as [DateTime]
     if (-not $CurrentDate) { $CurrentDate = [DateTime]::MinValue }
