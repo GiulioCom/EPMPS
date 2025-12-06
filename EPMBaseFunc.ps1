@@ -204,7 +204,7 @@ function Invoke-EPMRestMethod {
 ## EPM RestAPI Wrappers
 <#
 .SYNOPSIS
-Connects to the EPM (Enterprise Password Vault) using the provided credentials and tenant information.
+Connects to the EPM (Endponint Priviled Management) using the provided credentials and tenant information.
 
 .DESCRIPTION
 This function performs authentication with the EPM API to obtain the manager URL and authentication details.
