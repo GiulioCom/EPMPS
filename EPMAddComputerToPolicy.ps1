@@ -21,11 +21,11 @@
 .PARAMETER policyFile
     The full path to the input CSV file. The file must contain two columns:
         1. The Computer Name (e.g., WIN10X64-1).
-        2. A semicolon-separated list of Policy Names to be applied (e.g., [ICT] Script;[LSEG] - Shell).
+        2. A semicolon-separated list of Policy Names to be applied.
     
     Example CSV format:
-    WIN10X64-1,[ICT] Scrip;[LSEG] - Shell;PM-Allow Edit Enviroment Variable
-    WIN11-1,[ICT] Script
+    WIN10X64-1,Script;Shell;PM-Allow Edit Enviroment Variable
+    WIN11-1,Script
 
 .EXAMPLE
     .\EPMAddComputertoPolicy.ps1 -username "admin@epm.com" -setName "Default Set" -tenant "eu" -policyFile "C:\temp\policy_assignments.csv"

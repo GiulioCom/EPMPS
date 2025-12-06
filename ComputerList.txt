@@ -1,3 +1,0 @@
-WIN10X64-4
-ubuntu-3
-ubuntu-4

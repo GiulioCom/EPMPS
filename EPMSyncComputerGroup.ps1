@@ -29,7 +29,7 @@
     File: EPMAddComputertoPolicy.ps1
     Author: Giulio Compagnone
     Company: CyberArk
-    Version: 1
+    Version: 0.1
     Created: 11/2025
 
     TODO: the script only add computer in group or ADD new group. Future release the script will remove computer from group or remove groups and fullt sync the CSV fileprocessed

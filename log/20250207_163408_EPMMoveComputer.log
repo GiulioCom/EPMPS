@@ -1,7 +1,0 @@
-2025-02-07 16:34:08 [INFO] - + --------------- +
-2025-02-07 16:34:08 [INFO] - | EPMMoveComputer |
-2025-02-07 16:34:08 [INFO] - + --------------- +
-2025-02-07 16:34:12 [INFO] - Entering SET: [Giulio] Monitor(cyberark_16)...
-2025-02-07 16:34:12 [INFO] - Computer found: WIN10X64-4 (AgentId: a1282a8b-135b-406c-a619-51a59f24aa6f)
-2025-02-07 16:34:12 [INFO] - Computer found: ubuntu-3 (AgentId: 390967c2-4515-44eb-85d8-98fad35e7601)
-2025-02-07 16:34:12 [ERROR] - Computer 'ubuntu-4' from Set '[Giulio] Monitor(cyberark_16)' not found in the system.
