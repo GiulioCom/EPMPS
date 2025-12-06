@@ -1,0 +1,15 @@
+# --- File di sistema e temporanei ---
+*.log
+log/
+temp/
+
+# --- Uncompleted Script ---
+z_uncomplete/
+
+# --- Visual Studio Code (impostazioni personali) ---
+.vscode/
+*.code-workspace
+
+# --- Credenziali e Sicurezza (IMPORTANTISSIMO) ---
+# Evita di caricare file che potrebbero contenere password
+data/
