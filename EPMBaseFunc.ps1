@@ -401,7 +401,6 @@ Function Get-EPMComputers {
     }
 
     $offset = 0             # Offset
-    $iteration = 1          # Define the number of iteraction, used to increase the offset
     $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
 
     while ($offset -lt $total) {
@@ -411,9 +410,14 @@ Function Get-EPMComputers {
         $mergeComputers.TotalCount = $getComputers.TotalCount   # Update the TotalCount
 
         $total = $getComputers.TotalCount   # Update the total with the real total
-        $offset = $limit  * $iteration
-        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+        $offset += $getComputers.Computers.Count
+
+        # Progress  Bar
+        $Percent = [int](($offset / $total) * 100)
+        Write-Progress -Activity "Retrieving Computers $($total) total" -Status "Retrieved: $offset Computers" -PercentComplete $Percent
     }
+    Write-Progress -Activity "Retrieving Computers $($total) total"  -Status "Completed: Successfully retrieved $($mergeComputers.TotalCount) Computers" -PercentComplete 100 -Completed
+    
     return $mergeComputers
 }
 
@@ -474,9 +478,10 @@ Function Get-EPMEndpoints {
         $offset += $getEndpoints.returnedCount
 
         # Progress Bar
-        Write-Progress -Activity "Getting Endpoints: $($total)" -Status "Current: $offset" -PercentComplete $Percent
+        Write-Progress -Activity "Retrieving Endpoints $($total) total" -Status "Retrieved: $offset Endpoints" -PercentComplete $Percent
     }
-    Write-Progress -Activity "Retrieved: $($total)" -Status "Completed" 100 -Completed
+    Write-Progress -Activity "Retrieving Endpoints $($total) total"  -Status "Completed: Successfully retrieved $($mergeEndpoints.filteredCount) Endpoints" -PercentComplete 100 -Completed
+    
     return $mergeEndpoints
 }
 
@@ -563,10 +568,10 @@ Function Get-EPMPolicies {
 
         # Progress  Bar
         $Percent = [int](($offset / $total) * 100)
-        Write-Progress -Activity "Get Policies: $($total)" -Status "Current: $offset" -PercentComplete $Percent
-
+        Write-Progress -Activity "Retrieving Policies $($total) total" -Status "Retrieved: $offset Policies" -PercentComplete $Percent
     }
-    Write-Progress -Activity "Get Policies: $($total)" -Status "Completed" -PercentComplete 100 -Completed
+    Write-Progress -Activity "Retrieving Policies $($total) total"  -Status "Completed: Successfully retrieved $($mergePolicies.FilteredCount) Policies" -PercentComplete 100 -Completed
+
     return $mergePolicies
 }
 
@@ -619,10 +624,16 @@ Write-Log $set.SetId INFO
 #Example Request 
 
 # Test GetPolicies
-#Get-EPMPolicies -limit 200
+#$policies = Get-EPMPolicies -limit 50
+#$policies
 
 # Test GetEndpoints
-Get-EPMEndpoints -limit 2
+#$endpoints = Get-EPMEndpoints -limit 2
+#$endpoints
+
+# Test GetComputers
+#$computers = Get-EPMComputers -limit 2
+#$computers
 
 
 # Wrong Body
