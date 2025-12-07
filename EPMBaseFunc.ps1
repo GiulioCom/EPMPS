@@ -461,7 +461,6 @@ Function Get-EPMEndpoints {
     }
 
     $offset = 0             # Offset
-    $iteration = 1          # Define the number of iteraction, used to increase the offset
     $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
 
     while ($offset -lt $total) {
@@ -472,9 +471,12 @@ Function Get-EPMEndpoints {
         $mergeEndpoints.returnedCount = $getEndpoints.returnedCount   # Update the returnedCount
 
         $total = $getEndpoints.filteredCount   # Update the total with the real total
-        $offset = $limit * $iteration
-        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+        $offset += $getEndpoints.returnedCount
+
+        # Progress Bar
+        Write-Progress -Activity "Getting Endpoints: $($total)" -Status "Current: $offset" -PercentComplete $Percent
     }
+    Write-Progress -Activity "Retrieved: $($total)" -Status "Completed" 100 -Completed
     return $mergeEndpoints
 }
 
@@ -546,7 +548,6 @@ Function Get-EPMPolicies {
     }
 
     $offset = 0             # Offset
-    $iteration = 1          # Define the number of iteraction, used to increase the offset
     $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
 
     while ($offset -lt $total) {
@@ -557,10 +558,15 @@ Function Get-EPMPolicies {
         $mergePolicies.TotalCount = $getPolicies.TotalCount         # Update the TotalCount
         $mergePolicies.FilteredCount = $getPolicies.FilteredCount   # Update the FilteredCount
 
-        $total = $getPolicies.FilteredCount   # Update the total with the real total
-        $offset = $limit * $iteration
-        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+        $total = $getPolicies.FilteredCount                         # Update the total with the real total
+        $offset += $getPolicies.Policies.Count
+
+        # Progress  Bar
+        $Percent = [int](($offset / $total) * 100)
+        Write-Progress -Activity "Get Policies: $($total)" -Status "Current: $offset" -PercentComplete $Percent
+
     }
+    Write-Progress -Activity "Get Policies: $($total)" -Status "Completed" -PercentComplete 100 -Completed
     return $mergePolicies
 }
 
@@ -612,6 +618,13 @@ Write-Log $set.SetId INFO
 
 #Example Request 
 
+# Test GetPolicies
+#Get-EPMPolicies -limit 200
+
+# Test GetEndpoints
+Get-EPMEndpoints -limit 2
+
+
 # Wrong Body
 #$policyFilter = @{
 #    "filter" = "Active EQ true AND Action IN 3,4 AND PolicyType EQ ADV_WIN"
@@ -620,14 +633,14 @@ Write-Log $set.SetId INFO
 #Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search" -Method 'POST' -Headers $sessionHeader -Body $policyFilter
 
 
-$retryCount = 0
-do {
+#$retryCount = 0
+#do {
     # All computers
-    $getComputerList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers" -Method 'GET' -Headers $sessionHeader
+#    $getComputerList = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers" -Method 'GET' -Headers $sessionHeader
     #$getComputerList | ConvertTo-Json
-    Write-Log $getComputerList INFO
-    $retryCount++
-} while ($retryCount -lt 20)
+#    Write-Log $getComputerList INFO
+#    $retryCount++
+#} while ($retryCount -lt 20)
 
 # Disconnected Computers
 #$URLquery = "?`$filter=Status eq 'Disconnected'"
