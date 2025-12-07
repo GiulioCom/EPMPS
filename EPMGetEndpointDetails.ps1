@@ -452,8 +452,8 @@ function Get-EPMSetID {
 #>
 Function Get-EPMEndpoints {
     param (
-        [int]$limit = 1000,         #Set limit to the max size if not declared
-        [hashtable]$filter    #Set the search body
+        [int]$limit = 1000,     #Set limit to the max size if not declared
+        [hashtable]$filter      #Set the search body
     )
 
     $mergeEndpoints = [PSCustomObject]@{
@@ -467,7 +467,6 @@ Function Get-EPMEndpoints {
     }
 
     $offset = 0             # Offset
-    $iteration = 1          # Define the number of iteraction, used to increase the offset
     $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
 
     while ($offset -lt $total) {
@@ -478,9 +477,13 @@ Function Get-EPMEndpoints {
         $mergeEndpoints.returnedCount = $getEndpoints.returnedCount   # Update the returnedCount
 
         $total = $getEndpoints.filteredCount   # Update the total with the real total
-        $offset = $limit * $iteration
-        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+        $offset += $getEndpoints.returnedCount
+
+        # Progress Bar
+        Write-Progress -Activity "Retrieving Endpoints $($total) total" -Status "Retrieved: $offset Endpoints" -PercentComplete $Percent
     }
+    Write-Progress -Activity "Retrieving Endpoints $($total) total"  -Status "Completed: Successfully retrieved $($mergeEndpoints.filteredCount) Endpoints" -PercentComplete 100 -Completed
+    
     return $mergeEndpoints
 }
 
@@ -552,7 +555,6 @@ Function Get-EPMPolicies {
     }
 
     $offset = 0             # Offset
-    $iteration = 1          # Define the number of iteraction, used to increase the offset
     $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
 
     while ($offset -lt $total) {
@@ -563,10 +565,15 @@ Function Get-EPMPolicies {
         $mergePolicies.TotalCount = $getPolicies.TotalCount         # Update the TotalCount
         $mergePolicies.FilteredCount = $getPolicies.FilteredCount   # Update the FilteredCount
 
-        $total = $getPolicies.FilteredCount   # Update the total with the real total
-        $offset = $limit * $iteration
-        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+        $total = $getPolicies.FilteredCount                         # Update the total with the real total
+        $offset += $getPolicies.Policies.Count
+
+        # Progress  Bar
+        $Percent = [int](($offset / $total) * 100)
+        Write-Progress -Activity "Retrieving Policies $($total) total" -Status "Retrieved: $offset Policies" -PercentComplete $Percent
     }
+    Write-Progress -Activity "Retrieving Policies $($total) total"  -Status "Completed: Successfully retrieved $($mergePolicies.FilteredCount) Policies" -PercentComplete 100 -Completed
+
     return $mergePolicies
 }
 

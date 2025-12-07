@@ -407,7 +407,6 @@ Function Get-EPMComputers {
     }
 
     $offset = 0             # Offset
-    $iteration = 1          # Define the number of iteraction, used to increase the offset
     $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
 
     while ($offset -lt $total) {
@@ -417,9 +416,14 @@ Function Get-EPMComputers {
         $mergeComputers.TotalCount = $getComputers.TotalCount   # Update the TotalCount
 
         $total = $getComputers.TotalCount   # Update the total with the real total
-        $offset = $limit  * $iteration
-        $iteration++                        # Increase iteraction to count the number of cycle and increment $counter
+        $offset += $getComputers.Computers.Count
+
+        # Progress  Bar
+        $Percent = [int](($offset / $total) * 100)
+        Write-Progress -Activity "Retrieving Computers $($total) total" -Status "Retrieved: $offset Computers" -PercentComplete $Percent
     }
+    Write-Progress -Activity "Retrieving Computers $($total) total"  -Status "Completed: Successfully retrieved $($mergeComputers.TotalCount) Computers" -PercentComplete 100 -Completed
+    
     return $mergeComputers
 }
 
