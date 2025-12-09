@@ -467,7 +467,7 @@ $sessionHeader = @{
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
 # Last event tracking setup
-$resolvedLastEventFolder = Resolve-Folder -ProvidedFolder $lastEventFolder -DefaultSubFolder "EPMJIT_lastEvents\$($set.setName)"
+$resolvedLastEventFolder = Resolve-Folder -ProvidedFolder $lastEventFolder -DefaultSubFolder "Temp\EPMJIT_lastEvents\$($set.setName)"
 $lastEventFile = Join-Path $resolvedLastEventFolder "lastEvent.txt"
 
 # Set the last events, by default 1 month
