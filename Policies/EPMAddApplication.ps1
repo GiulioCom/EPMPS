@@ -25,7 +25,7 @@
     EPMAddApplication.ps1 -username username@domain -tenant eu
 
 .NOTES
-    File: EPMAddApplicaion.ps1
+    File: EPMAddApplication.ps1
     Author: Giulio Compagnone
     Company: CyberArk
     Version: 0.1

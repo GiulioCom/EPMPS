@@ -17,7 +17,7 @@
     Flag to enabled computer deletion
 
 .NOTES
-    File: EPMDuplicateComputer.ps1
+    File: EPMFixComputerPolicy.ps1
     Author: Giulio Compagnone
     Company: CyberArk
     Version: 0.1
@@ -447,7 +447,7 @@ Function Get-EPMComputers {
         $offset += $getComputers.Computers.Count
 
         # Progress  Bar
-        $Percent = [int](($offset / $total) * 100)
+        $Percent = (($offset / $total) * 100)
         Write-Progress -Activity "Retrieving Computers $($total) total" -Status "Retrieved: $offset Computers" -PercentComplete $Percent
     }
     Write-Progress -Activity "Retrieving Computers $($total) total"  -Status "Completed: Successfully retrieved $($mergeComputers.TotalCount) Computers" -PercentComplete 100 -Completed

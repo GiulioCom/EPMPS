@@ -480,6 +480,7 @@ Function Get-EPMEndpoints {
         $offset += $getEndpoints.returnedCount
 
         # Progress Bar
+        $Percent = (($offset / $total) * 100)
         Write-Progress -Activity "Retrieving Endpoints $($total) total" -Status "Retrieved: $offset Endpoints" -PercentComplete $Percent
     }
     Write-Progress -Activity "Retrieving Endpoints $($total) total"  -Status "Completed: Successfully retrieved $($mergeEndpoints.filteredCount) Endpoints" -PercentComplete 100 -Completed
@@ -577,7 +578,6 @@ Function Get-EPMPolicies {
     return $mergePolicies
 }
 
-
 ### Begin Script ###
 
 ## Prepare log folder and file
@@ -636,6 +636,3 @@ if ($details) {
     Write-Log "Saving Endpoints CSV file in '$fileCSVEndpoints'" INFO
     $getEndpointsList.endpoints | Export-Csv -Path $fileCSVEndpoints -NoTypeInformation
 }
-
-
-
