@@ -1,29 +1,85 @@
 <#
 .SYNOPSIS
-    Get Endpoint details, new resAPI POC
+    Retrieves detailed endpoint information from the CyberArk Endpoint Privilege Manager (EPM) API,
+    applying batching and dynamic data flattening for efficiency.
 
 .DESCRIPTION
-    Used to exzatract FQDN name
+    This script connects to a specified EPM tenant, fetches endpoints belonging to a given Set,
+    and optionally requests detailed inventory information (e.g., OS, Hardware, Network) in batches
+    to adhere to API limits. It prioritizes memory efficiency by streaming results and uses
+    secure coding practices.
 
-.PARAMETER username
-    The EPM username (e.g., user@domain).
+.PARAMETER Username
+    The EPM username required for session authentication. This is mandatory for establishing a session.
+    (Example: user@domain)
 
-.PARAMETER setName
-    The name of the EPM set.
+.PARAMETER SetName
+    The name of the EPM Set whose endpoints you wish to retrieve.
 
-.PARAMETER tenant
-    The EPM tenant name (e.g., eu, uk).
+.PARAMETER Tenant
+    The EPM tenant region/instance to connect to. Used to construct the correct API URL.
+    Input is validated against a known set of regions to prevent injection attacks.
+    (Accepted values: login, eu, uk, au, ca, in, jp, sg, it, ch)
 
-.PARAMETER destinationFolder
+.PARAMETER Log
+    If specified, enables logging output to both the console and a file defined by $logFolder.
 
+.PARAMETER LogFolder
+    The directory path where the log file will be created. Requires the -Log switch to be active.
+
+.PARAMETER DetailsLevel
+    Specifies the level of detailed inventory information to fetch for the endpoints.
+    If no set, only high-level properties are returned.
+    For detailed reports, the script fetches and dynamically flattens the specified inventory field.
+    (Accepted values: OsInfo, Hardware, Network, DomainInfo, TerminalSessions, TimeAndDate, UserGroups, InstalledPrograms, ProxySettings, Basic)
+
+.PARAMETER exportCSVFolder
+    The folder where the final CSV output file will be saved. A file named 'SETname_Endpoints_Details.csv'
+    will be created in this directory.
+
+.LINK
+    https://docs.cyberark.com/epm/latest/en/content/webservices/endpoint-apis/get-endpoints.htm
+    https://docs.cyberark.com/epm/latest/en/content/webservices/endpoint-apis/get-multiple-endpoint-details.htm
+
+.EXAMPLE
+    1. Retrieve Basic Endpoint Data and Handle Credentials Securely
+
+    # The output is saved in the default 'EPMGetEndpointsDetailsExport' folder.
+    .\EPMGetEndpointDetails.ps1 `
+        -Username 'user@domain.com' `
+        -Tenant 'eu' `
+
+.EXAMPLE
+    2. Retrieve Specific Hardware Details and Enable Detailed Logging
+
+    # Fetch detailed 'Hardware' inventory information.
+    # Enable logging (-Log) and verbose output (-Verbose) for debugging and auditing.
+    .\EPMGetEndpointDetails.ps1 `
+        -Username 'admin@corp.local' `
+        -Tenant 'uk' `
+        -SetName 'High-Risk Servers' `
+        -DetailsLevel 'Hardware' `
+        -Log `
+        -LogFolder 'C:\Logs\EPM_Scripts' `
+
+.EXAMPLE
+    3. Retrieve Network Information and Specify Custom Output Folder
+
+    # Fetch 'Network' inventory details.
+    # The output CSV will be saved in the specified temporary directory.
+    .\EPMGetEndpointDetails.ps1 `
+        -Username 'service@epm.local' `
+        -Tenant 'au' `
+        -DetailsLevel 'Network' `
+        -exportCSVFolder 'C:\Users\Auditor\Desktop\EPM_Network_Report'
 
 .NOTES
     File: EPMGetEndpointsDetails.ps1
     Author: Giulio Compagnone
     Company: CyberArk
-    Version: 0.1
+    Version: 0.2
     Created: 09/2025
-    Last Modified: 09/2025
+    Last Modified: 11/2025
 #>
 
 param (
@@ -43,11 +99,12 @@ param (
     [Parameter(HelpMessage = "Specify the log file path")]
     [string]$logFolder,
 
-    [Parameter(HelpMessage = "Specify if Endpoints details are needed")]
-    [switch]$details,
+    [Parameter(HelpMessage = "Specify the level of endpoint details required. Leave blank for basic information.")]
+    [ValidateSet("OsInfo", "Hardware", "Network", "DomainInfo", "TerminalSessions", "TimeAndDate", "UserGroups", "InstalledPrograms", "ProxySettings")]
+    [string]$DetailsLevel = "Basic",
 
     [Parameter(HelpMessage = "Export output in CSV file")]
-    [string]$exportCSVPath
+    [string]$exportCSVFolder = "EPMGetEndpointsDetailsExport"
 )
 
 ## Write-Host Wrapper and log management
@@ -525,6 +582,46 @@ Function Get-EPMPolicies {
     return $mergePolicies
 }
 
+<#
+.SYNOPSIS
+    Recursively flattens objects
+#>
+function ConvertTo-FlatObject {
+    param(
+        [Parameter(Mandatory = $true)]
+        [psobject]$InputObject,
+
+        [string]$Prefix = ""
+    )
+
+    $properties = [ordered]@{}
+
+    $pso = $InputObject.psobject
+
+    foreach ($prop in $pso.Properties) {
+        $propName = $prop.Name
+        $propValue = $prop.Value
+        
+        $newKey = if ([string]::IsNullOrEmpty($Prefix)) { $propName } else { "${Prefix}_${propName}" }
+        
+
+        if ($null -eq $propValue) {
+            $properties[$propName] = $null
+        } elseif ($propValue -is [System.Management.Automation.PSCustomObject] -or $propValue -is [System.Collections.Hashtable]) {
+
+            $nestedProps = ConvertTo-FlatObject -InputObject ([pscustomobject]$propValue) -Prefix $newKey
+            foreach ($key in $nestedProps.Keys) {
+                $properties[$key] = $nestedProps[$key]
+            }
+        }
+        else {
+            $properties[$newKey] = $propValue
+        }
+    }
+
+    return $properties
+}
+
 ### Begin Script ###
 
 ## Prepare log folder and file
@@ -565,21 +662,63 @@ $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -se
 
 Write-Log "Entering SET: $($set.setName)..." INFO -ForegroundColor Blue
 
-$fileCSVEndpoints = Join-Path $exportCSVPath "$($set.setName)_Endpoints.csv"
+$fileCSVEndpoints = Join-Path $exportCSVFolder "$($set.setName)_Endpoints_$DetailsLevel.csv"
 
 Write-Log "Getting Endpoints List from set '$($set.setName)'" INFO
-$getEndpointsList = Get-EPMEndpoints
+$EndpointsList = Get-EPMEndpoints
 
-if ($details) {
-    foreach ($endpoint in $getEndpointsList.endpoints) {
-        $policyFilter = @{
-            "filter" = "inventoryType IN Network"
-        }  | ConvertTo-Json
-        $endpointDetails = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/$($endpoint.id)/search" -Method 'POST' -Headers $sessionHeader -Body $filter
-        Write-Log "$($endpointDetails.Name): FQDN is: $($endpointDetails.inventory.network.fullComputerName)" INFO
-    }
+$EndpointsDetails = [System.Collections.Generic.List[Object]]::new()
+
+if ($DetailsLevel -eq "Basic"){
+    $EndpointsDetails.AddRange($EndpointsList.endpoints)
+    $CleanExport = $EndpointsDetails
 } else {
-    # Export Endpoints in CSV
-    Write-Log "Saving Endpoints CSV file in '$fileCSVEndpoints'" INFO
-    $getEndpointsList.endpoints | Export-Csv -Path $fileCSVEndpoints -NoTypeInformation
+    
+    $IdList = $EndpointsList.endpoints.id
+
+    # There is a limit to 10000 char for the filter string
+    # (https://docs.cyberark.com/epm/latest/en/content/webservices/endpoint-apis/delete-endpoint.htm#Bodyparameters)
+    # Considering the following data:
+    # GUID ID                   36 characters
+    # Separator (,)	            1 character
+    # Total per ID	            37 characters
+    # Prefix (endpointId IN )	14 characters
+
+    $MaxBatchSize = 250
+
+    for ($i = 0; $i -lt $IdList.Count; $i += $MaxBatchSize) {
+
+        $Batch = $IdList[$i..($i + $MaxBatchSize - 1)]
+
+        if (-not $Batch) {
+            Write-Log "Error: Failed to slice batch starting at index $i. Skipping." ERROR
+            continue
+        }
+
+        $FilterString = "endpointId IN " + ($Batch -join ",")
+
+        if ($FilterString.Length -gt 10000) {
+            Write-Log "FATAL ERROR: Calculated filter string length ($($FilterString.Length)) exceeded 10000 chars. ABORTING BATCH." ERROR
+            continue
+        }
+
+        Write-Log "Processing batch starting with ID $($Batch[0]) (Count: $($Batch.Count), Length: $($FilterString.Length))." INFO
+
+        $FilterBody = @{
+            "filter" = $FilterString
+        } | ConvertTo-Json
+
+        $Result = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/endpoints/inventory/$DetailsLevel" -Method 'POST' -Headers $sessionHeader -Body $FilterBody
+        if ($Result){
+            $EndpointsDetails.AddRange($Result)
+        }
+    }
+    
+    $CleanExport = $EndpointsDetails | ForEach-Object {
+        $FlatBaseData = ConvertTo-FlatObject -InputObject $_
+        [PSCustomObject]$FlatBaseData
+    }
 }
+
+Write-Log "Saving Endpoints CSV file in '$fileCSVEndpoints'" INFO
+$CleanExport | Export-Csv -Path $fileCSVEndpoints -NoTypeInformation

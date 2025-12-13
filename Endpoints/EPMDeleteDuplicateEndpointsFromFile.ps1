@@ -463,8 +463,8 @@ if ($delete){
 
             try {
                 $Result = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/delete" -Method 'POST' -Headers $sessionHeader -Body $DeleteBody
+                
                 $message = "Batch delete executed. Confirmed Deleted $($Result.appliedIds.Count) in a batch of $($Batch.Count)."
-
                 if ($Result.appliedIds.Count -lt $Batch.Count) {
                     Write-Log $message ERROR
                 } else {
