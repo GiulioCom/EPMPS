@@ -44,6 +44,22 @@ param (
 )
 
 ## Write-Host Wrapper and log management
+<#
+.SYNOPSIS
+    Writes a formatted message to the console and conditionally to a log file.
+
+.DESCRIPTION
+    This function manages both console output (with standard PowerShell streams where possible)
+    and file logging based on script scope variables ($script:LogEnabled and $script:LogFilePath).
+
+.PARAMETER Message
+    The content of the log message.
+
+.PARAMETER Severity
+    The severity level of the message (INFO, WARN, ERROR).
+.PARAMETER ForegroundColor
+    Define text color, by default: INFO = Green, WARN = Yellow, ERROR = Red.
+#>
 function Write-Log {
     param (
         [Parameter(Mandatory = $true)]
@@ -57,16 +73,9 @@ function Write-Log {
         [string]$ForegroundColor
     )
     
-    $expSeverity = $severity
-    $exceedingChars = 5-$severity.Length
-    
-    while ($exceedingChars -ne 0) {
-        $expSeverity = $expSeverity + " "
-        $exceedingChars--
-    }
-
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logMessage = "$timestamp [$expSeverity] $message"
+    $logMessage = "$timestamp [$($severity.PadRight(5))] $message"
+    
 
     switch ($severity) {
         "INFO" {
@@ -88,11 +97,47 @@ function Write-Log {
 
     Write-Host $logMessage -ForegroundColor $ForegroundColor
 
-    if ($log) {
-        Add-Content -Path $logFilePath -Value $logMessage
+    if ($Log) {
+        Add-Content -Path $LogFilePath -Value $logMessage
     }
 }
 
+<#
+.SYNOPSIS
+    Initializes the log file path and ensures the log folder exists.
+
+.DESCRIPTION
+    This function handles the setup for script logging. It determines the log folder,
+    creates it if necessary, and constructs a unique log file path based on the script name and timestamp.
+
+.PARAMETER LogFolder
+    The path to the desired log folder. If not provided, a 'log' subfolder in the script's directory is used.
+
+.OUTPUTS
+    System.String. The full path to the created log file.
+#>
+function Initialize-Log {
+    param (
+        [Parameter(HelpMessage = "Specify the log file path")]
+        [string]$LogFolder
+    )
+
+    if (-not $PSBoundParameters.ContainsKey('LogFolder') -or [string]::IsNullOrWhiteSpace($LogFolder)) {
+        $scriptDirectory = $MyInvocation.PSScriptRoot
+        $LogFolder = Join-Path $scriptDirectory "log"
+    }
+
+    if (-not (Test-Path -Path $LogFolder -PathType Container)) {
+        New-Item -Path $LogFolder -ItemType Directory -ErrorAction Stop | Out-Null
+    }
+
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    #$scriptName = [System.IO.Path]::GetFileNameWithoutExtension($ScriptName)
+    $logFileName = "$timestamp`_$scriptName.log"
+    
+    $logFilePath = Join-Path $LogFolder $logFileName
+    return $logFilePath
+}
 function Write-Box {
     param (
         [string]$title
@@ -578,32 +623,21 @@ Function Get-EPMPolicies {
 
 
 ### Begin Script ###
-
-## Prepare log folder and file
-# Set default log folder if not provided
-if (-not $PSBoundParameters.ContainsKey('logFolder')) {
-    $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
-    $logFolder = Join-Path $scriptDirectory "log"
+$ScriptName = [System.IO.Path]::GetFileNameWithoutExtension((Split-Path -leaf $MyInvocation.MyCommand.Path))
+## Prepare log if needed
+if ($log) {
+    $LogFilePath = Initialize-Log -LogFolder $LogFolder
+    Write-Log "Logging enabled. File: $LogFilePath" INFO
 }
 
-# Ensure the log folder exists
-if (-not (Test-Path $logFolder)) {
-    New-Item -Path $logFolder -ItemType Directory -Force
-}
-
-# Create log file name based on timestamp and script name
-$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
-$logFileName = "$timestamp`_$scriptName.log"
-$logFilePath = Join-Path $logFolder $logFileName
-##
-
-Write-Box "$scriptName"
-##
+Write-Box "$ScriptName"
 
 # Request EPM Credentials
 $credential = Get-Credential -UserName $username -Message "Enter password for $username"
-
+if ($null -eq $credential) {
+    Write-Log "Failed to get credentials..." ERROR
+    exit
+}
 # Authenticate
 $login = Connect-EPM -credential $credential -epmTenant $tenant
 
@@ -621,6 +655,12 @@ Write-Log $login.managerURL INFO
 Write-Log $set.SetName INFO
 Write-Log $set.SetId INFO
 
+<#
+Write-Log "This is an INFO" INFO
+Write-Log "This is a WARNING" WARN
+Write-Log "This is an ERROR" ERROR
+Write-Log "This is an INFO" INFO -ForegroundColor DarkCyan
+#>
 
 #Example Request 
 
