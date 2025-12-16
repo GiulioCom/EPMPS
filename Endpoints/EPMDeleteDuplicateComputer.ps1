@@ -547,9 +547,17 @@ Write-Log "Searching for duplicated..." INFO
 $DuplicatedEndpoints = [System.Collections.Generic.List[Object]]::new()
 $LatestEndpoints   = @{} # Key = Computer Name (Endpoint.name), Value = Endpoint Object
 
+$processedEndpoints = 0
+$updateInterval = [Math]::Max(1, [Math]::Floor($Endpoints.Count / 100)) # Update every 1%
+
 foreach ($Endpoint in $getEndpointsList.endpoints) {
     
     $Name = $Endpoint.Computer
+
+    if ($processedEndpoints % $updateInterval -eq 0) {
+        $Percent = (($processedEndpoints / $Endpoints.Count) * 100)
+        Write-Progress -Activity "Processing Endpoints $($Endpoints.Count)" -Status "Processed: $processedEndpoints Endpoints" -PercentComplete $Percent
+    }
     
     $CurrentDate = $Endpoint.lastDisconnected -as [DateTime]
     if (-not $CurrentDate) { $CurrentDate = [DateTime]::MinValue }
@@ -571,7 +579,10 @@ foreach ($Endpoint in $getEndpointsList.endpoints) {
     else {
         $LatestEndpoints[$Name] = $Endpoint
     }
+    $processedEndpoints++
 }
+
+Write-Progress -Activity "Processing Endpoints $($Endpoints.Count)" -Status "Completed: $processedEndpoints Endpoints" -PercentComplete 100 -Completed
 
 Write-Log "Identified $($DuplicatedEndpoints.Count) duplicated endpoints to remove." INFO
 
@@ -618,7 +629,7 @@ if ($delete){
             continue
             }
     
-            Write-Log "Processing batch starting with ID $($Batch[0]) (Count: $($Batch.Count), Length: $($FilterString.Length))." INFO
+            #Write-Log "Processing batch starting with ID $($Batch[0]) (Count: $($Batch.Count), Length: $($FilterString.Length))." INFO
     
             $DeleteBody = @{ "filter" = $FilterString }
             if ($ForceDelete) {
@@ -627,25 +638,19 @@ if ($delete){
             $DeleteBody = $DeleteBody | ConvertTo-Json
             
             $Result = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/delete" -Method 'POST' -Headers $sessionHeader -Body $DeleteBody
-            Write-Log "Batch delete executed" INFO
-            if ($null -eq $Result.statuses) {
-               Write-Log "Not Deleted: $($Batch.Count) - Status: ID not presente or valid." WARN
-            } else {
-                foreach ($property in $Result.statuses.psobject.Properties) {
+            #Write-Log "Batch delete executed" INFO
+            if ($Result.statuses.psobject.Properties.Count -gt 0) {
+               foreach ($property in $Result.statuses.psobject.Properties) {
                     if ($property.Name -eq "OK") {
                         Write-Log "Deleted: $($property.Value) - Status: $($property.Name)" INFO
                     } else {
                         Write-Log "Not Deleted: $($property.Value) - Status: $($property.Name)" WARN
                     }
                 }
-            }
+            } else { Write-Log "Not Deleted: $($Batch.Count) - Status: ID not presente or valid." WARN }        
         }        
-    } else {
-        Write-Log "No Duplicated Endpoints" WARN
-    }
-} else {
-        Write-Log "Demo Mode - No deletion" WARN
-}
+    } else { Write-Log "No Duplicated Endpoints" WARN }
+} else { Write-Log "Demo Mode - No deletion" WARN }
 
 ## Processing My Computer (Old API)
 Write-Log "Working on 'My Computer'." INFO

@@ -378,7 +378,6 @@ $sessionHeader = @{
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
 Write-Box "$($set.setName)"
-#>
 
 Write-Log "Importing data from $EndpointReportCSV..." INFO
 $Endpoints = Import-Csv -Path $EndpointReportCSV
@@ -388,9 +387,17 @@ Write-Log "Searching for duplicated..." INFO
 $DuplicatedEndpoints = [System.Collections.Generic.List[Object]]::new()
 $LatestEndpoints = @{} # Key = Computer Name (Endpoint.name), Value = Endpoint Object
 
+$processedEndpoints = 0
+$updateInterval = [Math]::Max(1, [Math]::Floor($Endpoints.Count / 100)) # Update every 1%
+
 foreach ($Endpoint in $Endpoints) {
     
     $Name = $Endpoint.Computer
+
+    if ($processedEndpoints % $updateInterval -eq 0) {
+        $Percent = (($processedEndpoints / $Endpoints.Count) * 100)
+        Write-Progress -Activity "Processing Endpoints $($Endpoints.Count)" -Status "Processed: $processedEndpoints Endpoints" -PercentComplete $Percent
+    }
     
     $CurrentDate = $Endpoint."Last Seen" -as [DateTime]
     if (-not $CurrentDate) { $CurrentDate = [DateTime]::MinValue }
@@ -404,15 +411,13 @@ foreach ($Endpoint in $Endpoints) {
         if ($Endpoint._ParsedDate -gt $ExistingEndpoint._ParsedDate) {
             $DuplicatedEndpoints.Add($ExistingEndpoint)
             $LatestEndpoints[$Name] = $Endpoint
-        }
-        else {
-            $DuplicatedEndpoints.Add($Endpoint)
-        }
+        } else { $DuplicatedEndpoints.Add($Endpoint) }
     }
-    else {
-        $LatestEndpoints[$Name] = $Endpoint
-    }
+    else { $LatestEndpoints[$Name] = $Endpoint }
+    $processedEndpoints++
 }
+
+Write-Progress -Activity "Processing Endpoints $($Endpoints.Count)" -Status "Completed: $processedEndpoints Endpoints" -PercentComplete 100 -Completed
 
 Write-Log "Identified $($DuplicatedEndpoints.Count) duplicated endpoints to remove." INFO
 
@@ -423,7 +428,7 @@ foreach ($Dup in $DuplicatedEndpoints) {
     if ($Dup."New Agent Id" -eq "00000000-0000-0000-0000-000000000000") {
         Write-Log "Agent not compatible with Endpoints. Use MyComputer: $EndpointInfoMessage" WARN
     } else {
-        $IdList += [Uri]::EscapeDataString($Dup."New Agent Id")
+        $IdList += $Dup."New Agent Id"
         Write-Log "To be deleted (batch): $EndpointInfoMessage" WARN
     }
 }
@@ -456,34 +461,26 @@ if ($delete){
 
             if ($FilterString.Length -gt 10000) {
                 Write-Log "FATAL ERROR: Calculated filter string length ($($FilterString.Length)) exceeded 10000 chars. ABORTING BATCH." ERROR
-            continue
+                continue
             }
     
-            Write-Log "Processing batch starting with ID $($Batch[0]) (Count: $($Batch.Count), Length: $($FilterString.Length))." INFO
+            #Write-Log "Processing batch starting with ID $($Batch[0]) (Count: $($Batch.Count), Length: $($FilterString.Length))." INFO
     
             $DeleteBody = @{ "filter" = $FilterString }
-            if ($ForceDelete) {
-                $DeleteBody.force = $true
-            }
+            if ($ForceDelete) {  $DeleteBody.force = $true }
             $DeleteBody = $DeleteBody | ConvertTo-Json
 
             $Result = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/delete" -Method 'POST' -Headers $sessionHeader -Body $DeleteBody
-            Write-Log "Batch delete executed" INFO
-            if ($null -eq $Result.statuses) {
-               Write-Log "Not Deleted: $($Batch.Count) - Status: ID not presente or valid." WARN
-            } else {
-                foreach ($property in $Result.statuses.psobject.Properties) {
+
+            if ($Result.statuses.psobject.Properties.Count -gt 0) {
+               foreach ($property in $Result.statuses.psobject.Properties) {
                     if ($property.Name -eq "OK") {
                         Write-Log "Deleted: $($property.Value) - Status: $($property.Name)" INFO
                     } else {
                         Write-Log "Not Deleted: $($property.Value) - Status: $($property.Name)" WARN
                     }
                 }
-            }
-        }        
-    } else {
-        Write-Log "No Duplicated Endpoints" WARN
-    }
-} else {
-        Write-Log "Demo Mode - No deletion" WARN
-}
+            } else { Write-Log "Not Deleted: $($Batch.Count) - Status: ID not presente or valid." WARN }
+        }
+    } else { Write-Log "No Duplicated Endpoints" WARN }
+} else { Write-Log "Demo Mode - No deletion" WARN }
