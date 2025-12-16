@@ -27,6 +27,7 @@
         -   Update base functions
     Update: 11/2025
         - Improve performance duplicate endpoints
+    Update 12/2025
 #>
 
 param (
@@ -47,7 +48,10 @@ param (
     [string]$logFolder,
 
     [Parameter(HelpMessage="Delete duplicated Endpoint")]
-    [switch]$delete = $false
+    [switch]$delete = $false,
+
+    [Parameter(HelpMessage="Force delete the endpoint from this list, even if the endpoint is currently connected.")]
+    [switch]$ForceDelete = $false
 )
 
 ## Write-Host Wrapper and log management
@@ -616,22 +620,24 @@ if ($delete){
     
             Write-Log "Processing batch starting with ID $($Batch[0]) (Count: $($Batch.Count), Length: $($FilterString.Length))." INFO
     
-            $DeleteBody = @{
-                "filter" = $FilterString
-            } | ConvertTo-Json
-
-            try {
-                $Result = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/delete" -Method 'POST' -Headers $sessionHeader -Body $DeleteBody
-                $message = "Batch delete executed. Confirmed Deleted $($Result.appliedIds.Count) in a batch of $($Batch.Count)."
-
-                if ($Result.appliedIds.Count -lt $Batch.Count) {
-                    Write-Log $message ERROR
-                } else {
-                    Write-Log $message INFO
-                }
+            $DeleteBody = @{ "filter" = $FilterString }
+            if ($ForceDelete) {
+                $DeleteBody.force = $true
             }
-            catch {
-                Write-Log "Batch deletion failed for starting ID $($Batch[0]): $($_.Exception.Message)" ERROR
+            $DeleteBody = $DeleteBody | ConvertTo-Json
+            
+            $Result = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/delete" -Method 'POST' -Headers $sessionHeader -Body $DeleteBody
+            Write-Log "Batch delete executed" INFO
+            if ($null -eq $Result.statuses) {
+               Write-Log "Not Deleted: $($Batch.Count) - Status: ID not presente or valid." WARN
+            } else {
+                foreach ($property in $Result.statuses.psobject.Properties) {
+                    if ($property.Name -eq "OK") {
+                        Write-Log "Deleted: $($property.Value) - Status: $($property.Name)" INFO
+                    } else {
+                        Write-Log "Not Deleted: $($property.Value) - Status: $($property.Name)" WARN
+                    }
+                }
             }
         }        
     } else {

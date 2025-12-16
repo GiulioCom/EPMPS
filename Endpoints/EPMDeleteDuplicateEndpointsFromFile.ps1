@@ -19,7 +19,11 @@ param (
     [string]$EndpointReportCSV,
 
     [Parameter(HelpMessage="Delete duplicated Endpoint")]
-    [switch]$delete = $false
+    [switch]$delete = $false,
+
+    [Parameter(HelpMessage="Force delete the endpoint from this list, even if the endpoint is currently connected.")]
+    [switch]$ForceDelete = $false
+
 )
 
 ## Write-Host Wrapper and log management
@@ -457,9 +461,11 @@ if ($delete){
     
             Write-Log "Processing batch starting with ID $($Batch[0]) (Count: $($Batch.Count), Length: $($FilterString.Length))." INFO
     
-            $DeleteBody = @{
-                "filter" = $FilterString
-            } | ConvertTo-Json
+            $DeleteBody = @{ "filter" = $FilterString }
+            if ($ForceDelete) {
+                $DeleteBody.force = $true
+            }
+            $DeleteBody = $DeleteBody | ConvertTo-Json
 
             $Result = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/delete" -Method 'POST' -Headers $sessionHeader -Body $DeleteBody
             Write-Log "Batch delete executed" INFO
