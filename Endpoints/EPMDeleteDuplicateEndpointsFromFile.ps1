@@ -461,18 +461,18 @@ if ($delete){
                 "filter" = $FilterString
             } | ConvertTo-Json
 
-            try {
-                $Result = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/delete" -Method 'POST' -Headers $sessionHeader -Body $DeleteBody
-                
-                $message = "Batch delete executed. Confirmed Deleted $($Result.appliedIds.Count) in a batch of $($Batch.Count)."
-                if ($Result.appliedIds.Count -lt $Batch.Count) {
-                    Write-Log $message ERROR
-                } else {
-                    Write-Log $message INFO
+            $Result = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/delete" -Method 'POST' -Headers $sessionHeader -Body $DeleteBody
+            Write-Log "Batch delete executed" INFO
+            if ($null -eq $Result.statuses) {
+               Write-Log "Not Deleted: $($Batch.Count) - Status: ID not presente or valid." WARN
+            } else {
+                foreach ($property in $Result.statuses.psobject.Properties) {
+                    if ($property.Name -eq "OK") {
+                        Write-Log "Deleted: $($property.Value) - Status: $($property.Name)" INFO
+                    } else {
+                        Write-Log "Not Deleted: $($property.Value) - Status: $($property.Name)" WARN
+                    }
                 }
-            }
-            catch {
-                Write-Log "Batch deletion failed for starting ID $($Batch[0]): $($_.Exception.Message)" ERROR
             }
         }        
     } else {
