@@ -18,16 +18,29 @@
 .PARAMETER tenant
     The EPM tenant name (e.g., eu, uk).
 
+.PARAMETER eventType
+    Define the type of event to retrieve from the list: "ElevationRequest", "Trust", "Launch", "ManualRequest"
+    (https://docs.cyberark.com/epm/latest/en/content/webservices/getdetailedrawevents.htm#Eventtypes)
+
 .NOTES
     File: EPMGetEvents.ps1
     Author: Giulio Compagnone
     Company: CyberArk
-    Version: 0.1 - POC
-    Date: 06/2025
+    Version: 0.2 - POC
+
+    [06/2025] 0.1
+    - Initil release
+
+    [02/2026] 0.2:
+    - Added event type
+    - Added output file
+    - Store data in CSV file
 
 .EXAMPLE
-    1. .\EPMGetEvents.ps1 -username "user@domain" -setName "MySet" -tenant "eu"
-        Get events in the set and store in the current folder
+    1. .\EPMGetEvents.ps1 -username "user@domain" -setName "MySet" -tenant "eu" -eventType "ElevationRequest"
+    Retrieve events details of type "ElevationRequest" and store in a csv file in the "data" subfolder 
+    2. .\EPMGetEvents.ps1 -username "user@domain" -setName "MySet" -tenant "eu" -eventType "Launch" -output "c:\temp\report.csv"
+    Retrieve events details of type "Launch" and store in "c:\temp\report.csv"
 #>
 
 param (
@@ -168,6 +181,32 @@ function Remove-InvalidCharacters {
 
     return $sanitizedString
 }
+
+function Add-msToTimestamp {
+    param (
+        [string]$timestamp
+    )
+
+    if ($timestamp -match '^(?<Date>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(?<Milliseconds>\d+))?(?<Zone>Z)$') {
+        
+        $datePart = $Matches['Date']
+        $milliseconds = $Matches['Milliseconds']
+        #$zone = $Matches['Zone']
+
+        # Ensure milliseconds are always three digits
+        $milliseconds = if ($null -eq $milliseconds) { "000" } else { $milliseconds.PadRight(3, '0') }
+
+        $datems = "$datePart.$milliseconds"
+        
+        # Convert to integer and add 1 millisecond
+        $newDate = [datetime]::ParseExact($datems, "yyyy-MM-ddTHH:mm:ss.fff", $null).AddMilliseconds(1).ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+        return $newDate
+           
+    } else {
+        throw "Invalid timestamp format: $timestamp"
+    }
+}
+
 
 ## Invoke-RestMethod Wrapper
 function Invoke-EPMRestMethod {
@@ -419,30 +458,6 @@ function Get-EPMSetID {
     throw "Maximum attempts reached. Exiting set selection."
 }
 
-function Add-msToTimestamp {
-    param (
-        [string]$timestamp
-    )
-
-    if ($timestamp -match '^(?<Date>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(?<Milliseconds>\d+))?(?<Zone>Z)$') {
-        
-        $datePart = $Matches['Date']
-        $milliseconds = $Matches['Milliseconds']
-        #$zone = $Matches['Zone']
-
-        # Ensure milliseconds are always three digits
-        $milliseconds = if ($null -eq $milliseconds) { "000" } else { $milliseconds.PadRight(3, '0') }
-
-        $datems = "$datePart.$milliseconds"
-        
-        # Convert to integer and add 1 millisecond
-        $newDate = [datetime]::ParseExact($datems, "yyyy-MM-ddTHH:mm:ss.fff", $null).AddMilliseconds(1).ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
-        return $newDate
-           
-    } else {
-        throw "Invalid timestamp format: $timestamp"
-    }
-}
 
 ### Begin Script ###
 
