@@ -1,11 +1,49 @@
+<#
+.SYNOPSIS
+    Remove Duplciated Endpoints by readind the Endpoints Report
+
+.PARAMETER username
+    The EPM username (e.g., user@domain).
+
+.PARAMETER setName
+    The name of the EPM set.
+
+.PARAMETER tenant
+    The EPM tenant name (e.g., eu, uk).
+
+.PARAMETER EndpointReportCSV
+    Mandatory: Report file
+
+.PARAMETER delete
+    Whetever or not running the deletion of duplicates.
+    Disabled By default.
+
+.PARAMETER ForceDelete
+    Whetever or not force deletion of endpoint having status "Online".
+    Disabled by default.
+
+.PARAMETER ShowDebug
+    Whetever or not show details info
+    Disabled by default.
+
+.NOTES
+    File: EPMDuplicateEndpointsFromFile.ps1
+    Author: Giulio Compagnone
+    Company: CyberArk
+    Version: 2
+    Created: 09/2025
+    Last Modified: 02/2026
+#>
+
+[CmdletBinding()]
 param (
-    [Parameter(Mandatory = $true, HelpMessage="Please enter valid EPM username (For example: user@domain)")]
+    [Parameter(HelpMessage="Please enter valid EPM username (For example: user@domain)")]
     [string]$username,
 
     [Parameter(HelpMessage="Please enter valid EPM set name")]
     [string]$setName,
 
-    [Parameter(Mandatory = $true, HelpMessage="Please enter valid EPM tenant (eu, uk, ....)")]
+    [Parameter(HelpMessage="Please enter valid EPM tenant (eu, uk, ....)")]
     [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch")]
     [string]$tenant,
 
@@ -15,103 +53,110 @@ param (
     [Parameter(HelpMessage = "Specify the log file path")]
     [string]$logFolder,
 
-    [Parameter(HelpMessage="Endpoints Report")]
+    [Parameter(Mandatory = $true, HelpMessage="Endpoints Report")]
     [string]$EndpointReportCSV,
 
     [Parameter(HelpMessage="Delete duplicated Endpoint")]
     [switch]$delete = $false,
 
     [Parameter(HelpMessage="Force delete the endpoint from this list, even if the endpoint is currently connected.")]
-    [switch]$ForceDelete = $false
+    [switch]$ForceDelete = $false,
 
+    [switch]$ShowDebug = $false
 )
 
 ## Write-Host Wrapper and log management
 function Write-Log {
+    <#
+    .SYNOPSIS
+        Outputs a formatted log message to the console and a file.
+    #>
     param (
-        [Parameter(Mandatory = $true)]
-        [string]$message,
-        
-        [Parameter(Mandatory = $true)]
-        [ValidateSet("INFO", "WARN", "ERROR")]
-        [string]$severity,
-
-        [ValidateSet("Black", "DarkBlue", "DarkGreen", "DarkCyan", "DarkRed", "DarkMagenta", "DarkYellow", "Gray", "DarkGray", "Blue", "Green", "Cyan", "Red", "Magenta", "Yellow", "White")]
-        [string]$ForegroundColor
+        [Parameter(Mandatory = $true)] [string]$message,
+        [Parameter(Mandatory = $true)] [ValidateSet("INFO", "WARN", "ERROR", "DEBUG")] [string]$severity,
+        [ConsoleColor]$ForegroundColor
     )
-    
-    $expSeverity = $severity
-    $exceedingChars = 5-$severity.Length
-    
-    while ($exceedingChars -ne 0) {
-        $expSeverity = $expSeverity + " "
-        $exceedingChars--
-    }
+
+    if ($severity -eq "DEBUG" -and -not $ShowDebug) { return }
 
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logMessage = "$timestamp [$expSeverity] $message"
+    $logMessage = "$timestamp [$($severity.PadRight(5))] $message"
 
-    switch ($severity) {
-        "INFO" {
-            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
-                $ForegroundColor = "Green"
-            }
-        }
-        "WARN" {
-            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
-                $ForegroundColor = "Yellow"
-            }
-        }
-        "ERROR" {
-            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
-                $ForegroundColor = "Red"
-            }
+    if (-not $PSBoundParameters.ContainsKey('ForegroundColor')) {
+        $ForegroundColor = switch ($Severity) {
+            "INFO"  { "Green" }
+            "WARN"  { "Yellow" }
+            "ERROR" { "Red" }
+            "DEBUG" { "Gray" }
         }
     }
 
     Write-Host $logMessage -ForegroundColor $ForegroundColor
 
     if ($log) {
-        Add-Content -Path $logFilePath -Value $logMessage
+        Add-Content -Path $LogPath -Value $logMessage
     }
 }
 
 function Write-Box {
+    <#
+    .SYNOPSIS
+        Displays a centered title within a fixed 42-character decorative box.
+    #>
     param (
+        [Parameter(Mandatory = $true)]
+        [ValidateScript({$_.Length -le 38})]
         [string]$title
     )
-    
-    # Create the top and bottom lines
-    $line = "-" * $title.Length
 
-    # Print the box
-    Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
-    Write-Log "| $title |" -severity INFO -ForegroundColor Cyan
-    Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
+    $totalWidth = 42
+    $contentWidth = $totalWidth - 2
+    
+    # Calculate padding for centering
+    $leftPadding  = [Math]::Floor(($contentWidth - $title.Length) / 2)
+    $rightPadding = $contentWidth - $title.Length - $leftPadding
+    
+    # Construct lines
+    $horizontalLine = "+" + ("-" * ($totalWidth - 2)) + "+"
+    $centeredText   = "|" + (" " * $leftPadding) + $title + (" " * $rightPadding) + "|"
+
+    $textProp = @{
+        "Severity"        = "INFO"
+        "ForegroundColor" = "Cyan"
+    }
+    
+    $textProp = @{
+        "Severity" = "INFO"
+        "ForegroundColor" = "Cyan"
+    }
+
+    Write-Log $horizontalLine @textProp
+    Write-Log $centeredText   @textProp
+    Write-Log $horizontalLine @textProp
 }
 
 ## Invoke-RestMethod Wrapper
-<#
-.SYNOPSIS
-    Invokes a REST API method with automatic retry logic in case of transient failures.
-
-.DESCRIPTION
-    This function is designed to make REST API calls with automatic retries in case of specific errors, such as rate limiting.
-    It provides a robust way to handle transient failures and ensures that the API call is retried a specified number of times.
-
-.PARAMETER URI
-    The Uniform Resource Identifier (URI) for the REST API endpoint.
-
-.PARAMETER Method
-    The HTTP method (e.g., GET, POST, PUT, DELETE) for the API call.
-
-.PARAMETER Body
-    The request body data to be sent in the API call (can be null for certain methods).
-
-.PARAMETER Headers
-    Headers to include in the API request.
-#>
 function Invoke-EPMRestMethod {
+    <#
+    .SYNOPSIS
+        Invokes a REST API method with automatic retry logic in case of transient failures.
+
+    .DESCRIPTION
+        This function is designed to make REST API calls with automatic retries in case of specific errors, such as rate limiting.
+        It provides a robust way to handle transient failures and ensures that the API call is retried a specified number of times.
+
+    .PARAMETER URI
+        The Uniform Resource Identifier (URI) for the REST API endpoint.
+
+    .PARAMETER Method
+        The HTTP method (e.g., GET, POST, PUT, DELETE) for the API call.
+
+    .PARAMETER Body
+        The request body data to be sent in the API call (can be null for certain methods).
+
+    .PARAMETER Headers
+        Headers to include in the API request.
+    #>
     param (
         [string]$URI,
         [string]$Method,
@@ -176,24 +221,24 @@ function Invoke-EPMRestMethod {
 }
 
 ## EPM RestAPI Wrappers
-<#
-.SYNOPSIS
-Connects to the EPM (Endpoint Privilege Manager) using the provided credentials and tenant information.
-
-.DESCRIPTION
-This function performs authentication with the EPM API to obtain the manager URL and authentication details.
-
-.PARAMETER credential
-The credential object containing the username and password.
-
-.PARAMETER epmTenant
-The EPM tenant name.
-
-.OUTPUTS
-A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
-
-#>
 function Connect-EPM {
+    <#
+    .SYNOPSIS
+    Connects to the EPM (Endpoint Privilege Manager) using the provided credentials and tenant information.
+
+    .DESCRIPTION
+    This function performs authentication with the EPM API to obtain the manager URL and authentication details.
+
+    .PARAMETER credential
+    The credential object containing the username and password.
+
+    .PARAMETER epmTenant
+    The EPM tenant name.
+
+    .OUTPUTS
+    A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
+
+    #>
     param (
         [Parameter(Mandatory = $true)]
         [pscredential]$credential,  # Credential object containing the username and password
@@ -236,26 +281,26 @@ function Connect-EPM {
     }
 }
 
-<#
-.SYNOPSIS
-Retrieves the ID and name of an EPM set based on the provided parameters.
-
-.DESCRIPTION
-This function interacts with the EPM API to retrieve information about sets based on the specified parameters.
-
-.PARAMETER managerURL
-The URL of the EPM manager.
-
-.PARAMETER Headers
-The authorization headers.
-
-.PARAMETER setName
-The name of the EPM set to retrieve.
-
-.OUTPUTS
-A custom object with the properties "setId" and "setName" representing the EPM set information.
-#>
 function Get-EPMSetID {
+    <#
+    .SYNOPSIS
+    Retrieves the ID and name of an EPM set based on the provided parameters.
+
+    .DESCRIPTION
+    This function interacts with the EPM API to retrieve information about sets based on the specified parameters.
+
+    .PARAMETER managerURL
+    The URL of the EPM manager.
+
+    .PARAMETER Headers
+    The authorization headers.
+
+    .PARAMETER setName
+    The name of the EPM set to retrieve.
+
+    .OUTPUTS
+    A custom object with the properties "setId" and "setName" representing the EPM set information.
+    #>
     param (
         [Parameter(Mandatory = $true)]
         [string]$managerURL,
@@ -361,26 +406,11 @@ $logFilePath = Join-Path $logFolder $logFileName
 Write-Box "$scriptName"
 ##
 
-
-# Request EPM Credentials
-$credential = Get-Credential -UserName $username -Message "Enter password for $username"
-
-# Authenticate
-$login = Connect-EPM -credential $credential -epmTenant $tenant
-
-# Create a session header with the authorization token
-$sessionHeader = @{
-    "Authorization" = "basic $($login.auth)"
-}
-
-
-# Get SetId
-$set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
-
-Write-Box "$($set.setName)"
+if (-not $delete){ Write-Log "Analysis Mode Enabled." INFO DarkGreen}
+else { Write-Log "Delete Mode Enabled." INFO DarkGreen}
 
 Write-Log "Importing data from $EndpointReportCSV..." INFO
-$Endpoints = Import-Csv -Path $EndpointReportCSV
+$EndpointstotalCount = (Get-Content $EndpointReportCSV | Measure-Object).Count - 1
 
 Write-Log "Searching for duplicated..." INFO
 
@@ -388,48 +418,49 @@ $DuplicatedEndpoints = [System.Collections.Generic.List[Object]]::new()
 $LatestEndpoints = @{} # Key = Computer Name (Endpoint.name), Value = Endpoint Object
 
 $processedEndpoints = 0
-$updateInterval = [Math]::Max(1, [Math]::Floor($Endpoints.Count / 100)) # Update every 1%
+$updateInterval = [Math]::Max(1, [Math]::Floor($EndpointsTotalCount / 100)) # Update every 1%
 
-foreach ($Endpoint in $Endpoints) {
-    
-    $Name = $Endpoint.Computer
+Import-Csv -Path $EndpointReportCSV | ForEach-Object {    
 
     if ($processedEndpoints % $updateInterval -eq 0) {
-        $Percent = (($processedEndpoints / $Endpoints.Count) * 100)
-        Write-Progress -Activity "Processing Endpoints $($Endpoints.Count)" -Status "Processed: $processedEndpoints Endpoints" -PercentComplete $Percent
+        $Percent = (($processedEndpoints / $EndpointstotalCount) * 100)
+        Write-Progress -Activity "Processing Endpoints $EndpointsTotalCount" -Status "Processed: $processedEndpoints Endpoints" -PercentComplete $Percent
     }
     
-    $CurrentDate = $Endpoint."Last Seen" -as [DateTime]
-    if (-not $CurrentDate) { $CurrentDate = [DateTime]::MinValue }
+    $LastSeenDate = $_."Last Seen" -as [DateTime]
+    if (-not $LastSeenDate) { $LastSeenDate = [DateTime]::MinValue }
     
-    # Add a temporary property for easy comparison
-    $Endpoint | Add-Member -MemberType NoteProperty -Name "_ParsedDate" -Value $CurrentDate -Force
+    $CurrentEndpoint = [PSCustomObject]@{
+        Computer     = $_.Computer
+        NewAgentId   = $_."New Agent Id"
+        AgentVersion = $_."Agent Version"
+        _ParsedDate  = $LastSeenDate
+    }
 
-    if ($LatestEndpoints.ContainsKey($Name)) {
-        $ExistingEndpoint = $LatestEndpoints[$Name]
+    if ($LatestEndpoints.ContainsKey($CurrentEndpoint.Computer)) {
+        $ExistingEndpoint = $LatestEndpoints[$CurrentEndpoint.Computer]
         
-        if ($Endpoint._ParsedDate -gt $ExistingEndpoint._ParsedDate) {
+        if ($CurrentEndpoint._ParsedDate -gt $ExistingEndpoint._ParsedDate) {
             $DuplicatedEndpoints.Add($ExistingEndpoint)
-            $LatestEndpoints[$Name] = $Endpoint
-        } else { $DuplicatedEndpoints.Add($Endpoint) }
+            $LatestEndpoints[$CurrentEndpoint.Computer] = $CurrentEndpoint
+        } else { $DuplicatedEndpoints.Add($CurrentEndpoint) }
     }
-    else { $LatestEndpoints[$Name] = $Endpoint }
+    else { $LatestEndpoints[$CurrentEndpoint.Computer] = $CurrentEndpoint }
     $processedEndpoints++
 }
 
-Write-Progress -Activity "Processing Endpoints $($Endpoints.Count)" -Status "Completed: $processedEndpoints Endpoints" -PercentComplete 100 -Completed
+Write-Progress -Activity "Processing Endpoints $($EndpointsTotalCount)" -Status "Completed: $processedEndpoints Endpoints" -PercentComplete 100 -Completed
 
 Write-Log "Identified $($DuplicatedEndpoints.Count) duplicated endpoints to remove." INFO
 
-$IdList = @()
-foreach ($Dup in $DuplicatedEndpoints) {
-    $EndpointInfoMessage = "$($Dup.Computer) - ID: $($Dup."New Agent Id") (LastSeen: $($Dup."Last Seen"), Version: $($Dup."Agent Version"))"
+$IdList = foreach ($Dup in $DuplicatedEndpoints) {
+    $EndpointInfoMessage = "$($Dup.Computer) - ID: $($Dup.NewAgentId) (LastSeen: $($Dup._ParsedDate), Version: $($Dup.AgentVersion))"
 
-    if ($Dup."New Agent Id" -eq "00000000-0000-0000-0000-000000000000") {
-        Write-Log "Agent not compatible with Endpoints. Use MyComputer: $EndpointInfoMessage" WARN
+    if ($Dup.NewAgentId -eq "00000000-0000-0000-0000-000000000000") {
+        Write-Log "Agent not compatible with script. Use MyComputer instead: $EndpointInfoMessage" WARN
     } else {
-        $IdList += $Dup."New Agent Id"
-        Write-Log "To be deleted (batch): $EndpointInfoMessage" WARN
+        Write-Log "To be deleted (batch): $EndpointInfoMessage" DEBUG
+        $Dup.NewAgentId
     }
 }
 
@@ -438,6 +469,15 @@ Write-Log "Identified $($IdList.Count) duplicated endpoints to remove." INFO
 if ($delete){
     if ($IdList.Count -gt 0) {
 
+        # Connect to EPM
+        $credential = Get-Credential -UserName $username -Message "Enter password for $username"
+        $login = Connect-EPM -credential $credential -epmTenant $tenant
+        $sessionHeader = @{
+            "Authorization" = "basic $($login.auth)"
+        }
+        $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
+        Write-Box "$($set.setName)"        
+        
         # There is a limit to 10000 char for the filter string
         # (https://docs.cyberark.com/epm/latest/en/content/webservices/endpoint-apis/delete-endpoint.htm#Bodyparameters)
         # Considering the following data:
@@ -467,7 +507,7 @@ if ($delete){
             #Write-Log "Processing batch starting with ID $($Batch[0]) (Count: $($Batch.Count), Length: $($FilterString.Length))." INFO
     
             $DeleteBody = @{ "filter" = $FilterString }
-            if ($ForceDelete) {  $DeleteBody.force = $true }
+            if ($ForceDelete) { $DeleteBody.force = $true }
             $DeleteBody = $DeleteBody | ConvertTo-Json
 
             $Result = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/delete" -Method 'POST' -Headers $sessionHeader -Body $DeleteBody
