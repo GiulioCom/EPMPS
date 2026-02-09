@@ -3,7 +3,12 @@
     Demo Script update policy propertiers massively
 
 .DESCRIPTION
-    Update Policy proterties (Enable Audit, Remove duplicated, Remove Imported prefix)
+    Update Policy proterties:
+    - Enable Audit
+    - Remove duplicated
+    - Remove "[Imported]" prefix
+    - Disable policies by readin CSV file
+
 
 .PARAMETER username
     The EPM username (e.g., user@domain).
@@ -18,12 +23,15 @@
 
 
 .NOTES
-    File: EPMPolicyUpdateExample.ps1
+    File: EPMPolicyUpdate.ps1
     Author: Giulio Compagnone
     Company: CyberArk
-    Version: 1
-    Created: 07/2024
-    Last Modified: 07/2024
+    Version: 1.2
+    
+    Initial Version: 07/2024
+    
+    Update: 02/2026
+    - Adding disabling policies from file
 #>
 
 param (
@@ -43,104 +51,116 @@ param (
     [Parameter(HelpMessage = "Specify the log file path")]
     [string]$logFolder,
 
+    [Parameter(HelpMessage="Endpoints List (for Disable Policies)")]
+    [string]$PoliciesFile,
+
+    [switch]$ShowDebug = $false,
+
     [switch]$RemoveDuplicatedPolicy,
     [switch]$RemoveImportedFlag,
-    [switch]$EnableAudit
+    [switch]$EnableAudit,
+    [switch]$DisablePolicies
 )
 
 ## Write-Host Wrapper and log management
 function Write-Log {
+    <#
+    .SYNOPSIS
+        Outputs a formatted log message to the console and a file.
+    #>
     param (
-        [Parameter(Mandatory = $true)]
-        [string]$message,
-        
-        [Parameter(Mandatory = $true)]
-        [ValidateSet("INFO", "WARN", "ERROR")]
-        [string]$severity,
-
-        [ValidateSet("Black", "DarkBlue", "DarkGreen", "DarkCyan", "DarkRed", "DarkMagenta", "DarkYellow", "Gray", "DarkGray", "Blue", "Green", "Cyan", "Red", "Magenta", "Yellow", "White")]
-        [string]$ForegroundColor
+        [Parameter(Mandatory = $true)] [string]$message,
+        [Parameter(Mandatory = $true)] [ValidateSet("INFO", "WARN", "ERROR", "DEBUG")] [string]$severity,
+        [ConsoleColor]$ForegroundColor
     )
-    
-    $expSeverity = $severity
-    $exceedingChars = 5-$severity.Length
-    
-    while ($exceedingChars -ne 0) {
-        $expSeverity = $expSeverity + " "
-        $exceedingChars--
-    }
+
+    if ($severity -eq "DEBUG" -and -not $ShowDebug) { return }
 
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logMessage = "$timestamp [$expSeverity] $message"
+    $logMessage = "$timestamp [$($severity.PadRight(5))] $message"
 
-    switch ($severity) {
-        "INFO" {
-            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
-                $ForegroundColor = "Green"
-            }
-        }
-        "WARN" {
-            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
-                $ForegroundColor = "Yellow"
-            }
-        }
-        "ERROR" {
-            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
-                $ForegroundColor = "Red"
-            }
+    if (-not $PSBoundParameters.ContainsKey('ForegroundColor')) {
+        $ForegroundColor = switch ($Severity) {
+            "INFO"  { "Green" }
+            "WARN"  { "Yellow" }
+            "ERROR" { "Red" }
+            "DEBUG" { "Gray" }
         }
     }
 
     Write-Host $logMessage -ForegroundColor $ForegroundColor
 
     if ($log) {
-        Add-Content -Path $logFilePath -Value $logMessage
+        Add-Content -Path $LogPath -Value $logMessage
     }
 }
 
 function Write-Box {
+    <#
+    .SYNOPSIS
+        Displays a centered title within a fixed 42-character decorative box.
+    #>
     param (
+        [Parameter(Mandatory = $true)]
+        [ValidateScript({$_.Length -le 38})]
         [string]$title
     )
-    
-    # Create the top and bottom lines
-    $line = "-" * $title.Length
 
-    # Print the box
-    Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
-    Write-Log "| $title |" -severity INFO -ForegroundColor Cyan
-    Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
+    $totalWidth = 42
+    $contentWidth = $totalWidth - 2
+    
+    # Calculate padding for centering
+    $leftPadding  = [Math]::Floor(($contentWidth - $title.Length) / 2)
+    $rightPadding = $contentWidth - $title.Length - $leftPadding
+    
+    # Construct lines
+    $horizontalLine = "+" + ("-" * ($totalWidth - 2)) + "+"
+    $centeredText   = "|" + (" " * $leftPadding) + $title + (" " * $rightPadding) + "|"
+
+    $textProp = @{
+        "Severity"        = "INFO"
+        "ForegroundColor" = "Cyan"
+    }
+    
+    $textProp = @{
+        "Severity" = "INFO"
+        "ForegroundColor" = "Cyan"
+    }
+
+    Write-Log $horizontalLine @textProp
+    Write-Log $centeredText   @textProp
+    Write-Log $horizontalLine @textProp
 }
 
 ## Invoke-RestMethod Wrapper
-<#
-.SYNOPSIS
-    Invokes a REST API method with automatic retry logic in case of transient failures.
-
-.DESCRIPTION
-    This function is designed to make REST API calls with automatic retries in case of specific errors, such as rate limiting.
-    It provides a robust way to handle transient failures and ensures that the API call is retried a specified number of times.
-
-.PARAMETER URI
-    The Uniform Resource Identifier (URI) for the REST API endpoint.
-
-.PARAMETER Method
-    The HTTP method (e.g., GET, POST, PUT, DELETE) for the API call.
-
-.PARAMETER Body
-    The request body data to be sent in the API call (can be null for certain methods).
-
-.PARAMETER Headers
-    Headers to include in the API request.
-#>
 function Invoke-EPMRestMethod {
+    <#
+    .SYNOPSIS
+        Invokes a REST API method with automatic retry logic in case of transient failures.
+
+    .DESCRIPTION
+        This function is designed to make REST API calls with automatic retries in case of specific errors, such as rate limiting.
+        It provides a robust way to handle transient failures and ensures that the API call is retried a specified number of times.
+
+    .PARAMETER URI
+        The Uniform Resource Identifier (URI) for the REST API endpoint.
+
+    .PARAMETER Method
+        The HTTP method (e.g., GET, POST, PUT, DELETE) for the API call.
+
+    .PARAMETER Body
+        The request body data to be sent in the API call (can be null for certain methods).
+
+    .PARAMETER Headers
+        Headers to include in the API request.
+    #>
     param (
         [string]$URI,
         [string]$Method,
         [object]$Body = $null,
         [hashtable]$Headers = @{},
-        [int]$MaxRetries = 3
-    #    [int]$RetryDelay = 120
+        [int]$MaxRetries = 3,
+        [int]$RetryDelay = 120 # Default value, in case of the returned message doesn't contain the limit info
     )
 
     $retryCount = 0
@@ -171,9 +191,10 @@ function Invoke-EPMRestMethod {
                 if ($match.Success) {
                     $minutes = [int]($match.Value -replace '\s+minute', '')
                     [int]$RetryDelay = $minutes * 60
+                    Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
                 }
 
-                Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
+                Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds (default)..." WARN
                 Start-Sleep -Seconds $RetryDelay
                 $retryCount++
             } else {
@@ -197,24 +218,24 @@ function Invoke-EPMRestMethod {
 }
 
 ## EPM RestAPI Wrappers
-<#
-.SYNOPSIS
-Connects to the EPM (Endpoint Privilege Manager) using the provided credentials and tenant information.
-
-.DESCRIPTION
-This function performs authentication with the EPM API to obtain the manager URL and authentication details.
-
-.PARAMETER credential
-The credential object containing the username and password.
-
-.PARAMETER epmTenant
-The EPM tenant name.
-
-.OUTPUTS
-A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
-
-#>
 function Connect-EPM {
+    <#
+    .SYNOPSIS
+    Connects to the EPM (Endpoint Privilege Manager) using the provided credentials and tenant information.
+
+    .DESCRIPTION
+    This function performs authentication with the EPM API to obtain the manager URL and authentication details.
+
+    .PARAMETER credential
+    The credential object containing the username and password.
+
+    .PARAMETER epmTenant
+    The EPM tenant name.
+
+    .OUTPUTS
+    A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
+
+    #>
     param (
         [Parameter(Mandatory = $true)]
         [pscredential]$credential,  # Credential object containing the username and password
@@ -257,26 +278,26 @@ function Connect-EPM {
     }
 }
 
-<#
-.SYNOPSIS
-Retrieves the ID and name of an EPM set based on the provided parameters.
-
-.DESCRIPTION
-This function interacts with the EPM API to retrieve information about sets based on the specified parameters.
-
-.PARAMETER managerURL
-The URL of the EPM manager.
-
-.PARAMETER Headers
-The authorization headers.
-
-.PARAMETER setName
-The name of the EPM set to retrieve.
-
-.OUTPUTS
-A custom object with the properties "setId" and "setName" representing the EPM set information.
-#>
 function Get-EPMSetID {
+    <#
+    .SYNOPSIS
+    Retrieves the ID and name of an EPM set based on the provided parameters.
+
+    .DESCRIPTION
+    This function interacts with the EPM API to retrieve information about sets based on the specified parameters.
+
+    .PARAMETER managerURL
+    The URL of the EPM manager.
+
+    .PARAMETER Headers
+    The authorization headers.
+
+    .PARAMETER setName
+    The name of the EPM set to retrieve.
+
+    .OUTPUTS
+    A custom object with the properties "setId" and "setName" representing the EPM set information.
+    #>
     param (
         [Parameter(Mandatory = $true)]
         [string]$managerURL,
@@ -326,7 +347,7 @@ function Get-EPMSetID {
         throw "No sets found. Cannot proceed."
     }
 
-    Write-Box "Available Sets:" INFO
+    Write-Box "Available Sets:"
 
     for ($i = 0; $i -lt $sets.Sets.Count; $i++) {
         Write-Log "$($i + 1). $($sets.Sets[$i].Name)" INFO DarkCyan
@@ -358,35 +379,35 @@ function Get-EPMSetID {
     throw "Maximum attempts reached. Exiting set selection."
 }
 
-<#
-.SYNOPSIS
-    Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
-
-.DESCRIPTION
-    This function acts as a wrapper for the CyberArk EPM REST API to get computers.
-    It automatically manages pagination by making multiple API calls if the total number
-    of computers exceeds the API's maximum limit (5000). The function merges all
-    computers into a single PSCustomObject for easy management.
-
-.PARAMETER limit
-    The maximum number of computers to retrieve per API call. The default is 5000,
-    which is the maximum allowed by the CyberArk EPM API.
-
-.EXAMPLE
-    Get-EPMTotalCount -limit 500
-
-.OUTPUTS
-    This function returns an object containing the merged computers and metadata.
-    The object has the following properties:
-        - Computers: An array of all policy objects.
-        - TotalCount: The total number of policies on the server.
-
-.NOTES
-    This function requires a valid session header and manager URL to be accessible
-    in the execution context. It uses Invoke-EPMRestMethod.
-#>
 Function Get-EPMComputers {
-        param (
+    <#
+    .SYNOPSIS
+        Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
+
+    .DESCRIPTION
+        This function acts as a wrapper for the CyberArk EPM REST API to get computers.
+        It automatically manages pagination by making multiple API calls if the total number
+        of computers exceeds the API's maximum limit (5000). The function merges all
+        computers into a single PSCustomObject for easy management.
+
+    .PARAMETER limit
+        The maximum number of computers to retrieve per API call. The default is 5000,
+        which is the maximum allowed by the CyberArk EPM API.
+
+    .EXAMPLE
+        Get-EPMTotalCount -limit 500
+
+    .OUTPUTS
+        This function returns an object containing the merged computers and metadata.
+        The object has the following properties:
+            - Computers: An array of all policy objects.
+            - TotalCount: The total number of policies on the server.
+
+    .NOTES
+        This function requires a valid session header and manager URL to be accessible
+        in the execution context. It uses Invoke-EPMRestMethod.
+    #>
+    param (
         [int]$limit = 5000  # Set limit to the max size if not declared
     )
 
@@ -416,55 +437,55 @@ Function Get-EPMComputers {
     return $mergeComputers
 }
 
-<#
-.SYNOPSIS
-    Retrieves a list of EPM policies from a CyberArk EPM server, handling pagination automatically.
-
-.DESCRIPTION
-    This function acts as a wrapper for the CyberArk EPM REST API to get policies.
-    It automatically manages pagination by making multiple API calls if the total number
-    of policies exceeds the API's maximum limit (1000). The function merges all
-    policies into a single PSCustomObject for easy management.
-
-.PARAMETER limit
-    The maximum number of policies to retrieve per API call. The default is 1000,
-    which is the maximum allowed by the CyberArk EPM API.
-
-.PARAMETER sortBy
-    The field by which to sort the policies. Common values include "Updated", "Name",
-    and "PolicyType". The default is "Updated".
-
-.PARAMETER sortDir
-    The sorting direction. Valid values are "asc" (ascending) and "desc" (descending).
-    The default is "desc".
-
-.PARAMETER policyFilter
-    A hashtable containing filter criteria for the policies. The keys and values
-    must match the JSON format expected by the EPM API's search endpoint.
-    Example: @{ "filter" = "PolicyType IN 11,36,37,38" }.
-
-.EXAMPLE
-    Get-EPMPolicies -limit 500 -sortBy "Name"
-
-.EXAMPLE
-    $myFilter = @{
-        "filter" = "PolicyType IN 11,36"
-    }
-    Get-EPMPolicies -policyFilter $myFilter
-
-.OUTPUTS
-    This function returns an object containing the merged policies and metadata.
-    The object has the following properties:
-        - Policies: An array of all policy objects.
-        - ActiveCount: The count of active policies.
-        - TotalCount: The total number of policies on the server.
-        - FilteredCount: The total number of policies that match the applied filter.
-
-.NOTES
-    This function requires a valid session header and manager URL to be accessible
-    in the execution context. It uses Invoke-EPMRestMethod.
-#>
 Function Get-EPMPolicies {
+    <#
+    .SYNOPSIS
+        Retrieves a list of EPM policies from a CyberArk EPM server, handling pagination automatically.
+
+    .DESCRIPTION
+        This function acts as a wrapper for the CyberArk EPM REST API to get policies.
+        It automatically manages pagination by making multiple API calls if the total number
+        of policies exceeds the API's maximum limit (1000). The function merges all
+        policies into a single PSCustomObject for easy management.
+
+    .PARAMETER limit
+        The maximum number of policies to retrieve per API call. The default is 1000,
+        which is the maximum allowed by the CyberArk EPM API.
+
+    .PARAMETER sortBy
+        The field by which to sort the policies. Common values include "Updated", "Name",
+        and "PolicyType". The default is "Updated".
+
+    .PARAMETER sortDir
+        The sorting direction. Valid values are "asc" (ascending) and "desc" (descending).
+        The default is "desc".
+
+    .PARAMETER policyFilter
+        A hashtable containing filter criteria for the policies. The keys and values
+        must match the JSON format expected by the EPM API's search endpoint.
+        Example: @{ "filter" = "PolicyType IN 11,36,37,38" }.
+
+    .EXAMPLE
+        Get-EPMPolicies -limit 500 -sortBy "Name"
+
+    .EXAMPLE
+        $myFilter = @{
+            "filter" = "PolicyType IN 11,36"
+        }
+        Get-EPMPolicies -policyFilter $myFilter
+
+    .OUTPUTS
+        This function returns an object containing the merged policies and metadata.
+        The object has the following properties:
+            - Policies: An array of all policy objects.
+            - ActiveCount: The count of active policies.
+            - TotalCount: The total number of policies on the server.
+            - FilteredCount: The total number of policies that match the applied filter.
+
+    .NOTES
+        This function requires a valid session header and manager URL to be accessible
+        in the execution context. It uses Invoke-EPMRestMethod.
+    #>
     param (
         [int]$limit = 1000,         # Set limit to the max size if not declared
         [string]$sortBy = "Updated",
@@ -505,7 +526,6 @@ Function Get-EPMPolicies {
 
     return $mergePolicies
 }
-
 
 ### Begin Script ###
 
@@ -726,4 +746,70 @@ if ($RemoveImportedFlag) {
         }
     }
     Write-Log "... Done Application Groups..." INFO
+}
+
+if ($DisablePolicies) {
+    if (-not (Test-Path $PoliciesFile)) {
+        Write-Log "File '$PoliciesFile' not found. Skipping." ERROR        Return
+    }
+    
+    Write-Log "Fetching current policies list from EPM Console..." INFO
+    $policiesSearchFilter = @{
+        "filter" = "PolicyType EQ ADV_WIN"
+    }
+    $policySearch = Get-EPMPolicies -policyFilter $policiesSearchFilter
+
+    $PoliciesLookup = @{}
+    foreach ($policy in $policySearch.Policies){
+        if ($null -eq $policy.PolicyName) { continue }
+        $PoliciesLookup[$policy.PolicyName] = [PSCustomObject]@{
+            Id       = $policy.PolicyId
+            IsActive = [bool]$policy.IsActive # Cast to bool to ensure type safety
+        }
+    }
+
+    Write-Log "Importing data from $PoliciesFile..." INFO
+    $PoliciesTotalCount = (Get-Content $PoliciesFile | Measure-Object).Count - 1
+    
+    $Counter = 1
+    
+    Write-Log "Processing $($PoliciesTotalCount) rows from $PoliciesFile..." INFO
+    Import-Csv -Path $PoliciesFile | ForEach-Object {
+        Write-Log "$counter/$PoliciesTotalCount Processing Policy: '$($_.PolicyName)'" INFO
+        if ($PoliciesLookup.ContainsKey($_.PolicyName)) {
+            
+            $PolicyLookup = $PoliciesLookup[$_.PolicyName]
+            if ($PolicyLookup.IsActive -eq $true) {
+                Write-Log "Policy '$($_.PolicyName)' found and active." INFO
+                
+                $URIpDetails = "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/$($PolicyLookup.Id)"
+                $getPolicyDetailsParam = @{
+                    Uri = $URIpDetails
+                    Method = 'GET'
+                    Headers = $sessionHeader
+                }
+                $getPolicyDetails = Invoke-EPMRestMethod @getPolicyDetailsParam
+
+                $getPolicyDetails.Policy.IsActive = $false
+                Write-Log "$($_.PolicyName): Disabling Policy" INFO
+
+                $updatePolicyJson = $getPolicyDetails.Policy | ConvertTo-Json -Depth 10
+
+                # Update policy
+                $updatePolicyParam = @{
+                    Uri = $URIpDetails
+                    Method = 'PUT'
+                    Headers = $sessionHeader
+                    Body = ([System.Text.Encoding]::UTF8.GetBytes($updatePolicyJson)) # to handle special char
+                }
+                $null = Invoke-EPMRestMethod @updatePolicyParam
+                Write-Log "$($_.PolicyName): Successfully disabled." INFO
+            } else {
+                Write-Log "$($_.PolicyName): Already disabled in EPM. Skipping." INFO
+            }
+        } else {
+            Write-Log "$($_.PolicyName): Not found in EPM search results." WARN
+        }
+        $Counter++
+    } 
 }
