@@ -44,64 +44,76 @@ param (
 )
 
 ## Write-Host Wrapper and log management
-<#
-.SYNOPSIS
-    Writes a formatted message to the console and conditionally to a log file.
-
-.DESCRIPTION
-    This function manages both console output (with standard PowerShell streams where possible)
-    and file logging based on script scope variables ($script:LogEnabled and $script:LogFilePath).
-
-.PARAMETER Message
-    The content of the log message.
-
-.PARAMETER Severity
-    The severity level of the message (INFO, WARN, ERROR).
-.PARAMETER ForegroundColor
-    Define text color, by default: INFO = Green, WARN = Yellow, ERROR = Red.
-#>
 function Write-Log {
+    <#
+    .SYNOPSIS
+        Outputs a formatted log message to the console and a file.
+    #>
     param (
-        [Parameter(Mandatory = $true)]
-        [string]$message,
-        
-        [Parameter(Mandatory = $true)]
-        [ValidateSet("INFO", "WARN", "ERROR")]
-        [string]$severity,
-
-        [ValidateSet("Black", "DarkBlue", "DarkGreen", "DarkCyan", "DarkRed", "DarkMagenta", "DarkYellow", "Gray", "DarkGray", "Blue", "Green", "Cyan", "Red", "Magenta", "Yellow", "White")]
-        [string]$ForegroundColor
+        [Parameter(Mandatory = $true)] [string]$message,
+        [Parameter(Mandatory = $true)] [ValidateSet("INFO", "WARN", "ERROR", "DEBUG")] [string]$severity,
+        [ConsoleColor]$ForegroundColor
     )
-    
+
+    if ($severity -eq "DEBUG" -and -not $ShowDebug) { return }
+
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     $logMessage = "$timestamp [$($severity.PadRight(5))] $message"
-    
 
-    switch ($severity) {
-        "INFO" {
-            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
-                $ForegroundColor = "Green"
-            }
-        }
-        "WARN" {
-            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
-                $ForegroundColor = "Yellow"
-            }
-        }
-        "ERROR" {
-            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
-                $ForegroundColor = "Red"
-            }
+    if (-not $PSBoundParameters.ContainsKey('ForegroundColor')) {
+        $ForegroundColor = switch ($Severity) {
+            "INFO"  { "Green" }
+            "WARN"  { "Yellow" }
+            "ERROR" { "Red" }
+            "DEBUG" { "Gray" }
         }
     }
 
     Write-Host $logMessage -ForegroundColor $ForegroundColor
 
-    if ($Log) {
-        Add-Content -Path $LogFilePath -Value $logMessage
+    if ($log) {
+        Add-Content -Path $LogPath -Value $logMessage
     }
 }
 
+function Write-Box {
+    <#
+    .SYNOPSIS
+        Displays a centered title within a fixed 42-character decorative box.
+    #>
+    param (
+        [Parameter(Mandatory = $true)]
+        [ValidateScript({$_.Length -le 38})]
+        [string]$title
+    )
+
+    $totalWidth = 42
+    $contentWidth = $totalWidth - 2
+    
+    # Calculate padding for centering
+    $leftPadding  = [Math]::Floor(($contentWidth - $title.Length) / 2)
+    $rightPadding = $contentWidth - $title.Length - $leftPadding
+    
+    # Construct lines
+    $horizontalLine = "+" + ("-" * ($totalWidth - 2)) + "+"
+    $centeredText   = "|" + (" " * $leftPadding) + $title + (" " * $rightPadding) + "|"
+
+    $textProp = @{
+        "Severity"        = "INFO"
+        "ForegroundColor" = "Cyan"
+    }
+    
+    $textProp = @{
+        "Severity" = "INFO"
+        "ForegroundColor" = "Cyan"
+    }
+
+    Write-Log $horizontalLine @textProp
+    Write-Log $centeredText   @textProp
+    Write-Log $horizontalLine @textProp
+}
+
+function Initialize-Log {
 <#
 .SYNOPSIS
     Initializes the log file path and ensures the log folder exists.
@@ -116,7 +128,6 @@ function Write-Log {
 .OUTPUTS
     System.String. The full path to the created log file.
 #>
-function Initialize-Log {
     param (
         [Parameter(HelpMessage = "Specify the log file path")]
         [string]$LogFolder
@@ -137,19 +148,6 @@ function Initialize-Log {
     
     $logFilePath = Join-Path $LogFolder $logFileName
     return $logFilePath
-}
-function Write-Box {
-    param (
-        [string]$title
-    )
-    
-    # Create the top and bottom lines
-    $line = "-" * $title.Length
-
-    # Print the box
-    Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
-    Write-Log "| $title |" -severity INFO -ForegroundColor Cyan
-    Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
 }
 
 ## Invoke-RestMethod Wrapper
