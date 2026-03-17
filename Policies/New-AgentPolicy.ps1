@@ -192,19 +192,25 @@ function Invoke-EPMRestMethod {
                     $minutes = [int]($match.Value -replace '\s+minute', '')
                     [int]$RetryDelay = $minutes * 60
                     Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
+                } else {
+                    Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds (default)..." WARN
                 }
-
-                Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds (default)..." WARN
                 Start-Sleep -Seconds $RetryDelay
                 $retryCount++
             } else {
-                # Handle Body possible filter error 
+                
                 if ($ErrorDetailsMessage.ErrorCode -eq "EPM000002E" -and $null -ne $Body) {
+                # Handle Body possible filter error 
                     Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
                     Write-Log "Please verify the filter body if present, as it could be the cause of this error code." ERROR
                     throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
-                } else {
-                    # Log error only if it's NOT the handled EPM00000AE error
+                } elseif ($ErrorDetailsMessage.ErrorCode -eq "EPM000012E") {
+                # Handle Error EPM000012E - "ErrorMessage: EPM cannot identify the following target computers that were previously selected."
+                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
+                    return
+                }
+                else {
+                # Log any other error
                     Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
                     throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
                 }
@@ -378,27 +384,6 @@ function Get-EPMSetID {
 
     throw "Maximum attempts reached. Exiting set selection."
 }
-
-<#
-function Get-ComputerID {
-    param (
-        [string] $compName
-    )
-
-    $getComputers = Invoke-EPMRestMethod -URI "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers?`$filter=ComputerName eq '$compName'" -Method 'GET' -Headers $sessionHeader
-    
-    if ($getComputers.Computers.length -eq 0 ) {
-        Write-Log "No Computer named $compName was found, please refine your search." ERROR
-        exit 1
-    } elseif ($getComputers.Computers.length -gt 1) {
-        Write-Log "To many device found having name $compName was found, please refine your search." ERROR
-        exit 1
-    } else {
-        # Write-Log "$compName having ID: $($getComputers.Computers[0].AgentId)" INFO
-        return $getComputers.Computers[0].AgentId
-    }
-}
-#>
 
 # Logging setup
 $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
