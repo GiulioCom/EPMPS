@@ -1,6 +1,17 @@
 <#
 .SYNOPSIS
-    Remove Duplciated Endpoints by readind the Endpoints Report
+    Identifies duplicate endpoints from a CSV report for safe removal.
+
+.DESCRIPTION
+    This script processes the EPM Report for Endpoints to identify duplicate computer records. 
+    It executes the following safe-handling logic:
+    1. Agent ID Conflict Check: Scans for duplicated 'New Agent ID' values and excludes them 
+       from deletion. This prevents accidentally deleting multiple distinct endpoints that are 
+       incorrectly sharing the same Agent ID.
+    2. Duplicate Identification: Identifies duplicate computer names and lists the older records 
+       for potential deletion by comparing the 'Last Seen' dates.
+    3. Fail-Safe: If a record's 'Last Seen' date is malformed, missing, or empty, the script 
+       will safely ignore that record and it will not be processed for deletion.
 
 .PARAMETER username
     The EPM username (e.g., user@domain).
@@ -26,13 +37,15 @@
     Whetever or not show details info
     Disabled by default.
 
+.EXAMPLE
+    1. .\Remove-DuplicateEndpoints.ps1 -EndpointReportCSV report_file_0.csv -ShowDebug
+
 .NOTES
-    File: EPMDuplicateEndpointsFromFile.ps1
     Author: Giulio Compagnone
     Company: CyberArk
     Version: 2
     Created: 09/2025
-    Last Modified: 02/2026
+    Last Modified: 03/2026
 #>
 
 [CmdletBinding()]
@@ -53,7 +66,14 @@ param (
     [Parameter(HelpMessage = "Specify the log file path")]
     [string]$logFolder,
 
-    [Parameter(Mandatory = $true, HelpMessage="Endpoints Report")]
+    [Parameter(Mandatory = $true, HelpMessage = "Endpoints Report")]
+    [ValidateScript({
+        if (Test-Path $_ -PathType Leaf) {
+            $true
+        } else {
+            throw "File not found or is a directory: $_"
+        }
+    })]
     [string]$EndpointReportCSV,
 
     [Parameter(HelpMessage="Delete duplicated Endpoint")]
@@ -412,8 +432,11 @@ if ($log) {
 Write-Box "$scriptName"
 ##
 
-if (-not $delete){ Write-Log "Analysis Mode Enabled." INFO DarkGreen}
-else { Write-Log "Delete Mode Enabled." INFO DarkGreen}
+if (-not $delete){
+    Write-Log "Analysis Mode Enabled." INFO DarkGreen
+} else {
+    Write-Log "Delete Mode Enabled." INFO DarkGreen
+}
 
 Write-Log "Importing data from $EndpointReportCSV..." INFO
 
@@ -456,7 +479,7 @@ Import-Csv -Path $EndpointReportCSV | ForEach-Object {
     $NewAgentId = $_."New Agent Id"
 
     if (-not [string]::IsNullOrWhiteSpace($NewAgentId) -or $NewAgentId -eq "00000000-0000-0000-0000-000000000000") {
-        if ($NewAgentIdFrequency.ContainsKey($AgentId)) {
+        if ($NewAgentIdFrequency.ContainsKey($NewAgentId)) {
             $NewAgentIdFrequency[$NewAgentId]++
         } else {
             $NewAgentIdFrequency[$NewAgentId] = 1
@@ -514,7 +537,6 @@ Import-Csv -Path $EndpointReportCSV | ForEach-Object {
             $LatestEndpoints[$CurrentEndpoint.Computer] = $CurrentEndpoint
         }
     }
-    
 }
 
 Write-Progress -Activity "Processing Endpoints $($EndpointsTotalCount)" -Status "Completed: $processedEndpoints Endpoints" -PercentComplete 100 -Completed
@@ -527,7 +549,7 @@ $IdList = foreach ($Dup in $DuplicatedEndpoints) {
     if ($Dup.NewAgentId -eq "00000000-0000-0000-0000-000000000000") {
         Write-Log "Agent not compatible with script. Use MyComputer instead: $EndpointInfoMessage" WARN
     } else {
-        Write-Log "To be deleted (batch): $EndpointInfoMessage" DEBUG
+        Write-Log "To be deleted: $EndpointInfoMessage" DEBUG
         $Dup.NewAgentId
     }
 }
@@ -597,4 +619,20 @@ if ($delete){
     }
 } else {
     Write-Log "Demo Mode - No deletion" WARN
+}
+
+# Show the duplicated New Agent ID
+$DuplicatedAgentIdKeys = $NewAgentIdFrequency.Keys | Where-Object {
+    $NewAgentIdFrequency[$_] -gt 1
+}
+
+if ($DuplicatedAgentIdKeys.Count -gt 0) {
+    Write-Log "Found $($DuplicatedAgentIdKeys.Count) unique Agent IDs that are being shared by multiple computers!" WARN
+    
+    # Optional: Log the specific IDs to the console or a file
+    foreach ($Id in $DuplicatedAgentIdKeys) {
+        Write-Log " - Agent ID [$Id] is shared by $($NewAgentIdFrequency[$Id]) computers." WARN
+    }
+} else {
+    Write-Log "No duplicate Agent IDs found. All registered agents are unique." INFO
 }
