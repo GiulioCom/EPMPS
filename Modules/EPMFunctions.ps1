@@ -153,6 +153,7 @@ function Write-Box {
 }
 
 ## Invoke-RestMethod Wrapper
+function Invoke-EPMRestMethod {
 <#
 .SYNOPSIS
     Invokes a REST API method with automatic retry logic in case of transient failures.
@@ -173,13 +174,13 @@ function Write-Box {
 .PARAMETER Headers
     Headers to include in the API request.
 #>
-function Invoke-EPMRestMethod {
-    param (
+param (
         [string]$URI,
         [string]$Method,
         [object]$Body = $null,
         [hashtable]$Headers = @{},
-        [int]$MaxRetries = 3
+        [int]$MaxRetries = 3,
+        [int]$RetryDelay = 120 # Default value, in case of the returned message doesn't contain the limit info
     )
 
     $retryCount = 0
@@ -204,36 +205,32 @@ function Invoke-EPMRestMethod {
 
             # Handle rate limit error (EPM00000AE)
             if ($ErrorDetailsMessage -and $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
-                $errorMessage = $ErrorDetailsMessage.ErrorMessage
-                
-                if ($errorMessage -like "*Limit of the API calls exceeded*") {
-                    Write-Log "Rate limit permanently exceeded. Please wait a while before running again." ERROR
-                    return
-                }
-
-                $pattern = '(\d+)\s+minute' 
-                $match = [regex]::Match($errorMessage, $pattern)
-
+                # Regex pattern to find numbers followed by "minute(s)"
+                $pattern = "\d+\s+minute"
+                $match = [regex]::Match($ErrorDetailsMessage.ErrorMessage, $pattern)
                 if ($match.Success) {
-                    $minutes = [int]$match.Groups[1].Value
+                    $minutes = [int]($match.Value -replace '\s+minute', '')
                     [int]$RetryDelay = $minutes * 60
-                    
-                    Write-Log "$errorMessage - Retrying in $RetryDelay seconds (Attempt $($retryCount + 1))..." WARN
-
-                    Start-Sleep -Seconds $RetryDelay
-                    $retryCount++
+                    Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
                 } else {
-                    Write-Log "Rate limit error (EPM00000AE) encountered: $errorMessage." ERROR
-                    return
+                    Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds (default)..." WARN
                 }
+                Start-Sleep -Seconds $RetryDelay
+                $retryCount++
             } else {
-                # Handle Body possible filter error 
+                
                 if ($ErrorDetailsMessage.ErrorCode -eq "EPM000002E" -and $null -ne $Body) {
+                # Handle Body possible filter error 
                     Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
                     Write-Log "Please verify the filter body if present, as it could be the cause of this error code." ERROR
                     throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
-                } else {
-                    # Log error only if it's NOT the handled EPM00000AE error
+                } elseif ($ErrorDetailsMessage.ErrorCode -eq "EPM000012E") {
+                # Handle Error EPM000012E - "ErrorMessage: EPM cannot identify the following target computers that were previously selected."
+                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
+                    return
+                }
+                else {
+                # Log any other error
                     Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
                     throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
                 }
@@ -247,6 +244,7 @@ function Invoke-EPMRestMethod {
 }
 
 ## EPM RestAPI Wrappers
+function Connect-EPM {
 <#
 .SYNOPSIS
 Connects to the EPM (Endponint Priviled Management) using the provided credentials and tenant information.
@@ -262,9 +260,7 @@ The EPM tenant name.
 
 .OUTPUTS
 A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
-
 #>
-function Connect-EPM {
     param (
         [Parameter(Mandatory = $true)]
         [pscredential]$credential,  # Credential object containing the username and password
@@ -307,6 +303,7 @@ function Connect-EPM {
     }
 }
 
+function Get-EPMSetID {
 <#
 .SYNOPSIS
 Retrieves the ID and name of an EPM set based on the provided parameters.
@@ -326,7 +323,6 @@ The name of the EPM set to retrieve.
 .OUTPUTS
 A custom object with the properties "setId" and "setName" representing the EPM set information.
 #>
-function Get-EPMSetID {
     param (
         [Parameter(Mandatory = $true)]
         [string]$managerURL,
@@ -351,8 +347,6 @@ function Get-EPMSetID {
         throw "Could not retrieve EPM sets."
     }
 
-    #$setId = $null
-
     # If setName is provided, search for it directly
     if (-not [string]::IsNullOrEmpty($setName)) {
         $selectedSet = $sets.Sets | Where-Object { $_.Name -eq $setName } | Select-Object -First 1
@@ -367,9 +361,6 @@ function Get-EPMSetID {
             throw "Invalid Set Name: $setName"
         }
     }
-
-    # If no setName is provided, prompt the user to select one
-    #Write-Log "No set name provided. Listing available sets for selection..." INFO
 
     if ($sets.Sets.Count -eq 0) {
         Write-Log "No sets available in EPM." ERROR
@@ -408,6 +399,7 @@ function Get-EPMSetID {
     throw "Maximum attempts reached. Exiting set selection."
 }
 
+Function Get-EPMComputers {
 <#
 .SYNOPSIS
     Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
@@ -435,8 +427,7 @@ function Get-EPMSetID {
     This function requires a valid session header and manager URL to be accessible
     in the execution context. It uses Invoke-EPMRestMethod.
 #>
-Function Get-EPMComputers {
-        param (
+    param (
         [int]$limit = 5000  # Set limit to the max size if not declared
     )
 
@@ -466,6 +457,7 @@ Function Get-EPMComputers {
     return $mergeComputers
 }
 
+Function Get-EPMEndpoints {
 <#
 .SYNOPSIS
     Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
@@ -493,10 +485,9 @@ Function Get-EPMComputers {
     This function requires a valid session header and manager URL to be accessible
     in the execution context. It uses Invoke-EPMRestMethod.
 #>
-Function Get-EPMEndpoints {
     param (
         [int]$limit = 1000,     #Set limit to the max size if not declared
-        [hashtable]$filter      #Set the search body
+        [string]$filter         #Set the search body
     )
 
     $mergeEndpoints = [PSCustomObject]@{
@@ -505,8 +496,10 @@ Function Get-EPMEndpoints {
         returnedCount = 0
     }
 
-    if ($null -ne $filter) {
-        $filterJSON = $filter | ConvertTo-Json
+    if ((-not [string]::IsNullOrWhiteSpace($filter))) {
+        $filterJSON = @{
+            filter = $filter
+        } | ConvertTo-Json
     }
 
     $offset = 0             # Offset
@@ -522,15 +515,20 @@ Function Get-EPMEndpoints {
         $total = $getEndpoints.filteredCount   # Update the total with the real total
         $offset += $getEndpoints.returnedCount
 
-        # Progress Bar
-        $Percent = (($offset / $total) * 100)
-        Write-Progress -Activity "Retrieving Endpoints $($total) total" -Status "Retrieved: $offset Endpoints" -PercentComplete $Percent
+        # Manage 0 results
+        if ($total -eq 0 -and $offset -eq 0) { continue }
+        else {
+            # Progress Bar
+            $Percent = (($offset / $total) * 100)
+            Write-Progress -Activity "Retrieving Endpoints $($total) total" -Status "Retrieved: $offset Endpoints" -PercentComplete $Percent
+        }
     }
     Write-Progress -Activity "Retrieving Endpoints $($total) total"  -Status "Completed: Successfully retrieved $($mergeEndpoints.filteredCount) Endpoints" -PercentComplete 100 -Completed
     
     return $mergeEndpoints
 }
 
+Function Get-EPMPolicies {
 <#
 .SYNOPSIS
     Retrieves a list of EPM policies from a CyberArk EPM server, handling pagination automatically.
@@ -579,7 +577,6 @@ Function Get-EPMEndpoints {
     This function requires a valid session header and manager URL to be accessible
     in the execution context. It uses Invoke-EPMRestMethod.
 #>
-Function Get-EPMPolicies {
     param (
         [int]$limit = 1000,         # Set limit to the max size if not declared
         [string]$sortBy = "Updated",
