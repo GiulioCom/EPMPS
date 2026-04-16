@@ -19,7 +19,14 @@
 
 .PARAMETER AppDefCSV
     The Application Definition csv file having the following header:
-    Publisher,AppGroupName
+    Publisher,AppGroupName,CompareAs
+
+    CompareAs is a string value based the official docs: https://docs.cyberark.com/epm/latest/en/content/webservices/applicationpatterns.htm#Publisher
+    - exact
+    - prefix
+    - contains
+    - wildcards
+    - regExp
 
 .PARAMETER log
     Enable logging to file and console
@@ -428,6 +435,15 @@ function Test-EpmGroupCapacity {
 
 ### Begin Script ###
 
+### Mappting
+$CompareAsMap = @{
+    "exact"     = 0
+    "prefix"    = 1
+    "contains"  = 2
+    "wildcards" = 3
+    "regExp"    = 4
+}
+
 $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
 
 ## Prepare log folder and file
@@ -463,7 +479,7 @@ $login = Connect-EPM -credential $credential -epmTenant $tenant
 # Create a session header with the authorization token
 $sessionHeader = @{
     "Authorization" = "basic $($login.auth)"
-    "Content-Type" = "application/json"
+#    "Content-Type" = "application/json"
 }
 
 # Get SetId
@@ -473,7 +489,7 @@ $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -se
 $URI = "$($login.managerURL)/EPM/API/Sets/$($set.setId)"
 
 # Get the list of AppGroups and build a map for fast search
-Write-Log "Retrieving the Applicaiton Groups Data..." INFO
+Write-Log "Retrieving the Application Groups Data..." INFO
 
 $AppGroups = Invoke-EPMRestMethod -Uri "$URI/Policies/ApplicationGroups/Search?limit=1000" -Method 'POST' -Headers $sessionHeader
 $AppGroupsMap = @{}
@@ -484,7 +500,7 @@ foreach ($AppGroup in $AppGroups.Policies) {
 Write-Log "Importing data from $AppDefCSV..." INFO
 
 # Validate CSV
-$FirstRow = Import-Csv -Path $AppDefCSV | Select-Object -First 1
+$FirstRow = Import-Csv -Path $AppDefCSV -Encoding utf8 | Select-Object -First 1
 if (-not $FirstRow) {
     $ErrorMessage = "Schema Error: $AppDefCSV is empty or missing valid headers."
     Write-Log $ErrorMessage ERROR
@@ -492,7 +508,7 @@ if (-not $FirstRow) {
 }
 
 $RawHeader = $FirstRow.psobject.properties.name
-$RequiredHeaders = @('Publisher', 'AppGroupName')
+$RequiredHeaders = @('Publisher', 'AppGroupName','CompareAs')
 
 foreach ($Header in $RequiredHeaders) {
     if ($Header -notin $RawHeader) {
@@ -507,22 +523,36 @@ foreach ($Header in $RequiredHeaders) {
 $AppLookup = @{}
 
 Import-Csv -Path $AppDefCSV | ForEach-Object {
-    $AppGroupName = $_.AppGroupName
-    $Publisher = $_.Publisher
+    $GroupName = $_.AppGroupName
+    $RawCompare = $_.CompareAs.Trim()
 
-    if (-not $AppLookup.ContainsKey($AppGroupName)) {
-        $AppLookup[$AppGroupName] = [System.Collections.Generic.List[string]]::new()
+    if (-not $AppLookup.ContainsKey($GroupName)) {
+        $AppLookup[$GroupName] = [System.Collections.Generic.List[object]]::new()
     }
-    $AppLookup[$AppGroupName].Add($Publisher)
+
+    $NumericCompare = if ($CompareAsMap.ContainsKey($RawCompare)) {
+        $CompareAsMap[$RawCompare]
+    } else {
+        Write-Log "Invalid CompareAs value '$RawCompare' for publisher '$($_.Publisher)'. Defaulting to 0 (exacly)." WARN
+        0 
+    }
+
+    $PublisherData = [PSCustomObject]@{
+        PublisherName = $_.Publisher.Trim()
+        CompareAs = $NumericCompare
+    }
+
+    $AppLookup[$GroupName].Add($PublisherData)
 }
 
 foreach ($Entry in $AppLookup.GetEnumerator()) {
     
     $TargetAppGroupName = $Entry.Key
-    $Publishers = $Entry.Value
+    $PublishersData = $Entry.Value
 
-    $AppDefinitions = @(foreach ($PublisherName in $Publishers) {
-        if ([string]::IsNullOrWhiteSpace($PublisherName)) { continue }
+    $AppDefinitions = @(foreach ($Item in $PublishersData) {
+        
+        if ([string]::IsNullOrWhiteSpace($Item.PublisherName)) { continue }
 
         [PSCustomObject]@{
             "internalId"= 0
@@ -535,15 +565,15 @@ foreach ($Entry in $AppLookup.GetEnumerator()) {
                 "signatureLevel"= 2
                 "separator"= ";"
                 "caseSensitive"= $false
-                "compareAs"= 2 # Contains
+                "compareAs"= [int]$Item.CompareAs
                 "isEmpty"= $false
-                "content"= $PublisherName.Trim()
+                "content"= $Item.PublisherName
                 }
             }
             "childProcess"= $true
             "restrictOpenSaveFileDialog"= $true
         }
-    })    
+    }) 
     
     # Search the App Group in the Map
     if ($AppGroupsMap.ContainsKey($TargetAppGroupName)) {
@@ -562,12 +592,12 @@ foreach ($Entry in $AppLookup.GetEnumerator()) {
 
         # Update the object reference
         $appGroup.Policy.Applications = $finalAppList
-        $AppGroupJSON = $AppGroup.Policy | ConvertTo-Json -Depth 10 -Compress
-    
+        $AppGroupJSON = [System.Text.Encoding]::UTF8.GetBytes(($appGroup.Policy | ConvertTo-Json -Depth 10 -Compress)) #Force UTF8
+
         # Update the AppGroup
         $UpdateResponse = Invoke-EPMRestMethod -Uri "$URI/Policies/ApplicationGroups/$targetAppGroupId" -Method 'PUT' -Headers $sessionHeader -Body $AppGroupJSON
         if ($null -ne $UpdateResponse -and $null -ne $UpdateResponse.Id) {
-            Write-Log "SUCCESS: Group '$($UpdateAppGroup.Name)' updated. Now contains $($UpdateResponse.Applications.Count) application(s)." INFO
+            Write-Log "SUCCESS: Group '$($UpdateResponse.Name)' updated. Now contains $($UpdateResponse.Applications.Count) application(s)." INFO
         }
     } else {
         Write-Log "Group '$TargetAppGroupName' not found in EPM. Creating the Application Group..." -severity WARN
@@ -580,10 +610,12 @@ foreach ($Entry in $AppLookup.GetEnumerator()) {
             "Name" = $TargetAppGroupName
             "PolicyType" = 14
             "Applications" = $AppDefinitions
-        } | ConvertTo-Json -Depth 10 -Compress
+        }
+
+        $AppGroupJSON = [System.Text.Encoding]::UTF8.GetBytes(($NewAppGroup | ConvertTo-Json -Depth 10 -Compress)) #Force UTF8
 
         # Create the AppGroup
-        $AddResponse = Invoke-EPMRestMethod -Uri "$URI/Policies/ApplicationGroups" -Method 'POST' -Headers $sessionHeader -Body $NewAppGroup
+        $AddResponse = Invoke-EPMRestMethod -Uri "$URI/Policies/ApplicationGroups" -Method 'POST' -Headers $sessionHeader -Body $AppGroupJSON
         if ($null -ne $AddResponse -and $null -ne $AddResponse.Id) {
             Write-Log "SUCCESS: New Application Group '$($AddResponse.Name)' created with ID: $($AddResponse.Id)." -severity INFO
         }
