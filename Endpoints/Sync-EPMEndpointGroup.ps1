@@ -23,102 +23,120 @@
     WIN11-1,PreProd
 
 .EXAMPLE
-    .\EPMsyncComputerGroup.ps1 -username "admin@epm.com" -setName "Default Set" -tenant "eu" -source "C:\temp\policy_assignments.csv"
+    .\EPMsyncComputerGroup.ps1 -username "admin@epm.com" -setName "Default Set" -tenant "eu" -MappingCsvPath "C:\temp\policy_assignments.csv"
 
 .NOTES
-    File: EPMAddComputertoPolicy.ps1
     Author: Giulio Compagnone
     Company: CyberArk
     Version: 0.1
     Created: 11/2025
 
-    TODO: the script only add computer in group or ADD new group. Future release the script will remove computer from group or remove groups and fullt sync the CSV fileprocessed
+    Update: 04/2026
+    - Using the "Add or update static group members by filter" API: https://docs.cyberark.com/epm/latest/en/content/webservices/endpoint-group-apis/add-or-update-static-group-members-by-filter.htm
+
 #>
 
 param (
     [Parameter(Mandatory = $true, HelpMessage="Please enter valid EPM username (For example: user@domain)")]
-    [string]$username,
+    [string]$Username,
 
     [Parameter(HelpMessage="Please enter valid EPM set name")]
-    [string]$setName,
+    [string]$SetName,
 
     [Parameter(Mandatory = $true, HelpMessage="Please enter valid EPM tenant (eu, uk, ....)")]
     [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch", "beta")]
-    [string]$tenant,
+    [string]$Tenant,
+
+    [Parameter(Mandatory = $true, HelpMessage="Path to the Mapping CSV (EndpointName, GroupName)")]
+    [ValidateScript({
+        if (-not (Test-Path $_ -PathType Leaf)) { 
+            throw "Path '$_' must be a valid file. Folders are not supported." 
+        }
+        $true
+    })]
+    [string]$MappingCsvPath,
+
+    [Parameter(Mandatory = $false, HelpMessage="Optional: EPM Endpoints Report for ID lookups")]
+    [ValidateScript({
+        if (-not (Test-Path $_ -PathType Leaf)) { 
+            throw "Path '$_' must be a valid file. Folders are not supported." 
+        }
+        $true
+    })]
+    [string]$LookupCsvPath,
 
     [Parameter(HelpMessage = "Enable logging to file and console")]
-    [switch]$log,
+    [switch]$Log,
 
     [Parameter(HelpMessage = "Specify the log file path")]
-    [string]$logFolder,
-
-    [Parameter(Mandatory=$true)]
-    [string]$source
+    [string]$LogFolder
 )
 
 ## Write-Host Wrapper and log management
 function Write-Log {
+<#
+.SYNOPSIS
+    Outputs a formatted log message to the console and a file.
+#>
     param (
-        [Parameter(Mandatory = $true)]
-        [string]$message,
-        
-        [Parameter(Mandatory = $true)]
-        [ValidateSet("INFO", "WARN", "ERROR")]
-        [string]$severity,
-
-        [ValidateSet("Black", "DarkBlue", "DarkGreen", "DarkCyan", "DarkRed", "DarkMagenta", "DarkYellow", "Gray", "DarkGray", "Blue", "Green", "Cyan", "Red", "Magenta", "Yellow", "White")]
-        [string]$ForegroundColor
+        [Parameter(Mandatory = $true)] [string]$message,
+        [Parameter(Mandatory = $true)] [ValidateSet("INFO", "WARN", "ERROR", "DEBUG")] [string]$severity,
+        [ConsoleColor]$ForegroundColor
     )
-    
-    $expSeverity = $severity
-    $exceedingChars = 5-$severity.Length
-    
-    while ($exceedingChars -ne 0) {
-        $expSeverity = $expSeverity + " "
-        $exceedingChars--
-    }
+
+    if ($severity -eq "DEBUG" -and -not $ShowDebug) { return }
 
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logMessage = "$timestamp [$expSeverity] $message"
+    $logMessage = "$timestamp [$($severity.PadRight(5))] $message"
 
-    switch ($severity) {
-        "INFO" {
-            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
-                $ForegroundColor = "Green"
-            }
-        }
-        "WARN" {
-            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
-                $ForegroundColor = "Yellow"
-            }
-        }
-        "ERROR" {
-            if (-not $PSBoundParameters.ContainsKey("ForegroundColor")) {
-                $ForegroundColor = "Red"
-            }
+    if (-not $PSBoundParameters.ContainsKey('ForegroundColor')) {
+        $ForegroundColor = switch ($Severity) {
+            "INFO"  { "Green" }
+            "WARN"  { "Yellow" }
+            "ERROR" { "Red" }
+            "DEBUG" { "Gray" }
         }
     }
 
     Write-Host $logMessage -ForegroundColor $ForegroundColor
 
     if ($log) {
-        Add-Content -Path $logFilePath -Value $logMessage
+        Add-Content -Path $LogPath -Value $logMessage
     }
 }
 
 function Write-Box {
+<#
+.SYNOPSIS
+    Displays a centered title within a fixed 42-character decorative box.
+#>
     param (
+        [Parameter(Mandatory = $true)]
+        [ValidateScript({$_.Length -le 38})]
         [string]$title
     )
-    
-    # Create the top and bottom lines
-    $line = "-" * $title.Length
 
-    # Print the box
-    Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
-    Write-Log "| $title |" -severity INFO -ForegroundColor Cyan
-    Write-Log "+ $line +" -severity INFO -ForegroundColor Cyan
+    $totalWidth = 42
+    $contentWidth = $totalWidth - 2
+    
+    # Calculate padding for centering
+    $leftPadding  = [Math]::Floor(($contentWidth - $title.Length) / 2)
+    $rightPadding = $contentWidth - $title.Length - $leftPadding
+    
+    # Construct lines
+    $horizontalLine = "+" + ("-" * ($totalWidth - 2)) + "+"
+    $centeredText   = "|" + (" " * $leftPadding) + $title + (" " * $rightPadding) + "|"
+
+    $textProp = @{
+        "Severity" = "INFO"
+        "ForegroundColor" = "Cyan"
+    }
+
+    Write-Log $horizontalLine @textProp
+    Write-Log $centeredText   @textProp
+    Write-Log $horizontalLine @textProp
 }
+##
 
 ## Invoke-RestMethod Wrapper
 function Invoke-EPMRestMethod {
@@ -171,6 +189,12 @@ param (
                 }
             }
 
+            if ($null -eq $ErrorDetailsMessage) {
+                $GenericError = "$URI - HTTP Error: $($_.Exception.Message)"
+                Write-Log $GenericError ERROR
+                throw $GenericError
+            } 
+
             # Handle rate limit error (EPM00000AE)
             if ($ErrorDetailsMessage -and $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
                 # Regex pattern to find numbers followed by "minute(s)"
@@ -210,8 +234,8 @@ param (
     Write-Log "API call failed after $MaxRetries retries. URI: $URI" ERROR
     throw "API call failed after $MaxRetries retries."
 }
-
 ## EPM RestAPI Wrappers
+function Connect-EPM {
 <#
 .SYNOPSIS
 Connects to the EPM (Endpoint Privilege Manager) using the provided credentials and tenant information.
@@ -229,7 +253,6 @@ The EPM tenant name.
 A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
 
 #>
-function Connect-EPM {
     param (
         [Parameter(Mandatory = $true)]
         [pscredential]$credential,  # Credential object containing the username and password
@@ -272,6 +295,7 @@ function Connect-EPM {
     }
 }
 
+function Get-EPMSetID {
 <#
 .SYNOPSIS
 Retrieves the ID and name of an EPM set based on the provided parameters.
@@ -291,7 +315,6 @@ The name of the EPM set to retrieve.
 .OUTPUTS
 A custom object with the properties "setId" and "setName" representing the EPM set information.
 #>
-function Get-EPMSetID {
     param (
         [Parameter(Mandatory = $true)]
         [string]$managerURL,
@@ -304,7 +327,7 @@ function Get-EPMSetID {
 
     # Retrieve list of sets
     try {
-        #Write-Log "Retrieving EPM Sets from: $managerURL" INFO
+        Write-Log "Retrieving EPM Sets from: $managerURL" INFO
         $sets = Invoke-EPMRestMethod -URI "$managerURL/EPM/API/Sets" -Method 'GET' -Headers $Headers
 
         if (-not $sets -or -not $sets.Sets) {
@@ -312,11 +335,10 @@ function Get-EPMSetID {
         }
     }
     catch {
-        Write-Log "Failed to retrieve EPM Sets. Error: $_" ERROR
-        throw "Could not retrieve EPM sets."
+        $message = "Failed to retrieve EPM Sets. Error: $_" 
+        Write-Log $message ERROR
+        throw $message
     }
-
-    #$setId = $null
 
     # If setName is provided, search for it directly
     if (-not [string]::IsNullOrEmpty($setName)) {
@@ -333,15 +355,12 @@ function Get-EPMSetID {
         }
     }
 
-    # If no setName is provided, prompt the user to select one
-    #Write-Log "No set name provided. Listing available sets for selection..." INFO
-
     if ($sets.Sets.Count -eq 0) {
         Write-Log "No sets available in EPM." ERROR
         throw "No sets found. Cannot proceed."
     }
 
-    Write-Box "Available Sets:" INFO
+    Write-Box "Available Sets:"
 
     for ($i = 0; $i -lt $sets.Sets.Count; $i++) {
         Write-Log "$($i + 1). $($sets.Sets[$i].Name)" INFO DarkCyan
@@ -373,6 +392,7 @@ function Get-EPMSetID {
     throw "Maximum attempts reached. Exiting set selection."
 }
 
+Function Get-EPMEndpoints {
 <#
 .SYNOPSIS
     Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
@@ -400,7 +420,6 @@ function Get-EPMSetID {
     This function requires a valid session header and manager URL to be accessible
     in the execution context. It uses Invoke-EPMRestMethod.
 #>
-Function Get-EPMEndpoints {
     param (
         [int]$limit = 1000,     #Set limit to the max size if not declared
         [hashtable]$filter      #Set the search body
@@ -438,6 +457,7 @@ Function Get-EPMEndpoints {
 }
 
 ## Script Functions
+function ConvertTo-EpmGroupData {
 <#
 .SYNOPSIS
     Converts a CSV file of computer-to-group mappings into
@@ -452,21 +472,20 @@ Function Get-EPMEndpoints {
     The full path to the input CSV file.
 
 .PARAMETER GroupLookup
-    (Optional) A pre-built hash table that maps [GroupName] to [GroupID].
+     A pre-built hash table that maps [GroupName] to [GroupID].
     If provided, the GroupId property will be populated.
     If a group from the CSV is not found in this map, GroupId will be $null.
 
 .OUTPUTS
     [PSCustomObject]
     Streams objects to the pipeline, each with:
-    - EpmGroupName (string)
+    - roupName (string)
     - GroupId (always $null, as a placeholder)
-    - Computers (array of strings)
+    - Endpoints (array of strings)
 #>
-function ConvertTo-EpmGroupData {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true, Position=0)]
+        [Parameter(Mandatory=$true)]
         [ValidateScript({
             if (-not (Test-Path -Path $_ -PathType Leaf)) {
                 throw "File not found: $_"
@@ -475,8 +494,8 @@ function ConvertTo-EpmGroupData {
         })]
         [string]$Path,
 
-        [Parameter(Mandatory=$false)]
-        [System.Collections.IDictionary]$GroupLookup = $null
+        [Parameter(Mandatory=$true)]
+        [System.Collections.IDictionary]$GroupLookup
     )
 
     Write-Log "Starting EPM Group processing for file: $Path" INFO
@@ -526,42 +545,48 @@ function ConvertTo-EpmGroupData {
         
         # This object is written to the output stream
         [PSCustomObject]@{
-            EpmGroupName = $entry.Key
+            GroupName = $entry.Key
             GroupId      = $groupId
-            Computers    = $entry.Value # This is the [List[string]] we built
+            Endpoints    = $entry.Value # This is the [List[string]] containig the list of Endpoints 
         }
     }
 }
 
 ### Begin Script ###
 
+$scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
+
 ## Prepare log folder and file
 # Set default log folder if not provided
-if (-not $PSBoundParameters.ContainsKey('logFolder')) {
-    $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
-    $logFolder = Join-Path $scriptDirectory "log"
-}
+if ($log) {
+    if (-not $PSBoundParameters.ContainsKey('logFolder')) {
+        $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
+        $logFolder = Join-Path $scriptDirectory "log"
+    }
 
-# Ensure the log folder exists
-if (-not (Test-Path $logFolder)) {
-    New-Item -Path $logFolder -ItemType Directory -Force
-}
+    # Ensure the log folder exists
+    if (-not (Test-Path $logFolder)) {
+        New-Item -Path $logFolder -ItemType Directory -Force
+    }
 
-# Create log file name based on timestamp and script name
-$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
-$logFileName = "$timestamp`_$scriptName.log"
-$logFilePath = Join-Path $logFolder $logFileName
+    # Create log file name based on timestamp and script name
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $logFileName = "$timestamp`_$scriptName.log"
+    $logFilePath = Join-Path $logFolder $logFileName
+
+    Write-Log "Logging enabled. Log file: $logFilePath" INFO
+}
 ##
 
 Write-Box "$scriptName"
-##
 
 # Request EPM Credentials
 $credential = Get-Credential -UserName $username -Message "Enter password for $username"
 
 # Authenticate
 $login = Connect-EPM -credential $credential -epmTenant $tenant
+
+Write-Log $login.managerURL INFO
 
 # Create a session header with the authorization token
 $sessionHeader = @{
@@ -572,65 +597,158 @@ $sessionHeader = @{
 # Get SetId
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
-Write-Log "Entering SET: $($set.setName)..." INFO -ForegroundColor Blue
+# Define common URI
+$URI = "$($login.managerURL)/EPM/API/Sets/$($set.setId)"
 
-# Check the source file
-if (-not (Test-Path $source)) {
-    Write-Log "The specified CSV file '$source' was not found." ERROR
-    exit 1
-}
+Write-Log "Entering SET: $($set.setName)..." INFO -ForegroundColor Blue
 
 # Get Static Groups
 $compGroupFilter = @{
     "filter" = "type EQ Static"
 } | ConvertTo-Json
-$getCompGroups = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/groups/search" -Method 'POST' -Headers $sessionHeader -Body $compGroupFilter
+$getEndpointGroups = Invoke-EPMRestMethod -Uri "$URI/Endpoints/groups/search" -Method 'POST' -Headers $sessionHeader -Body $compGroupFilter
 
-$GroupNameToIdMap = @{} # Map of [GroupName] = GroupID
-foreach ($compGroup in $getCompGroups) {
-    $name = $compGroup.name
-    $id = $compGroup.id
-    $GroupNameToIdMap[$name] = $id
+$EndpointsGroupMap = @{} # Map of [GroupName] = GroupID
+foreach ($group in $getEndpointGroups) {
+    $EndpointsGroupMap[$group.name] = $group.id
 }
 
+# Adding by computer name:
+# https://docs.cyberark.com/epm/latest/en/content/webservices/endpoint-group-apis/add-or-update-static-group-members-by-filter.htm
+
+ConvertTo-EpmGroupData -Path $MappingCsvPath -GroupLookup $EndpointsGroupMap | ForEach-Object {
+    Write-Log "Processing Group: $($_.GroupName)..." INFO
+    
+    if ($null -eq $_.GroupId) {
+        Write-Log "Group '$($_.GroupName)' does not exist. Creating..." INFO
+       
+        $GroupPayload = @{
+            "type" = "Static"
+            "name" = $($_.GroupName)
+            "description" = "Created by script"
+        } | ConvertTo-Json
+        
+        $addGroup = Invoke-EPMRestMethod -Uri "$URI/Endpoints/Groups" -Method 'POST' -Headers $sessionHeader -Body $GroupPayload
+        if ($null -eq $addGroup -or -not $addGroup.id) {
+            Write-Log "Group creation for '$($_.GroupName)' failed. API returned no ID." ERROR
+            continue
+        }
+        Write-Log "Group '$($_.GroupName)' created successfully with ID: $($addGroup.id)." INFO
+        $GroupID = $addGroup.id
+    } else {
+        Write-Log "Group '$($_.GroupName)' (ID: $($_.GroupId)) exists." INFO
+        $GroupID = $_.GroupId
+    }
+    
+    Write-Log "Adding $($_.Endpoints.Count) members to '$($_.GroupName)'." INFO
+    
+    $EndpointsList = $_.Endpoints -join ','
+    Write-Log "Endpoints: $EndpointsList" INFO
+
+    if ($_.Endpoints.Count -eq 1) {
+        $filter = "name EQ $EndpointsList"
+    } else {
+        $filter = "name IN $EndpointsList"
+    }
+
+    $UpdateGroupBody = @{
+        "filter" = $filter
+        "override" = $true
+    } | ConvertTo-Json
+    
+    $addMembers = Invoke-EPMRestMethod -Uri "$URI/Endpoints/Groups/$GroupID/members" -Method 'POST' -Headers $sessionHeader -Body $UpdateGroupBody
+
+    if ($addMembers.count -ge $_.Endpoints.Count) {
+        Write-Log "Successfully added $($addMembers.Count) members in '$($_.GroupName)'." INFO    
+    } elseif ($addMembers.count -lt $_.Endpoints.Count){
+        Write-Log "Only $($addMembers.count) of $($_.Endpoints.Count) uploaded." WARN
+    } else {
+        Write-Log "Error uploading..." ERROR
+    }
+}
+
+
+<#
 # Get Endpoints
-$getEndpoints = Get-EPMEndpoints
-$EndpointNameToIdMap = @{} # Map of [EndpointName] = EndpointID
+## Initialize a Hashtable to store ComputerName as the Key
+## and an ArrayList of IDs.
+## If there are more value for the same Endpoint name (duplicated)
+## The ID will be added to the same ComputerName
 
-foreach ($endpoint in $getEndpoints.endpoints) {
-    $name = $endpoint.name.Trim()
-    $id = $endpoint.id
-if ($EndpointNameToIdMap.ContainsKey($name)) {
-        # Duplicate name found. Temporary Solution.
-        # TO DO: Reuse the a function to hanlde dupkiated from otehr script
-        Write-Log "Duplicate endpoint name found: '$name'. The ID '$($EndpointNameToIdMap[$name])' will be used, ignoring ID '$id'." WARN
-    }
-    else {
-        $EndpointNameToIdMap[$name] = $id
+$EndpointLookup = @{}
+
+# Adding Map logic
+$AddInfoToMap = {
+    param($CompName, $AgentId)
+    $CleanName = $CompName.Trim()
+    $CleanId = [string]$AgentId.Trim()
+
+    if (-not [string]::IsNullOrWhiteSpace($CleanName)) {
+        if (-not $EndpointLookup.ContainsKey($CleanName)) {
+            $EndpointLookup[$CleanName] = [System.Collections.Generic.List[string]]::new()
+        }
+        $EndpointLookup[$CleanName].Add($CleanId)
     }
 }
 
-ConvertTo-EpmGroupData -Path $source -GroupLookup $GroupNameToIdMap | ForEach-Object {
+if ($null -ne $LookupCsvPath) {
+
+    Write-Log "Importing data from $LookupCsvPath..." INFO
+
+    # Validate CSV
+    $HeaderChecked = $false
+    Import-Csv -Path $LookupCsvPath | ForEach-Object {
+        if (-not $HeaderChecked) {
+            $RawHeaders = $_.psobject.properties.name
+                if ('Computer' -notin $RawHeaders -or 'New Agent Id' -notin $RawHeaders) {
+                    throw "Schema Error: Missing required columns in $LookupCsvPath"
+                }
+            $HeaderChecked = $true
+        }
+        &$AddInfoToMap -CompName $_.Computer -AgentId $_.'New Agent Id'
+    }
+} else {
+
+    Write-Log "WARNING: No Endpoints Report (LookupCsvPath) was provided." WARN
+    Write-Log "- The script will query the EPM Console directly." WARN
+    Write-Log "- RISK: This may hit the 100,000 daily API request limit." WARN
+    Write-Log "- ADVICE: For large-scale operations, use a CSV report to save API quota." WARN
+    $Confirmation = Read-Host "Are you sure you want to continue with direct API access? (y/N)"
+
+    if ($Confirmation -ne 'y') {
+        Write-Log "Operation cancelled by user to preserve API quota." INFO
+        return
+    }
+
+    $getEndpoints = Get-EPMEndpoints
+
+    foreach ($endpoint in $getEndpoints.endpoints) {
+        &$AddInfoToMap -CompName $_.Computer -AgentId $_.'New Agent Id'
+    }
+}
+
+#>
+
+<#
+ConvertTo-EpmGroupData -Path $source -GroupLookup $EndpointsGroupMap | ForEach-Object {
     
-    $GroupObject = $_
-    
-    Write-Log "Processing Group: $($GroupObject.EpmGroupName)" INFO
-    Write-Log "  Computers: ($($GroupObject.Computers -join ', '))" INFO
+    Write-Log "Processing Group: $($_.GroupName)..." INFO
+    Write-Log "  Computers: ($($_.Endpoints -join ', '))" DEBUG
 
     # Convert ComputerName to Computer ID
-    $memberIDsList = @()
-    foreach ($computerName in $GroupObject.Computers) {
-        if ($EndpointNameToIdMap.ContainsKey($computerName)) {
-            $memberIDsList += $EndpointNameToIdMap[$computerName]
+    $memberIDsList = [System.Collections.Generic.List[string]]::new()
+    foreach ($Endpoint in $_.Endpoints) {
+        if ($EndpointLookup.ContainsKey($Endpoint)) {
+            $memberIDsList.AddRange($EndpointLookup[$Endpoint])
 
         } else {
-            Write-Log "Computer '$computerName' not found in EPM inventory. Skipping for group '$($GroupObject.EpmGroupName)'." WARN
+            Write-Log "Endpoint '$computerName' not found in EPM inventory. Skipping for group '$($_.GroupName)'." WARN
         }
     }
     
     # Check if we have any valid IDs left to process
     if ($memberIDsList.Count -eq 0) {
-        Write-Log "Skipping group '$($GroupObject.EpmGroupName)': No members found in EPM inventory." WARN
+        Write-Log "Skipping group '$($_.GroupName)': No members found in EPM inventory." WARN
         return # Skip to the next group
     }
 
@@ -666,3 +784,4 @@ ConvertTo-EpmGroupData -Path $source -GroupLookup $GroupNameToIdMap | ForEach-Ob
         Write-Log "Successfully added $($addMembersIDs.Count) members to new group '$($GroupObject.EpmGroupName)'." INFO    
     }
 }
+#>
