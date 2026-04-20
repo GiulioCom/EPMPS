@@ -121,6 +121,7 @@ function Write-Box {
 }
 
 ## Invoke-RestMethod Wrapper
+function Invoke-EPMRestMethod {
 <#
 .SYNOPSIS
     Invokes a REST API method with automatic retry logic in case of transient failures.
@@ -141,14 +142,13 @@ function Write-Box {
 .PARAMETER Headers
     Headers to include in the API request.
 #>
-function Invoke-EPMRestMethod {
-    param (
+param (
         [string]$URI,
         [string]$Method,
         [object]$Body = $null,
         [hashtable]$Headers = @{},
-        [int]$MaxRetries = 3
-    #    [int]$RetryDelay = 120
+        [int]$MaxRetries = 3,
+        [int]$RetryDelay = 120 # Default value, in case of the returned message doesn't contain the limit info
     )
 
     $retryCount = 0
@@ -179,19 +179,26 @@ function Invoke-EPMRestMethod {
                 if ($match.Success) {
                     $minutes = [int]($match.Value -replace '\s+minute', '')
                     [int]$RetryDelay = $minutes * 60
+                    Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
+                } else {
+                    Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds (default)..." WARN
                 }
-
-                Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
                 Start-Sleep -Seconds $RetryDelay
                 $retryCount++
             } else {
-                # Handle Body possible filter error 
+                
                 if ($ErrorDetailsMessage.ErrorCode -eq "EPM000002E" -and $null -ne $Body) {
+                # Handle Body possible filter error 
                     Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
                     Write-Log "Please verify the filter body if present, as it could be the cause of this error code." ERROR
                     throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
-                } else {
-                    # Log error only if it's NOT the handled EPM00000AE error
+                } elseif ($ErrorDetailsMessage.ErrorCode -eq "EPM000012E") {
+                # Handle Error EPM000012E - "ErrorMessage: EPM cannot identify the following target computers that were previously selected."
+                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
+                    return
+                }
+                else {
+                # Log any other error
                     Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
                     throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
                 }
