@@ -23,7 +23,7 @@
     WIN11-1,PreProd
 
 .EXAMPLE
-    .\EPMsyncComputerGroup.ps1 -username "admin@epm.com" -setName "Default Set" -tenant "eu" -MappingCsvPath "C:\temp\policy_assignments.csv"
+    .\Sync-EPMEndpointGroup.ps1 -username "admin@epm.com" -setName "Default Set" -tenant "eu" -MappingCsvPath "C:\temp\policy_assignments.csv"
 
 .NOTES
     Author: Giulio Compagnone
@@ -56,14 +56,14 @@ param (
     })]
     [string]$MappingCsvPath,
 
-    [Parameter(Mandatory = $false, HelpMessage="Optional: EPM Endpoints Report for ID lookups")]
-    [ValidateScript({
-        if (-not (Test-Path $_ -PathType Leaf)) { 
-            throw "Path '$_' must be a valid file. Folders are not supported." 
-        }
-        $true
-    })]
-    [string]$LookupCsvPath,
+#    [Parameter(Mandatory = $false, HelpMessage="Optional: EPM Endpoints Report for ID lookups")]
+#    [ValidateScript({
+#        if (-not (Test-Path $_ -PathType Leaf)) { 
+#            throw "Path '$_' must be a valid file. Folders are not supported." 
+#        }
+#        $true
+#    })]
+#    [string]$LookupCsvPath,
 
     [Parameter(HelpMessage = "Enable logging to file and console")]
     [switch]$Log,
@@ -552,6 +552,29 @@ function ConvertTo-EpmGroupData {
     }
 }
 
+function Invoke-EPMMemberUpload {
+    param($Endpoints, $GroupId, $Override)
+
+    if ($Endpoints.Count -eq 1) {
+        $FilterString = "name EQ $($Endpoints[0])"
+    } else {
+        $FilterString = "name IN $($Endpoints -join ',')"
+    }
+    
+    $UpdateGroupBody = @{
+        "filter"   = $FilterString
+        "override" = [bool]$Override
+    } | ConvertTo-Json
+
+    $addMembers = Invoke-EPMRestMethod -Uri "$URI/Endpoints/Groups/$GroupID/members" -Method 'POST' -Headers $sessionHeader -Body $UpdateGroupBody
+    
+    if ($addMembers.count) {
+        Write-Log "Successfully uploaded: $($Response.count) members." INFO
+    } else {
+        Write-Log "API responded but no members were updated for Group $GroupId." WARN
+    }
+}
+
 ### Begin Script ###
 
 $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
@@ -641,7 +664,44 @@ ConvertTo-EpmGroupData -Path $MappingCsvPath -GroupLookup $EndpointsGroupMap | F
     }
     
     Write-Log "Adding $($_.Endpoints.Count) members to '$($_.GroupName)'." INFO
+
+    # Managing the filter lenght limitation = 5120
     
+    $CurrentBatch = [System.Collections.Generic.List[string]]::new()
+    $CurrentLength = 10 # Starting overhead for "name IN ()"
+    $IsFirstBatch = $true
+    $TotalProcessedCount = 0
+    $BatchNumber = 0
+    
+    foreach ($Endpoint in $_.Endpoints) {
+        $EntryLength = $Endpoint.Length + 1
+    
+        if (($CurrentLength + $EntryLength) -gt 5000) {
+            $BatchNumber++
+            Write-Log "Processing Batch $BatchNumber ($($CurrentBatch.Count) items). Overall: $TotalProcessedCount/$($_.Endpoints.Count)" INFO
+            Invoke-EPMMemberUpload -Endpoints $CurrentBatch -GroupId $GroupID -Override $IsFirstBatch
+        
+            $IsFirstBatch = $false
+            $CurrentBatch.Clear()
+            $CurrentLength = 10
+        }
+
+        $CurrentBatch.Add($Endpoint)
+        $CurrentLength += $EntryLength
+        $TotalProcessedCount++
+    }
+
+    if ($CurrentBatch.Count -gt 0) {
+        if ($BatchNumber -gt 0) {
+            $BatchNumber++
+            Write-Log "Processing Batch $BatchNumber ($($CurrentBatch.Count) items). Overall: $TotalProcessedCount/$($_.Endpoints.Count)" INFO
+        } else {
+            Write-Log "Processing $($_.Endpoints.Count)." INFO
+        }
+        Invoke-EPMMemberUpload -Endpoints $CurrentBatch -GroupId $GroupID -Override $IsFirstBatch
+    }    
+    
+    <#
     $EndpointsList = $_.Endpoints -join ','
     Write-Log "Endpoints: $EndpointsList" INFO
 
@@ -665,6 +725,7 @@ ConvertTo-EpmGroupData -Path $MappingCsvPath -GroupLookup $EndpointsGroupMap | F
     } else {
         Write-Log "Error uploading..." ERROR
     }
+    #>
 }
 
 
