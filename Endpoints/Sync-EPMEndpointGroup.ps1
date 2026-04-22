@@ -69,7 +69,11 @@ param (
     [switch]$Log,
 
     [Parameter(HelpMessage = "Specify the log file path")]
-    [string]$LogFolder
+    [string]$LogFolder,
+
+    [Parameter(HelpMessage = "Enable Debug log")]
+    [switch]$ShowDebug
+
 )
 
 ## Write-Host Wrapper and log management
@@ -101,7 +105,7 @@ function Write-Log {
     Write-Host $logMessage -ForegroundColor $ForegroundColor
 
     if ($log) {
-        Add-Content -Path $LogPath -Value $logMessage
+        Add-Content -Path $logFilePath -Value $logMessage
     }
 }
 
@@ -327,7 +331,7 @@ A custom object with the properties "setId" and "setName" representing the EPM s
 
     # Retrieve list of sets
     try {
-        Write-Log "Retrieving EPM Sets from: $managerURL" INFO
+        #Write-Log "Retrieving EPM Sets from: $managerURL" INFO
         $sets = Invoke-EPMRestMethod -URI "$managerURL/EPM/API/Sets" -Method 'GET' -Headers $Headers
 
         if (-not $sets -or -not $sets.Sets) {
@@ -506,7 +510,8 @@ function ConvertTo-EpmGroupData {
     $csvStream = Import-Csv -Path $Path -Header $headers
 
     foreach ($row in $csvStream) {
-        $computer = $row.ComputerName.Trim()
+        # Forcing uppercase
+        $computer = $row.ComputerName.ToUpper().Trim()
         if ([string]::IsNullOrWhiteSpace($computer)) {
             Write-Log "Skipping row with empty computer name." WARN
             continue
@@ -534,7 +539,7 @@ function ConvertTo-EpmGroupData {
         }
     }
 
-    Write-Log "Grouping complete. Found $($groupMap.Keys.Count) unique groups." INFO
+    Write-Log "Grouping complete. Found $($groupMap.Keys.Count) groups." INFO
 
     foreach ($entry in $groupMap.GetEnumerator()) {
         
@@ -556,15 +561,17 @@ function Invoke-EPMMemberUpload {
     param($Endpoints, $GroupId, $Override)
 
     if ($Endpoints.Count -eq 1) {
-        $FilterString = "name EQ $($Endpoints[0])"
+        $FilterString = "name EQ '$($Endpoints[0])'"
     } else {
-        $FilterString = "name IN $($Endpoints -join ',')"
+        $FilterString = "name IN '$($Endpoints -join "','")'"
     }
+
+    Write-Log "$FilterString" DEBUG
     
     $UpdateGroupBody = @{
         "filter"   = $FilterString
         "override" = [bool]$Override
-    } | ConvertTo-Json
+    } | ConvertTo-Json -Compress
 
     $addMembers = Invoke-EPMRestMethod -Uri "$URI/Endpoints/Groups/$GroupID/members" -Method 'POST' -Headers $sessionHeader -Body $UpdateGroupBody
     
@@ -608,8 +615,6 @@ $credential = Get-Credential -UserName $username -Message "Enter password for $u
 
 # Authenticate
 $login = Connect-EPM -credential $credential -epmTenant $tenant
-
-Write-Log $login.managerURL INFO
 
 # Create a session header with the authorization token
 $sessionHeader = @{
@@ -674,7 +679,7 @@ ConvertTo-EpmGroupData -Path $MappingCsvPath -GroupLookup $EndpointsGroupMap | F
     $BatchNumber = 0
     
     foreach ($Endpoint in $_.Endpoints) {
-        $EntryLength = $Endpoint.Length + 1
+        $EntryLength = $Endpoint.Length + 3 # for each Endpoint single quote and comma: '',
     
         if (($CurrentLength + $EntryLength) -gt 5000) {
             $BatchNumber++
