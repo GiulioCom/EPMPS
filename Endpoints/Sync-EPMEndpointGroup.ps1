@@ -563,7 +563,8 @@ function Invoke-EPMMemberUpload {
     if ($Endpoints.Count -eq 1) {
         $FilterString = "name EQ '$($Endpoints[0])'"
     } else {
-        $FilterString = "name IN '$($Endpoints -join "','")'"
+        #$FilterString = "name IN '$($Endpoints -join "','")'"
+        $FilterString = 'name IN "{0}"' -f ($Endpoints -join '","')
     }
 
     Write-Log "$FilterString" DEBUG
@@ -573,10 +574,12 @@ function Invoke-EPMMemberUpload {
         "override" = [bool]$Override
     } | ConvertTo-Json -Compress
 
-    $addMembers = Invoke-EPMRestMethod -Uri "$URI/Endpoints/Groups/$GroupID/members" -Method 'POST' -Headers $sessionHeader -Body $UpdateGroupBody
+    $addMembers = Invoke-EPMRestMethod -Uri "$URI/Endpoints/Groups/$GroupId/members" -Method 'POST' -Headers $sessionHeader -Body $UpdateGroupBody
     
-    if ($addMembers.count) {
-        Write-Log "Successfully uploaded: $($Response.count) members." INFO
+    if ($addMembers.count -ge $Endpoints.Count) {
+        Write-Log "Successfully uploaded: $($addMembers.count)/$($Endpoints.Count) members." INFO
+    } elseif ($addMembers.count -lt $Endpoints.Count) {
+        Write-Log "Successfully uploaded: $($addMembers.count)/$($Endpoints.Count) members." WARN
     } else {
         Write-Log "API responded but no members were updated for Group $GroupId." WARN
     }
@@ -681,7 +684,7 @@ ConvertTo-EpmGroupData -Path $MappingCsvPath -GroupLookup $EndpointsGroupMap | F
     foreach ($Endpoint in $_.Endpoints) {
         $EntryLength = $Endpoint.Length + 3 # for each Endpoint single quote and comma: '',
     
-        if (($CurrentLength + $EntryLength) -gt 5000) {
+        if (($CurrentLength + $EntryLength) -gt 5100) {
             $BatchNumber++
             Write-Log "Processing Batch $BatchNumber ($($CurrentBatch.Count) items). Overall: $TotalProcessedCount/$($_.Endpoints.Count)" INFO
             Invoke-EPMMemberUpload -Endpoints $CurrentBatch -GroupId $GroupID -Override $IsFirstBatch
