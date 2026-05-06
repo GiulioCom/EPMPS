@@ -19,7 +19,9 @@
 
 .PARAMETER AppDefCSV
     The Application Definition csv file having the following header:
-    Publisher,AppGroupName,CompareAs
+    AppGroupName,PropertyType,Value,CompareAs
+
+    PropertyType can be FileName or Publisher
 
     CompareAs is a string value based the official docs: https://docs.cyberark.com/epm/latest/en/content/webservices/applicationpatterns.htm#Publisher
     - exact
@@ -40,9 +42,9 @@
 .NOTES
     Author: Giulio Compagnone
     Company: CyberArk
-    Version: 0.2
+    Version: 0.3
     Created: 06/2025
-    Update: 04/2026
+    Update: 05/2026
 #>
 
 param (
@@ -178,8 +180,7 @@ param (
 
     while ($retryCount -lt $MaxRetries) {
         try {
-            $response = Invoke-RestMethod -Uri $Uri -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
-            return $response
+            return Invoke-RestMethod -Uri $Uri -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
         }
         catch {
             $ErrorDetailsMessage = $null
@@ -190,8 +191,25 @@ param (
                     $ErrorDetailsMessage = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction SilentlyContinue
                 }
                 catch {
-                    Write-Log "Failed to parse error message as JSON. Raw message: $($_.ErrorDetails.Message)" WARN
+                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - Failed to parse error message as JSON. Raw message: $($_.ErrorDetails.Message)" ERROR
+                    throw $_.ErrorDetails.Message
                 }
+            }
+
+            if ($null -eq $ErrorDetailsMessage) {
+                Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - $URI - HTTP Error: $($_.Exception.Message)" ERROR
+
+                if ($_.Exception.Response) {
+                    $responseStream = $_.Exception.Response.GetResponseStream()
+                    $reader = New-Object System.IO.StreamReader($responseStream)
+                    $errorBody = $reader.ReadToEnd()
+                    $reader.Close()
+
+                    if (-not [string]::IsNullOrWhiteSpace($errorBody)) {
+                        Write-Log "Server Error Detail: $errorBody" ERROR
+                    }
+                }
+                throw $_.Exception.Message
             }
 
             # Handle rate limit error (EPM00000AE)
@@ -214,7 +232,7 @@ param (
                 # Handle Body possible filter error 
                     Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
                     Write-Log "Please verify the filter body if present, as it could be the cause of this error code." ERROR
-                    throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
+                    throw "ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
                 } elseif ($ErrorDetailsMessage.ErrorCode -eq "EPM000012E") {
                 # Handle Error EPM000012E - "ErrorMessage: EPM cannot identify the following target computers that were previously selected."
                     Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
@@ -223,7 +241,7 @@ param (
                 else {
                 # Log any other error
                     Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
-                    throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
+                    throw "ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
                 }
             }
         }
@@ -479,7 +497,7 @@ $login = Connect-EPM -credential $credential -epmTenant $tenant
 # Create a session header with the authorization token
 $sessionHeader = @{
     "Authorization" = "basic $($login.auth)"
-#    "Content-Type" = "application/json"
+    "Content-Type" = "application/json"
 }
 
 # Get SetId
@@ -508,7 +526,7 @@ if (-not $FirstRow) {
 }
 
 $RawHeader = $FirstRow.psobject.properties.name
-$RequiredHeaders = @('Publisher', 'AppGroupName','CompareAs')
+$RequiredHeaders = @('AppGroupName', 'PropertyType','Value','CompareAs')
 
 foreach ($Header in $RequiredHeaders) {
     if ($Header -notin $RawHeader) {
@@ -523,57 +541,70 @@ foreach ($Header in $RequiredHeaders) {
 $AppLookup = @{}
 
 Import-Csv -Path $AppDefCSV | ForEach-Object {
-    $GroupName = $_.AppGroupName
-    $RawCompare = $_.CompareAs.Trim()
+    $GroupName = $_.AppGroupName.Trim()
+    $PropertyType = $_.PropertyType.Trim()
+    $Value = $_.Value.Trim()
+    $CompareAs = $_.CompareAs.Trim()
 
     if (-not $AppLookup.ContainsKey($GroupName)) {
         $AppLookup[$GroupName] = [System.Collections.Generic.List[object]]::new()
     }
 
-    $NumericCompare = if ($CompareAsMap.ContainsKey($RawCompare)) {
-        $CompareAsMap[$RawCompare]
+    $ValidProperties = @('FileName', 'Publisher')
+    
+    if ($PropertyType -notin $ValidProperties) {
+        Write-Log "Skipping unsupported PropertyType '$PropertyType'. Supported values are $($ValidProperties -join (','))." WARN
+        return
+    }
+
+    $CompareAsNum = if ($CompareAsMap.ContainsKey($CompareAs)) {
+        $CompareAsMap[$CompareAs]
     } else {
-        Write-Log "Invalid CompareAs value '$RawCompare' for publisher '$($_.Publisher)'. Defaulting to 0 (exacly)." WARN
+        Write-Log "Invalid CompareAs value '$CompareAs' for '$Value' (property '$PropertyType'). Defaulting to 0 (exactly)." WARN
         0 
     }
 
-    $PublisherData = [PSCustomObject]@{
-        PublisherName = $_.Publisher.Trim()
-        CompareAs = $NumericCompare
+    $AppData = [PSCustomObject]@{
+        Property = $PropertyType
+        Value = $Value
+        CompareAs = $CompareAsNum
     }
 
-    $AppLookup[$GroupName].Add($PublisherData)
+    $AppLookup[$GroupName].Add($AppData)
 }
 
 foreach ($Entry in $AppLookup.GetEnumerator()) {
     
     $TargetAppGroupName = $Entry.Key
-    $PublishersData = $Entry.Value
+    $AppData = $Entry.Value
 
-    $AppDefinitions = @(foreach ($Item in $PublishersData) {
-        
-        if ([string]::IsNullOrWhiteSpace($Item.PublisherName)) { continue }
+    $PropertyMap = @{
+        "FileName"  = "FILE_NAME"
+        "Publisher" = "PUBLISHER"
+    }
 
-        [PSCustomObject]@{
-            "internalId"= 0
-            "applicationType"= 3
-            "displayName"= ""
-            "description"= ""
-            "patterns"= @{
-                "PUBLISHER"= @{
-                "@type"= "Publisher"
-                "signatureLevel"= 2
-                "separator"= ";"
-                "caseSensitive"= $false
-                "compareAs"= [int]$Item.CompareAs
-                "isEmpty"= $false
-                "content"= $Item.PublisherName
-                }
-            }
-            "childProcess"= $true
-            "restrictOpenSaveFileDialog"= $true
+    $AppDefinitions = $AppData | ForEach-Object {
+        $item = $_
+
+        $propertyKey = $PropertyMap[$item.Property]
+
+        $pattern = @{
+            "@type"     = $item.Property
+            "compareAs" = [int]$item.CompareAs
+            "content"   = $item.Value
         }
-    }) 
+
+        if ($item.Property -eq "Publisher") {
+            $pattern["signatureLevel"] = 2
+        }
+        
+        [PSCustomObject]@{
+            "internalId"      = 0
+            "applicationType" = 3
+            "patterns"        = @{ $propertyKey = $pattern}
+            "childProcess"    = $true
+        }
+    } 
     
     # Search the App Group in the Map
     if ($AppGroupsMap.ContainsKey($TargetAppGroupName)) {
