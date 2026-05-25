@@ -30,7 +30,7 @@
     .\Remove-AgentPolicy.ps1 -Username "user@domain" -SetName "MySet" -Tenant "eu" -AllCustom
 #>
 
-[CmdletBinding(SupportsShouldProcess = $true, DefaultParameterSetName = 'ByCSV')]
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High', DefaultParameterSetName = 'ByCSV')]
 param (
     [Parameter(Mandatory = $true, HelpMessage="Please enter valid EPM username (For example: user@domain)")]
     [string]$username,
@@ -512,7 +512,6 @@ Function Get-AgentConf {
 
 
 # Logging setup
-#$scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
 $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 
 $loggingEnabled = $Log.IsPresent -or $PSBoundParameters.ContainsKey('LogFolder')
@@ -556,7 +555,8 @@ Write-Box "$($set.setName)"
 # General URI
 $URI = "$($login.managerURL)/EPM/API/Sets/$($set.setId)"
 
-$AgentConfIdsToRemove = [System.Collections.Generic.List[string]]::new()
+# Key = ID (string), Value = Name (string)
+$AgentConfIdsToRemove = [System.Collections.Generic.Dictionary[guid, string]]::new()
 
 $agentConfs = Get-AgentConf -URI $URI -SessionHeader $sessionHeader
 
@@ -564,33 +564,50 @@ switch ($PSCmdlet.ParameterSetName) {
     
     'ByCSV' {
         Write-Log -Message "Starting deletion via CSV list: $CSV" INFO
+
+        $targetNames = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
         
         Import-Csv -Path $CSV | ForEach-Object {
-
-            foreach ($agentConf in $agentConfs.Policies){
-                if ($agentConf.Name -eq $_) {
-                    $AgentConfIdsToRemove.Add($agentConf.PolicyId)
-                }
+            if (-not [string]::IsNullOrWhiteSpace($_.Name)) {
+                $null = $targetNames.Add($_.Name)
             }
+        }
+
+        foreach ($agentConf in $agentConfs.Policies){
+            if ($targetNames.Contains($agentConf.PolicyName)) {
+                $AgentConfIdsToRemove[$agentConf.PolicyId] = $agentConf.PolicyName
+                
+                # remove the object to keep track of the missing
+                $null = $targetNames.Remove($agentConf.PolicyName)
+            }
+        }
+
+        foreach ($missingName in $targetNames) {
+            Write-Log "Policy '$missingName' specified in CSV does not exist in this EPM Set."WARN
         }
     }
 
     'ByAllCustom' {
-        Write-Log "Starting deletion of ALL custom policies in Set: $SetName" INFO
+        Write-Log "Starting deletion of ALL custom policies in Set: $($set.setName)" INFO
         
         foreach ($agentConf in $agentConfs.Policies){
             # Exude the General Config. Generaconfig Id is the same as the Tenant SET ID
             if ($agentConf.PolicyId -ne $set.setId) {
-                $AgentConfIdsToRemove.Add($agentConf.PolicyId)
+                $AgentConfIdsToRemove[$agentConf.PolicyId] = $agentConf.PolicyName
             }
         }
     }
 }
 
-
-if ($PSCmdlet.ShouldProcess("EPM Policy ID: $targetPolicyId", "DELETE REST API Call")) {
+foreach ($kvp in $AgentConfIdsToRemove.GetEnumerator()) {
     
-    foreach ($Ids in $AgentConfIdsToRemove){
-        $getAgentConf = Invoke-EPMRestMethod "$URI/Policies/AgentConfiguration/$Ids" -Method "Delete" -Headers $sessionHeader
+    $policyId   = $kvp.Key
+    $policyName = $kvp.Value
+
+    $targetResource = "Agent Conf: '$policyName' (ID: $policyId)"
+    
+    if ($PSCmdlet.ShouldProcess($targetResource, "DELETE REST API Call")) {
+        Invoke-EPMRestMethod "$URI/Policies/AgentConfiguration/$policyId" -Method "Delete" -Headers $sessionHeader
+        Write-Log "$targetResource - Removed successfully" INFO
     }
 }

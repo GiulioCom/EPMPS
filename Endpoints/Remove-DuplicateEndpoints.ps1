@@ -25,13 +25,16 @@
 .PARAMETER EndpointReportCSV
     Mandatory: Report file
 
-.PARAMETER delete
+.PARAMETER Delete
     Whetever or not running the deletion of duplicates.
     Disabled By default.
 
 .PARAMETER ForceDelete
     Whetever or not force deletion of endpoint having status "Online".
     Disabled by default.
+
+.PARAMETER AdvSearch
+    For the duplicated endpoint identified, search for detailed information  getting the endpoints details using the RestAPI
 
 .PARAMETER ShowDebug
     Whetever or not show details info
@@ -76,6 +79,9 @@ param (
     })]
     [string]$EndpointReportCSV,
 
+    [Parameter(HelpMessage="Advanced Search")]
+    [switch]$AdvSearch = $false,
+    
     [Parameter(HelpMessage="Delete duplicated Endpoint")]
     [switch]$delete = $false,
 
@@ -190,8 +196,7 @@ param (
 
     while ($retryCount -lt $MaxRetries) {
         try {
-            $response = Invoke-RestMethod -Uri $Uri -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
-            return $response
+            return Invoke-RestMethod -Uri $Uri -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
         }
         catch {
             $ErrorDetailsMessage = $null
@@ -202,8 +207,25 @@ param (
                     $ErrorDetailsMessage = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction SilentlyContinue
                 }
                 catch {
-                    Write-Log "Failed to parse error message as JSON. Raw message: $($_.ErrorDetails.Message)" WARN
+                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - Failed to parse error message as JSON. Raw message: $($_.ErrorDetails.Message)" ERROR
+                    throw $_.ErrorDetails.Message
                 }
+            }
+
+            if ($null -eq $ErrorDetailsMessage) {
+                Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - $URI - HTTP Error: $($_.Exception.Message)" ERROR
+
+                if ($_.Exception.Response) {
+                    $responseStream = $_.Exception.Response.GetResponseStream()
+                    $reader = New-Object System.IO.StreamReader($responseStream)
+                    $errorBody = $reader.ReadToEnd()
+                    $reader.Close()
+
+                    if (-not [string]::IsNullOrWhiteSpace($errorBody)) {
+                        Write-Log "Server Error Detail: $errorBody" ERROR
+                    }
+                }
+                throw $_.Exception.Message
             }
 
             # Handle rate limit error (EPM00000AE)
@@ -226,7 +248,7 @@ param (
                 # Handle Body possible filter error 
                     Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
                     Write-Log "Please verify the filter body if present, as it could be the cause of this error code." ERROR
-                    throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
+                    throw "ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
                 } elseif ($ErrorDetailsMessage.ErrorCode -eq "EPM000012E") {
                 # Handle Error EPM000012E - "ErrorMessage: EPM cannot identify the following target computers that were previously selected."
                     Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
@@ -235,7 +257,7 @@ param (
                 else {
                 # Log any other error
                     Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
-                    throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
+                    throw "ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
                 }
             }
         }
@@ -405,29 +427,29 @@ A custom object with the properties "setId" and "setName" representing the EPM s
 
 ### Begin Script ###
 
-$scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
+$scriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
 
-## Prepare log folder and file
-# Set default log folder if not provided
-if ($log) {
-    if (-not $PSBoundParameters.ContainsKey('logFolder')) {
-        $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
-        $logFolder = Join-Path $scriptDirectory "log"
+# Logging setup
+$loggingEnabled = $Log.IsPresent -or $PSBoundParameters.ContainsKey('LogFolder')
+
+if ($loggingEnabled) {
+    
+    if (-not $PSBoundParameters.ContainsKey('LogFolder')) {
+        $logFolder = Join-Path $env:TEMP "$scriptName`_Logs"
     }
 
-    # Ensure the log folder exists
-    if (-not (Test-Path $logFolder)) {
-        New-Item -Path $logFolder -ItemType Directory -Force
+    if (-not (Test-Path -Path $logFolder -PathType Container)) {
+        $null = New-Item -Path $logFolder -ItemType Directory -Force
     }
 
-    # Create log file name based on timestamp and script name
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $logFileName = "$timestamp`_$scriptName.log"
     $logFilePath = Join-Path $logFolder $logFileName
 
-    Write-Log "Logging enabled. Log file: $logFilePath" INFO
+    Write-Log -Message "Logging enabled. Log file: $logFilePath" -Level INFO
 }
-##
+
+## Log file done
 
 Write-Box "$scriptName"
 ##
