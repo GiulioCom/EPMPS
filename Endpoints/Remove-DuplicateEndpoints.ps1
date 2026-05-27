@@ -1,57 +1,77 @@
 <#
 .SYNOPSIS
-    Identifies duplicate endpoints from a CSV report for safe removal.
+    Analyzes a CSV report to identify and securely prune stale, duplicated endpoints from the EPM console.
 
 .DESCRIPTION
-    This script processes the EPM Report for Endpoints to identify duplicate computer records. 
-    It executes the following safe-handling logic:
-    1. Agent ID Conflict Check: Scans for duplicated 'New Agent ID' values and excludes them 
-       from deletion. This prevents accidentally deleting multiple distinct endpoints that are 
-       incorrectly sharing the same Agent ID.
-    2. Duplicate Identification: Identifies duplicate computer names and lists the older records 
-       for potential deletion by comparing the 'Last Seen' dates.
-    3. Fail-Safe: If a record's 'Last Seen' date is malformed, missing, or empty, the script 
-       will safely ignore that record and it will not be processed for deletion.
+    This script processes an EPM Endpoint Report to identify duplicate computer records
+    and safely removes the obsolete entries via REST API.
+
+    Execution Flows:
+    1. Default Behavior: 
+       Identifies duplicated hostnames from the CSV, queries the EPM API, and compares 
+       the 'lastConnected' dates. It retains the single most recent connection and queues 
+       all older duplicates for deletion.
+       
+    2. Strict Hardware Matching (-RemoveBySN): 
+       Identifies duplicated hostnames from the CSV, queries the EPM API for duplicated hostnames
+       but applies a secondary filter using the hardware Serial Number. Deletion only occurs if both
+       the Hostname AND the Serial Number match. The oldest records in that specific hardware group are 
+       deleted, while endpoints with unique Serial Numbers are safely preserved.
+
+    Fail-Safes & Security:
+    * Native '-WhatIf' and '-Confirm' support prevents accidental mass deletions.
+    * If a record's 'lastConnected' date or ID is malformed/missing, it is safely 
+      ignored and excluded from the deletion queue.
+    * API deletion payloads are dynamically batched to respect HTTP constraints.    
 
 .PARAMETER username
-    The EPM username (e.g., user@domain).
+    The EPM username used for API authentication (e.g., user@domain).
 
 .PARAMETER setName
-    The name of the EPM set.
+    The specific name of the EPM set to query and modify.
 
 .PARAMETER tenant
     The EPM tenant name (e.g., eu, uk).
 
 .PARAMETER EndpointReportCSV
-    Mandatory: Report file
-
-.PARAMETER Delete
-    Whetever or not running the deletion of duplicates.
-    Disabled By default.
+    Mandatory. The file path to the generated EPM Endpoint Report CSV.
 
 .PARAMETER ForceDelete
-    Whetever or not force deletion of endpoint having status "Online".
-    Disabled by default.
+    Switch. Whether to forcefully delete duplicate endpoints that currently have an 
+    "Online" connection status. Disabled by default.
 
-.PARAMETER AdvSearch
-    For the duplicated endpoint identified, search for detailed information  getting the endpoints details using the RestAPI
+.PARAMETER RemoveBySN
+    Switch. Restricts the deletion logic to endpoints that share both a duplicated 
+    Hostname AND the exact same hardware Serial Number.
 
 .PARAMETER ShowDebug
     Whetever or not show details info
     Disabled by default.
 
 .EXAMPLE
-    1. .\Remove-DuplicateEndpoints.ps1 -EndpointReportCSV report_file_0.csv -ShowDebug
+    # EXAMPLE 1: The Security Best-Practice (Dry Run)
+    .\Remove-DuplicateEndpoints.ps1 -EndpointReportCSV "C:\reports\endpoints.csv" -WhatIf
+    
+    # Executes the script in simulation mode. It parses the CSV, queries the API, and 
+    # calculates the exact batching math, but outputs what *would* be deleted without 
+    # actually sending the DELETE commands to the API.
+
+.EXAMPLE
+    # EXAMPLE 2: Strict Hardware Deletion
+    .\Remove-DuplicateEndpoints.ps1 -EndpointReportCSV "report.csv" -RemoveBySN
+    
+    # Evaluates duplicates, but only deletes the older endpoints if the underlying 
+    # hardware Serial Numbers perfectly match.
 
 .NOTES
     Author: Giulio Compagnone
     Company: CyberArk
     Version: 2
     Created: 09/2025
-    Last Modified: 03/2026
+    Last Modified: 05/2026
 #>
 
-[CmdletBinding()]
+[CmdletBinding(SupportsShouldProcess = $true, ConfirmImpact = 'High')]
 param (
     [Parameter(HelpMessage="Please enter valid EPM username (For example: user@domain)")]
     [string]$username,
@@ -79,12 +99,9 @@ param (
     })]
     [string]$EndpointReportCSV,
 
-    [Parameter(HelpMessage="Advanced Search")]
-    [switch]$AdvSearch = $false,
+    [Parameter(HelpMessage="Enable to check the SerialNumber")]
+    [switch]$RemoveBySN = $false,
     
-    [Parameter(HelpMessage="Delete duplicated Endpoint")]
-    [switch]$delete = $false,
-
     [Parameter(HelpMessage="Force delete the endpoint from this list, even if the endpoint is currently connected.")]
     [switch]$ForceDelete = $false,
 
@@ -393,7 +410,7 @@ A custom object with the properties "setId" and "setName" representing the EPM s
         throw "No sets found. Cannot proceed."
     }
 
-    Write-Box "Available Sets:" INFO
+    Write-Box "Available Sets:"
 
     for ($i = 0; $i -lt $sets.Sets.Count; $i++) {
         Write-Log "$($i + 1). $($sets.Sets[$i].Name)" INFO DarkCyan
@@ -454,6 +471,17 @@ if ($loggingEnabled) {
 Write-Box "$scriptName"
 ##
 
+# Connect to EPM
+$credential = Get-Credential -UserName $username -Message "Enter password for $username"
+$login = Connect-EPM -credential $credential -epmTenant $tenant
+$sessionHeader = @{
+    "Authorization" = "basic $($login.auth)"
+}
+$set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
+Write-Box "$($set.setName)"
+
+$URI = "$($login.managerURL)/EPM/API/Sets/$($set.setId)"
+
 if (-not $delete){
     Write-Log "Analysis Mode Enabled." INFO DarkGreen
 } else {
@@ -462,16 +490,16 @@ if (-not $delete){
 
 Write-Log "Importing data from $EndpointReportCSV..." INFO
 
-# Validate CSV
-$FirstRow = Import-Csv -Path $EndpointReportCSV | Select-Object -First 1
-if (-not $FirstRow) {
-    $ErrorMessage = "Schema Error: $EndpointReportCSV is empty or missing valid headers."
+# Validate the CSV file
+$RawHeaderString = Get-Content -LiteralPath $EndpointReportCSV -TotalCount 1
+if ([string]::IsNullOrWhiteSpace($RawHeaderString)) {
+    $ErrorMessage = "Schema Error: $EndpointReportCSV is completely empty."
     Write-Log $ErrorMessage ERROR
     throw $ErrorMessage
 }
 
-$RawHeader = $FirstRow.psobject.properties.name
-$RequiredHeaders = @('Agent Id', 'Computer', 'New Agent Id', 'Agent Version')
+$RawHeader = $RawHeaderString -split ',' | ForEach-Object { $_.Trim('"') }
+$RequiredHeaders = @('Computer', 'New Agent Id')
 
 foreach ($Header in $RequiredHeaders) {
     if ($Header -notin $RawHeader) {
@@ -481,180 +509,176 @@ foreach ($Header in $RequiredHeaders) {
     }
 }
 
-# Calculate total rows
-$EndpointsTotalCount = 0
-$StreamReader = [System.IO.File]::OpenText($EndpointReportCSV)
-try {
-    while ($null -ne $StreamReader.ReadLine()) {
-        $EndpointsTotalCount++
-    }
-}
-finally {
-    $StreamReader.Dispose()
-}
-$EndpointsTotalCount = [Math]::Max(0, $EndpointsTotalCount - 1)
+$NewAgentIdList = [System.Collections.Generic.HashSet[guid]]::new()
+$NewAgentIdDuplicate = [System.Collections.Generic.HashSet[guid]]::new()
 
-Write-Log "Searching Duplicated by Agent ID..." INFO
+$HostnameList = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
+$HostnameDuplicate = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
 
-$NewAgentIdFrequency = [System.Collections.Generic.Dictionary[string, int]]::new()
-Import-Csv -Path $EndpointReportCSV | ForEach-Object {
-    $NewAgentId = $_."New Agent Id"
+# Scan the CSV to search duplicated hostname and duplpicated New Agent ID
 
-    if (-not [string]::IsNullOrWhiteSpace($NewAgentId) -or $NewAgentId -eq "00000000-0000-0000-0000-000000000000") {
-        if ($NewAgentIdFrequency.ContainsKey($NewAgentId)) {
-            $NewAgentIdFrequency[$NewAgentId]++
-        } else {
-            $NewAgentIdFrequency[$NewAgentId] = 1
-        }
-    }
-}
+foreach ($Row in (Import-Csv -LiteralPath $EndpointReportCSV)){
+    $Hostname = $Row.Computer
+    $NewAgentIDString = $Row.'New Agent Id'
 
-Write-Log "Searching for duplicated by Computer Name..." INFO
-
-# Define the Progress Bar
-$processedEndpoints = 0
-$updateInterval = [Math]::Max(1, [Math]::Floor($EndpointsTotalCount / 100)) # Update every 1%
-
-# Duplicates Counters
-$DuplicatedEndpoints = [System.Collections.Generic.List[PSCustomObject]]::new()
-$DuplicatedNewAgentIds  = [System.Collections.Generic.List[PSCustomObject]]::new()
-$LatestEndpoints = @{} # Key = Computer Name (Endpoint.name), Value = Endpoint Object
-
-Import-Csv -Path $EndpointReportCSV | ForEach-Object {    
-
-    $processedEndpoints++
-
-    if ($processedEndpoints % $updateInterval -eq 0) {
-        $Percent = (($processedEndpoints / $EndpointstotalCount) * 100)
-        Write-Progress -Activity "Processing Endpoints $EndpointsTotalCount" -Status "Processed: $processedEndpoints Endpoints" -PercentComplete $Percent
-    }
-    
-    $LastSeenDate = $_."Last Seen" -as [DateTime]
-    if (-not $LastSeenDate) {
-        Write-Log "'Last Seen' not valid is empty for Computer '$($_.Computer) - NewID: $($_."New Agent Id") (LastSeen: $($_."Last Seen"), Version: $($_."Agent Version"))'." ERROR
-        return
-    }
-    
-    $CurrentEndpoint = [PSCustomObject]@{
-        Computer     = $_.Computer
-        NewAgentId   = $_."New Agent Id"
-        AgentVersion = $_."Agent Version"
-        LastSeen     = $LastSeenDate
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($_."New Agent Id") -and $NewAgentIdFrequency[$_."New Agent Id"] -gt 1) {
-        $DuplicatedNewAgentIds.Add($CurrentEndpoint)
-    } else {
-
-        if ($LatestEndpoints.ContainsKey($CurrentEndpoint.Computer)) {
-            $ExistingEndpoint = $LatestEndpoints[$CurrentEndpoint.Computer]
-            
-            if ($CurrentEndpoint.LastSeen -gt $ExistingEndpoint.LastSeen) {
-                $DuplicatedEndpoints.Add($ExistingEndpoint)
-                $LatestEndpoints[$CurrentEndpoint.Computer] = $CurrentEndpoint
-            } else {
-                $DuplicatedEndpoints.Add($CurrentEndpoint)
+    $NewAgentID = [guid]::Empty
+    if ([guid]::TryParse($NewAgentIDString, [ref]$NewAgentID)) {
+        if ($NewAgentID -ne [guid]::Empty) {    
+            if (-not [string]::IsNullOrWhiteSpace($Hostname)) {
+                if (-not $HostnameList.Add($Hostname)) {
+                    [void]$HostnameDuplicate.Add($Hostname)
+                }
             }
-        } else {
-            $LatestEndpoints[$CurrentEndpoint.Computer] = $CurrentEndpoint
+
+            if (-not $NewAgentIDList.Add($NewAgentId)) {
+                [void]$NewAgentIdDuplicate.Add($NewAgentId)
+            }
         }
-    }
-}
-
-Write-Progress -Activity "Processing Endpoints $($EndpointsTotalCount)" -Status "Completed: $processedEndpoints Endpoints" -PercentComplete 100 -Completed
-
-Write-Log "Identified $($DuplicatedEndpoints.Count) duplicated endpoints to remove." INFO
-
-$IdList = foreach ($Dup in $DuplicatedEndpoints) {
-    $EndpointInfoMessage = "$($Dup.Computer) - NewID: $($Dup.NewAgentId) (LastSeen: $($Dup.LastSeen), Version: $($Dup.AgentVersion))"
-
-    if ($Dup.NewAgentId -eq "00000000-0000-0000-0000-000000000000") {
-        Write-Log "Agent not compatible with script. Use MyComputer instead: $EndpointInfoMessage" WARN
     } else {
-        Write-Log "To be deleted: $EndpointInfoMessage" DEBUG
-        $Dup.NewAgentId
+        Write-Log "Skipped row with invalid or missing New Agent ID for Hostname: $Hostname" ERROR
     }
 }
-
-Write-Log "Identified $($IdList.Count) duplicated endpoints to remove." INFO
-
-if ($delete){
-    if ($IdList.Count -gt 0) {
-
-        # Connect to EPM
-        $credential = Get-Credential -UserName $username -Message "Enter password for $username"
-        $login = Connect-EPM -credential $credential -epmTenant $tenant
-        $sessionHeader = @{
-            "Authorization" = "basic $($login.auth)"
-        }
-        $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
-        Write-Box "$($set.setName)"        
         
-        # There is a limit to 10000 char for the filter string
-        # (https://docs.cyberark.com/epm/latest/en/content/webservices/endpoint-apis/delete-endpoint.htm#Bodyparameters)
-        # Considering the following data:
-        # GUID ID	36 characters
-        # Separator (,)	1 character
-        # Total per ID	37 characters
-        # Prefix (id IN )	6 characters
+Write-Log "Identified $($HostnameDuplicate.Count) Hostname duplicate of a total of $($HostnameList.Count) Hostname in $EndpointReportCSV" INFO
+Write-Log "Identified $($NewAgentIdDuplicate.Count) New Agent ID duplicate of a total of $($NewAgentIdList.Count) New Agent ID in $EndpointReportCSV" INFO
 
-        $MaxBatchSize = 250
+if ($NewAgentIdDuplicate.Count -gt 0) {
+    $JoinedDuplicates = $NewAgentIdDuplicate -join "`n"
+    $ErrorMessage = "CRITICAL: Found Duplicated 'New Agent ID'(s). State corrupted. Please verify the following list and open a support case:`n$JoinedDuplicates"
+    Write-Log $ErrorMessage ERROR
+    throw $ErrorMessage
+}
 
-        for ($i = 0; $i -lt $IdList.Count; $i += $MaxBatchSize) {
-    
-            $Batch = $IdList[$i..($i + $MaxBatchSize - 1)]
+$RemoveIDs = [System.Collections.Generic.List[guid]]::new()
 
-            if (-not $Batch) {
-                Write-Log "Error: Failed to slice batch starting at index $i. Skipping." ERROR
-                continue
+if ($RemoveBySN){
+    # Search the duplicate in the console
+    foreach ($Hostname in $HostnameDuplicate) {
+            
+        $FilterBody = @{
+            "filter" = "name EQ $Hostname"
+        } | ConvertTo-Json
+            
+        $EndpointsInventory = Invoke-EPMRestMethod -Uri "$URI/endpoints/inventory/Hardware" -Method 'POST' -Headers $sessionHeader -Body $FilterBody
+
+        if (-not $EndpointsInventory) {
+            Write-Log "$Hostname not found in EPM Console" WARN
+            continue
+        }
+
+        if ($EndpointsInventory.Count -lt 2) {
+            Write-Log "$Hostname retuned from the EPM Console is not duplicated" WARN
+            continue
+        }
+
+        $EndpointsBySN = [System.Collections.Generic.Dictionary[string, System.Collections.Generic.List[PSCustomObject]]]::New([System.StringComparer]::OrdinalIgnoreCase)
+
+        foreach ($Endpoint in $EndpointsInventory) {
+            $SN = $Endpoint.inventory.hardware.machineInfo.serialNumber
+
+            if (-not $EndpointsBySN.ContainsKey($SN)) {
+                $EndpointsBySN[$SN] = [System.Collections.Generic.List[psobject]]::new()
             }
+            $EndpointsBySN[$SN].Add($Endpoint)
+        }
 
-            $FilterString = "id IN " + ($Batch -join ",")
+        foreach ($SN in $EndpointsBySN.Keys) {
+            $SNGroup = $EndpointsBySN[$SN]
 
-            if ($FilterString.Length -gt 10000) {
-                Write-Log "Filter string length $($FilterString.Length) exceeded 10.000 chars. Aborting." ERROR
-                continue
+            if ($SNGroup.Count -gt 1) {
+                $sortedGroup = $SNGroup | Sort-Object { $_.lastConnected -as [datetime]} -Descending
+
+                Write-Log "Endpoint to keep: $Hostname - New Agent ID: $($SortedGroup[0].id)" INFO
+
+                for ($i = 1; $i -lt $SortedGroup.Count; $i++) {
+                    [void]$RemoveIDs.Add($SortedGroup[$i].id)
+
+                    Write-Log "Endpoint to remove: $Hostname - New Agent ID: $($SortedGroup[$i].id)" WARN
+                }
             }
+        }
+    }
+} else {
     
+    foreach ($Hostname in $HostnameDuplicate) {
+            
+        $FilterBody = @{
+            "filter" = "name EQ $Hostname"
+        } | ConvertTo-Json
+            
+        $EndpointsLive = Invoke-EPMRestMethod -Uri "$URI/Endpoints/search" -Method 'POST' -Headers $sessionHeader -Body $FilterBody
+
+        if ($EndpointsLive.returnedCount -eq 0) {
+            Write-Log "$Hostname not found in EPM Console" WARN
+            continue
+        }
+
+        if ($EndpointsLive.returnedCount -lt 2) {
+            Write-Log "$Hostname retuned from the EPM Console is not duplicated" WARN
+            continue
+        }
+
+        if ($EndpointsLive.returnedCount -gt 1) {
+            $sortedGroup = $EndpointsLive.endpoints | Sort-Object { $_.lastConnected -as [datetime]} -Descending
+            Write-Log "Endpoint to keep: $Hostname - New Agent ID: $($SortedGroup[0].id)" INFO
+
+            for ($i = 1; $i -lt $SortedGroup.Count; $i++) {
+                [void]$RemoveIDs.Add($SortedGroup[$i].id)
+                Write-Log "Endpoint to remove: $Hostname - New Agent ID: $($SortedGroup[$i].id)" WARN
+            }
+        }
+    }
+}
+
+if ($RemoveIDs.Count -gt 0) {
+
+    Write-Log "Preparing to delete $($RemoveIDs.Count) Endpoints" WARN
+
+    # There is a limit to 10000 char for the filter string
+    # (https://docs.cyberark.com/epm/latest/en/content/webservices/endpoint-apis/delete-endpoint.htm#Bodyparameters)
+    # Considering the following data:
+    # GUID ID	36 characters
+    # Separator (,)	1 character
+    # Total per ID	37 characters
+    # Prefix (id IN )	6 characters
+
+    $MaxBatchSize = 250
+
+    for ($i = 0; $i -lt $RemoveIDs.Count; $i += $MaxBatchSize) {
+
+        $RemainingItems = $RemoveIDs.Count - $i
+        $TakeCount = [Math]::Min($MaxBatchSize, $RemainingItems)
+        $Batch = $RemoveIDs.GetRange($i, $TakeCount)        
+
+        $FilterString = "id IN " + ($Batch -join ",")
+            
+        if ($PSCmdlet.ShouldProcess($FilterString, "DELETE Endpoints")) {
+
             $DeleteBody = @{
                 "filter" = $FilterString
             }
+
             if ($ForceDelete) {
                 $DeleteBody.force = $true
             }
-            $DeleteBody = $DeleteBody | ConvertTo-Json
 
-            $Result = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/delete" -Method 'POST' -Headers $sessionHeader -Body $DeleteBody
+            $DeleteBody = $DeleteBody | ConvertTo-Json -Compress
+
+            $Result = Invoke-EPMRestMethod -Uri "$URI/Endpoints/delete" -Method 'POST' -Headers $sessionHeader -Body $DeleteBody
 
             if ($Result.statuses.psobject.Properties.Count -gt 0) {
-               foreach ($property in $Result.statuses.psobject.Properties) {
+                foreach ($property in $Result.statuses.psobject.Properties) {
                     if ($property.Name -eq "OK") {
                         Write-Log "Deleted: $($property.Value) - Status: $($property.Name)" INFO
                     } else {
                         Write-Log "Not Deleted: $($property.Value) - Status: $($property.Name)" WARN
                     }
                 }
-            } else { Write-Log "Not Deleted: $($Batch.Count) - Status: ID not presente or valid." WARN }
+            } else {
+                Write-Log "Not Deleted: $($Batch.Count) - Status: ID not presente or valid." WARN
+            }
         }
-    } else {
-        Write-Log "No Duplicated Endpoints" WARN
     }
 } else {
-    Write-Log "Demo Mode - No deletion" WARN
-}
-
-# Show the duplicated New Agent ID
-$DuplicatedAgentIdKeys = $NewAgentIdFrequency.Keys | Where-Object {
-    $NewAgentIdFrequency[$_] -gt 1
-}
-
-if ($DuplicatedAgentIdKeys.Count -gt 0) {
-    Write-Log "Found $($DuplicatedAgentIdKeys.Count) unique Agent IDs that are being shared by multiple computers!" WARN
-    
-    # Optional: Log the specific IDs to the console or a file
-    foreach ($Id in $DuplicatedAgentIdKeys) {
-        Write-Log " - Agent ID [$Id] is shared by $($NewAgentIdFrequency[$Id]) computers." WARN
-    }
-} else {
-    Write-Log "No duplicate Agent IDs found. All registered agents are unique." INFO
+    Write-Log "No Duplicated Endpoints" INFO
 }
