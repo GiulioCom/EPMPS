@@ -211,11 +211,14 @@ param (
 
     $retryCount = 0
 
+    $hErrorMsg = "API call failed at line $($MyInvocation.ScriptLineNumber)"
+
     while ($retryCount -lt $MaxRetries) {
         try {
             return Invoke-RestMethod -Uri $Uri -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
         }
         catch {
+            $retryCount++
             $ErrorDetailsMessage = $null
 
             # Extract API error details if available
@@ -224,65 +227,96 @@ param (
                     $ErrorDetailsMessage = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction SilentlyContinue
                 }
                 catch {
-                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - Failed to parse error message as JSON. Raw message: $($_.ErrorDetails.Message)" ERROR
-                    throw $_.ErrorDetails.Message
+                    Write-Log "$hErrorMsg - Failed to parse error message as JSON. Raw message: $($_.ErrorDetails.Message)" ERROR
+                   # throw $_.ErrorDetails.Message
                 }
             }
 
+            # SCENARIO A: Network Failure (Connection closed, DNS, Timeout)
             if ($null -eq $ErrorDetailsMessage) {
-                Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - $URI - HTTP Error: $($_.Exception.Message)" ERROR
+                Write-Log "$hErrorMsg - $URI - HTTP Error: $($_.Exception.Message)" ERROR
 
                 if ($_.Exception.Response) {
-                    $responseStream = $_.Exception.Response.GetResponseStream()
-                    $reader = New-Object System.IO.StreamReader($responseStream)
-                    $errorBody = $reader.ReadToEnd()
-                    $reader.Close()
+                    try {
+                        $responseStream = $_.Exception.Response.GetResponseStream()
+                        $reader = [System.IO.StreamReader]::new($responseStream)
+                        $errorBody = $reader.ReadToEnd()
+                        $reader.Close()
 
-                    if (-not [string]::IsNullOrWhiteSpace($errorBody)) {
-                        Write-Log "Server Error Detail: $errorBody" ERROR
+                        if (-not [string]::IsNullOrWhiteSpace($errorBody)) {
+                            Write-Log "Server Error Detail: $errorBody" ERROR
+                        }
+                    } catch {
+                        Write-Log "Stream unreadable (Connection severed)." ERROR
                     }
                 }
-                throw $_.Exception.Message
+                
+                $TransientSleep = 5 * $retryCount # Exponential network backoff
+                Write-Log "Retrying network connection ($retryCount/$MaxRetries) in $TransientSleep seconds..." WARN
+                Start-Sleep -Seconds $TransientSleep
+                continue # Jumps to the next iteration of the while loop
+
+            }
+
+            $EPMErrorCode = ""
+            $EPMErrorMsg  = ""
+
+            if ($null -ne $ErrorDetailsMessage) {
+                # Use .PSObject.Properties to safely check if the property exists
+                if ($ErrorDetailsMessage.PSObject.Properties.Match('ErrorCode').Count -gt 0) {
+                    $EPMErrorCode = $ErrorDetailsMessage.ErrorCode
+                }
+                if ($ErrorDetailsMessage.PSObject.Properties.Match('ErrorMessage').Count -gt 0) {
+                    $EPMErrorMsg = $ErrorDetailsMessage.ErrorMessage
+                }
             }
 
             # Handle rate limit error (EPM00000AE)
-            if ($ErrorDetailsMessage -and $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
+            if ($EPMErrorCode -eq "EPM00000AE") {
                 # Regex pattern to find numbers followed by "minute(s)"
                 $pattern = "\d+\s+minute"
-                $match = [regex]::Match($ErrorDetailsMessage.ErrorMessage, $pattern)
+                $match = [regex]::Match($EPMErrorMsg, $pattern)
                 if ($match.Success) {
                     $minutes = [int]($match.Value -replace '\s+minute', '')
                     [int]$RetryDelay = $minutes * 60
-                    Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
+                    Write-Log "$EPMErrorMsg - Retrying in $RetryDelay seconds..." WARN
                 } else {
-                    Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds (default)..." WARN
+                    Write-Log "$EPMErrorMsg - Retrying in $RetryDelay seconds (default)..." WARN
                 }
                 Start-Sleep -Seconds $RetryDelay
-                $retryCount++
-            } else {
-                
-                if ($ErrorDetailsMessage.ErrorCode -eq "EPM000002E" -and $null -ne $Body) {
-                # Handle Body possible filter error 
-                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
-                    Write-Log "Please verify the filter body if present, as it could be the cause of this error code." ERROR
-                    throw "ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
-                } elseif ($ErrorDetailsMessage.ErrorCode -eq "EPM000012E") {
-                # Handle Error EPM000012E - "ErrorMessage: EPM cannot identify the following target computers that were previously selected."
-                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
-                    return
-                }
-                else {
-                # Log any other error
-                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
-                    throw "ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
-                }
+                continue
             }
+                
+            if ($EPMErrorCode -eq "EPM000002E" -and $null -ne $Body) {
+                # Handle Body possible filter error 
+                $MSG = "ErrorCode: $EPMErrorCode, ErrorMessage: $EPMErrorMsg"
+                Write-Log "$hErrorMsg - $MSG" ERROR
+                Write-Log "Please verify the filter body if present, as it could be the cause of this error code." ERROR
+                throw $MSG
+            }
+            
+            if ($EPMErrorCode -eq "EPM000012E") {
+                # Handle Error EPM000012E - "ErrorMessage: EPM cannot identify the following target computers that were previously selected."
+                Write-Log "$hErrorMsg - ErrorCode: $EPMErrorCode, ErrorMessage: $EPMErrorMsg" ERROR
+                return
+            }
+            
+            # Log any other error
+            if ([string]::IsNullOrWhiteSpace($EPMErrorCode)) {
+                $MSG = "Unhandled API Error: $($_.Exception.Message)"
+            } else {
+                $MSG = "ErrorCode: $EPMErrorCode, ErrorMessage: $EPMErrorMsg"
+            }
+            
+            Write-Log "$hErrorMsg - $MSG" ERROR
+            throw $MSG
         }
     }
 
     # If all retries fail, log and throw an error
-    Write-Log "API call failed after $MaxRetries retries. URI: $URI" ERROR
-    throw "API call failed after $MaxRetries retries."
+    $MSG = "API call failed after $MaxRetries retries. URI: $URI"
+    Write-Log $MSG ERROR
+    throw $MSG
 }
 
 ## EPM RestAPI Wrappers
@@ -482,12 +516,6 @@ Write-Box "$($set.setName)"
 
 $URI = "$($login.managerURL)/EPM/API/Sets/$($set.setId)"
 
-if (-not $delete){
-    Write-Log "Analysis Mode Enabled." INFO DarkGreen
-} else {
-    Write-Log "Delete Mode Enabled." INFO DarkGreen
-}
-
 Write-Log "Importing data from $EndpointReportCSV..." INFO
 
 # Validate the CSV file
@@ -553,8 +581,16 @@ $RemoveIDs = [System.Collections.Generic.List[guid]]::new()
 
 if ($RemoveBySN){
     # Search the duplicate in the console
+    Write-Log "Remove by Serial Number" INFO
+
+    $counter = 0
+    $total = $HostnameDuplicate.Count
+    
     foreach ($Hostname in $HostnameDuplicate) {
-            
+    
+        $counter++
+        Write-Log "$counter/$total - Processing $Hostname" INFO
+
         $FilterBody = @{
             "filter" = "name EQ $Hostname"
         } | ConvertTo-Json
