@@ -579,12 +579,12 @@ if ($NewAgentIdDuplicate.Count -gt 0) {
 
 $RemoveIDs = [System.Collections.Generic.List[guid]]::new()
 
+$counter = 0
+$total = $HostnameDuplicate.Count
+
 if ($RemoveBySN){
     # Search the duplicate in the console
-    Write-Log "Remove by Serial Number" INFO
-
-    $counter = 0
-    $total = $HostnameDuplicate.Count
+    Write-Log "Checking Duplicate also by Serial Number" INFO
     
     foreach ($Hostname in $HostnameDuplicate) {
     
@@ -636,8 +636,13 @@ if ($RemoveBySN){
     }
 } else {
     
+    Write-Log "Checking Duplicate." INFO
+    
     foreach ($Hostname in $HostnameDuplicate) {
-            
+        
+        $counter++
+        Write-Log "$counter/$total - Processing $Hostname" INFO
+
         $FilterBody = @{
             "filter" = "name EQ $Hostname"
         } | ConvertTo-Json
