@@ -20,9 +20,11 @@
     File: EPMBaseFunc.ps1
     Author: Giulio Compagnone
     Company: CyberArk
-    Version: 2
+    Version: 3
     Created: 05/2023
-    Last Modified: 09/2025
+    Last Modified: 07/2026
+
+    # 3.0: Adding the ISPSS Auth
 #>
 
 param (
@@ -36,6 +38,12 @@ param (
     [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch")]
     [string]$tenant,
 
+    [Parameter(HelpMessage="Please enter valid ISPSS SubDomanin")]
+    [string]$SubDomain,
+    
+    [Parameter(HelpMessage="Please enter valid ISPSS OATH alias")]
+    [string]$AppAlias,
+    
     [Parameter(HelpMessage = "Enable logging to file and console")]
     [switch]$log,
 
@@ -183,12 +191,14 @@ param (
 
     $retryCount = 0
 
+    $hErrorMsg = "API call failed at line $($MyInvocation.ScriptLineNumber)"
+
     while ($retryCount -lt $MaxRetries) {
         try {
-            $response = Invoke-RestMethod -Uri $Uri -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
-            return $response
+            return Invoke-RestMethod -Uri $Uri -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
         }
         catch {
+            $retryCount++
             $ErrorDetailsMessage = $null
 
             # Extract API error details if available
@@ -197,48 +207,97 @@ param (
                     $ErrorDetailsMessage = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction SilentlyContinue
                 }
                 catch {
-                    Write-Log "Failed to parse error message as JSON. Raw message: $($_.ErrorDetails.Message)" WARN
+                    Write-Log "$hErrorMsg - Failed to parse error message as JSON. Raw message: $($_.ErrorDetails.Message)" ERROR
+                   # throw $_.ErrorDetails.Message
+                }
+            }
+
+            # SCENARIO A: Network Failure (Connection closed, DNS, Timeout)
+            if ($null -eq $ErrorDetailsMessage) {
+                Write-Log "$hErrorMsg - $URI - HTTP Error: $($_.Exception.Message)" ERROR
+
+                if ($_.Exception.Response) {
+                    try {
+                        $responseStream = $_.Exception.Response.GetResponseStream()
+                        $reader = [System.IO.StreamReader]::new($responseStream)
+                        $errorBody = $reader.ReadToEnd()
+                        $reader.Close()
+
+                        if (-not [string]::IsNullOrWhiteSpace($errorBody)) {
+                            Write-Log "Server Error Detail: $errorBody" ERROR
+                        }
+                    } catch {
+                        Write-Log "Stream unreadable (Connection severed)." ERROR
+                    }
+                }
+                
+                $TransientSleep = 5 * $retryCount # Exponential network backoff
+                Write-Log "Retrying network connection ($retryCount/$MaxRetries) in $TransientSleep seconds..." WARN
+                Start-Sleep -Seconds $TransientSleep
+                continue # Jumps to the next iteration of the while loop
+
+            }
+
+            $EPMErrorCode = ""
+            $EPMErrorMsg  = ""
+
+            if ($null -ne $ErrorDetailsMessage) {
+                $errorObject = @($ErrorDetailsMessage)[0]
+
+                if ($null -ne $errorObject.ErrorCode) {
+                    $EPMErrorCode = $errorObject.ErrorCode
+                }
+                if ($null -ne $errorObject.ErrorMessage) {
+                    $EPMErrorMsg = $errorObject.ErrorMessage
                 }
             }
 
             # Handle rate limit error (EPM00000AE)
-            if ($ErrorDetailsMessage -and $ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
+            if ($EPMErrorCode -eq "EPM00000AE") {
                 # Regex pattern to find numbers followed by "minute(s)"
                 $pattern = "\d+\s+minute"
-                $match = [regex]::Match($ErrorDetailsMessage.ErrorMessage, $pattern)
+                $match = [regex]::Match($EPMErrorMsg, $pattern)
                 if ($match.Success) {
                     $minutes = [int]($match.Value -replace '\s+minute', '')
                     [int]$RetryDelay = $minutes * 60
-                    Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds..." WARN
+                    Write-Log "$EPMErrorMsg - Retrying in $RetryDelay seconds..." WARN
                 } else {
-                    Write-Log "$($ErrorDetailsMessage.ErrorMessage) - Retrying in $RetryDelay seconds (default)..." WARN
+                    Write-Log "$EPMErrorMsg - Retrying in $RetryDelay seconds (default)..." WARN
                 }
                 Start-Sleep -Seconds $RetryDelay
-                $retryCount++
-            } else {
-                
-                if ($ErrorDetailsMessage.ErrorCode -eq "EPM000002E" -and $null -ne $Body) {
-                # Handle Body possible filter error 
-                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
-                    Write-Log "Please verify the filter body if present, as it could be the cause of this error code." ERROR
-                    throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
-                } elseif ($ErrorDetailsMessage.ErrorCode -eq "EPM000012E") {
-                # Handle Error EPM000012E - "ErrorMessage: EPM cannot identify the following target computers that were previously selected."
-                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
-                    return
-                }
-                else {
-                # Log any other error
-                    Write-Log "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)" ERROR
-                    throw "API call failed at line $($MyInvocation.ScriptLineNumber) - ErrorCode: $($ErrorDetailsMessage.ErrorCode), ErrorMessage: $($ErrorDetailsMessage.ErrorMessage)"
-                }
+                continue
             }
+                
+            if ($EPMErrorCode -eq "EPM000002E" -and $null -ne $Body) {
+                # Handle Body possible filter error 
+                $MSG = "ErrorCode: $EPMErrorCode, ErrorMessage: $EPMErrorMsg"
+                Write-Log "$hErrorMsg - $MSG" ERROR
+                Write-Log "Please verify the filter body if present, as it could be the cause of this error code." ERROR
+                throw $MSG
+            }
+            
+            if ($EPMErrorCode -eq "EPM000012E") {
+                # Handle Error EPM000012E - "ErrorMessage: EPM cannot identify the following target computers that were previously selected."
+                Write-Log "$hErrorMsg - ErrorCode: $EPMErrorCode, ErrorMessage: $EPMErrorMsg" ERROR
+                return
+            }
+            
+            # Log any other error
+            if ([string]::IsNullOrWhiteSpace($EPMErrorCode)) {
+                $MSG = "Unhandled API Error: $($_.Exception.Message)"
+            } else {
+                $MSG = "ErrorCode: $EPMErrorCode, ErrorMessage: $EPMErrorMsg"
+            }
+            
+            Write-Log "$hErrorMsg - $MSG" ERROR
+            throw $MSG
         }
     }
 
     # If all retries fail, log and throw an error
-    Write-Log "API call failed after $MaxRetries retries. URI: $URI" ERROR
-    throw "API call failed after $MaxRetries retries."
+    $MSG = "API call failed after $MaxRetries retries. URI: $URI"
+    Write-Log $MSG ERROR
+    throw $MSG
 }
 
 ## EPM RestAPI Wrappers
@@ -301,26 +360,123 @@ A custom object with the properties "managerURL" and "auth" representing the EPM
     }
 }
 
-function Get-EPMSetID {
 <#
 .SYNOPSIS
-Retrieves the ID and name of an EPM set based on the provided parameters.
-
+    Connects to CyberArk EPM using the ISPSS OIDC/OAuth portal.
 .DESCRIPTION
-This function interacts with the EPM API to retrieve information about sets based on the specified parameters.
-
-.PARAMETER managerURL
-The URL of the EPM manager.
-
-.PARAMETER Headers
-The authorization headers.
-
-.PARAMETER setName
-The name of the EPM set to retrieve.
-
+    Authenticates against CyberArk Identity ISPSS via client_credentials, retrieves an access token,
+    and queries the tenant's base manager URL. Keeps credentials secure in memory using byte arrays.
+.PARAMETER credential
+    The PSCredential object representing the client ID (Username) and client secret (Password).
+.PARAMETER epmTenant
+    The EPM tenant name (e.g., eu, uk).
+.PARAMETER SubDomain
+    The ISPSS identity portal subdomain.
+.PARAMETER AppAlias
+    The unique OAuth application alias configuration name.
 .OUTPUTS
-A custom object with the properties "setId" and "setName" representing the EPM set information.
+    [PSCustomObject] containing 'managerURL' (string) and 'auth' (string).
+
 #>
+function Connect-EPM-ISPSS {
+    param (
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNull()]
+        [pscredential]$credential,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch")]
+        [string]$epmTenant,
+
+        [Parameter(Mandatory = $true)]
+        [ValidatePattern('^[a-zA-Z0-9\-]+$')]
+        [string]$SubDomain,
+
+        [Parameter(Mandatory = $true)]
+        [ValidatePattern('^[a-zA-Z0-9\-]+$')]
+        [string]$AppAlias
+    )
+
+    $access_token = ""
+    $tenantUrl = ""
+    
+    # Login ISPSS
+    try {
+        $url = "https://{0}.id.cyberark.cloud/oauth2/token/{1}" -f $SubDomain, $AppAlias
+
+        $rawCreds = "{0}:{1}" -f $credential.UserName, $credential.GetNetworkCredential().Password
+        $base64   = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($rawCreds))
+        
+        # Clean up the clear text variable
+        $rawCreds = $null
+        
+        $headers = @{ "Authorization" = "Basic $base64" }
+        $body    = @{ grant_type = "client_credentials" }
+
+        $login = Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $body -ContentType "application/x-www-form-urlencoded"
+
+        # Ensure the response contains the expected fields
+        if (-not $login -or -not $login.access_token -or -not $login.token_type -or -not $login.expires_in) {
+            $msg = "EPM authentication failed on {0}: Missing expected response fields." -f $url
+            Write-Log $msg ERROR
+            throw $msg
+        }
+
+        $access_token = $login.access_token
+
+    }
+    catch {
+        $msg = "Failed to connect to EPM tenant: {0}. Error: {1}" -f $url, $_.Exception.Message
+        Write-Log $msg ERROR
+        throw $msg
+    }
+
+    # Get the tenant URL
+    try {
+        $url = "https://api-{0}.epm.cyberark.cloud/epm/api/accounts/tenanturl" -f $epmTenant
+        $headers = @{ "Authorization" = "Bearer $access_token" }
+
+        $tenant = Invoke-RestMethod -Uri $url -Method GET -Headers $headers
+
+        # Ensure the response contains the expected fields
+        if (-not $tenant -or -not $tenant.tenantUrl) {
+            $msg = "Failed get the tenant URL on {0}: Missing expected response fields." -f $url
+            Write-Log $msg ERROR
+            throw $msg
+        }
+
+        $tenantUrl = $tenant.tenantUrl
+
+    }
+    catch {
+        $msg = "Failed to connect to EPM tenant: {0}. Error: {1}" -f $url, $_.Exception.Message
+        Write-Log $msg ERROR
+        throw $msg
+    }
+
+    # Return a custom object with connection information
+    return [PSCustomObject]@{
+        managerURL = $tenantUrl
+        auth       = $access_token
+    }
+}
+
+<#
+.SYNOPSIS
+    Retrieves the ID and name of an EPM set based on the provided parameters.
+.DESCRIPTION
+    Interacts with the EPM API to retrieve sets. If a name is provided, it extracts it cleanly.
+    Otherwise, it provides an interactive prompt for the user.
+.PARAMETER managerURL
+    The base URL of the EPM manager.
+.PARAMETER Headers
+    The hashtable containing the Authorization token.
+.PARAMETER setName
+    The exact name of the EPM set to retrieve.
+.OUTPUTS
+    [PSCustomObject] containing 'setId' and 'setName'.
+#>
+function Get-EPMSetID {
     param (
         [Parameter(Mandatory = $true)]
         [string]$managerURL,
@@ -333,67 +489,68 @@ A custom object with the properties "setId" and "setName" representing the EPM s
 
     # Retrieve list of sets
     try {
-        #Write-Log "Retrieving EPM Sets from: $managerURL" INFO
-        $sets = Invoke-EPMRestMethod -URI "$managerURL/EPM/API/Sets" -Method 'GET' -Headers $Headers
+        $uri = "{0}/EPM/API/Sets" -f $managerURL.TrimEnd('/')
+        $setsResponse = Invoke-EPMRestMethod -URI $uri -Method 'GET' -Headers $Headers
+        $setsArray = @($setsResponse.Sets)
 
-        if (-not $sets -or -not $sets.Sets) {
-            throw "No sets retrieved from EPM."
+        if (-not $setsArray -or $setsArray.Count -eq 0) {
+            $msg = "No sets available. Verify the user permission."
+            Write-Log $msg ERROR
+            throw $msg
         }
     }
     catch {
-        Write-Log "Failed to retrieve EPM Sets. Error: $_" ERROR
-        throw "Could not retrieve EPM sets."
+        $msg = "Failed to retrieve EPM Sets. Error: {0}" -f $_.Exception.Message
+        Write-Log $msg ERROR
+        throw $msg
     }
 
     # If setName is provided, search for it directly
-    if (-not [string]::IsNullOrEmpty($setName)) {
-        $selectedSet = $sets.Sets | Where-Object { $_.Name -eq $setName } | Select-Object -First 1
+    if (-not [string]::IsNullOrWhiteSpace($setName)) {
+        $selectedSet = $setsArray.Where({ $_.Name -eq $setName }, 'First', 1)
 
         if ($selectedSet) {
             return [PSCustomObject]@{
-                setId   = $selectedSet.Id
-                setName = $selectedSet.Name
+                setId   = $selectedSet[0].Id
+                setName = $selectedSet[0].Name
             }
         } else {
-            Write-Log "Error: Set '$setName' not found in EPM." ERROR
-            throw "Invalid Set Name: $setName"
+            $msg = "Invalid Set Name: '{0}' not found in EPM." -f $setName
+            Write-Log $msg ERROR
+            throw $msg
         }
     }
 
-    if ($sets.Sets.Count -eq 0) {
-        Write-Log "No sets available in EPM." ERROR
-        throw "No sets found. Cannot proceed."
-    }
+    Write-Box "Available Sets:"
 
-    Write-Box "Available Sets:" INFO
-
-    for ($i = 0; $i -lt $sets.Sets.Count; $i++) {
-        Write-Log "$($i + 1). $($sets.Sets[$i].Name)" INFO DarkCyan
+    for ($i = 0; $i -lt $setsArray.Count; $i++) {
+        Write-Log "$($i + 1). $($setsArray[$i].Name)" INFO DarkCyan
     }
 
     # Prompt user for input with max retries
     $maxRetries = 3
     for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
-        $chosenSetNumber = Read-Host "Enter the number of the set you want to choose"
+        $rawInput = Read-Host "Enter the number of the set you want to choose"
+        $chosenSetNum = 0
 
-        try {
-            $chosenSetNumber = [int]$chosenSetNumber
-
-            if ($chosenSetNumber -ge 1 -and $chosenSetNumber -le $sets.Sets.Count) {
-                $chosenSet = $sets.Sets[$chosenSetNumber - 1]
+        if ([int]::TryParse($rawInput, [ref]$chosenSetNum)) {
+            if ($chosenSetNum -ge 1 -and $chosenSetNum -le $setsArray.Count) {
+                $chosenSet = $setsArray[$chosenSetNum - 1]
                 return [PSCustomObject]@{
                     setId   = $chosenSet.Id
                     setName = $chosenSet.Name
                 }
             } else {
-                Write-Log "Invalid selection. Please enter a number between 1 and $($sets.Sets.Count)." ERROR
+                $msg = "Invalid selection. Please enter a number between 1 and {0}." -f $setsArray.Count
+                Write-Log $msg ERROR
             }
-        }
-        catch {
-            Write-Log "Invalid input. Please enter a valid number." ERROR
+        } else {
+            Write-Log "Invalid input. Please enter a valid numerical digit." ERROR
         }
     }
 
+    $msg = "Maximum attempts reached. Exiting set selection."
+    Write-Log $msg ERROR
     throw "Maximum attempts reached. Exiting set selection."
 }
 
@@ -633,12 +790,27 @@ if ($null -eq $credential) {
     Write-Log "Failed to get credentials..." ERROR
     exit
 }
-# Authenticate
-$login = Connect-EPM -credential $credential -epmTenant $tenant
 
-# Create a session header with the authorization token
-$sessionHeader = @{
-    "Authorization" = "basic $($login.auth)"
+# Authenticate
+if (-not $SubDomain -and -not $AppAlias) {
+    $login = Connect-EPM -credential $credential -epmTenant $tenant
+
+    # Create a session header with the authorization token
+    $sessionHeader = @{
+        "Authorization" = "basic {0}" -f $login.auth
+    }
+
+} elseif ($SubDomain -and $AppAlias) {
+    $login = Connect-EPM-ISPSS -credential $credential -epmTenant $tenant -SubDomain $SubDomain -AppAlias $AppAlias
+
+    $sessionHeader = @{
+        "Authorization" = "Bearer {0}" -f $login.auth
+    }
+
+} else {
+    $msg = 'Invalid configuration: Both SubDomain and AppAlias must be provided together for ISPSS auth, or both omitted for legacy auth.'
+    Write-Log $msg ERROR
+    throw $msg
 }
 
 # Get SetId
@@ -660,8 +832,13 @@ Write-Log "This is an INFO" INFO -ForegroundColor DarkCyan
 #Example Request 
 
 # Test GetPolicies
-#$policies = Get-EPMPolicies -limit 50
-#$policies
+$i = 1
+while ($true) {
+    $policies = Get-EPMPolicies -limit 50
+    $policies
+    Write-Log $i INFO
+    $i++
+}
 
 # Test GetEndpoints
 #$endpoints = Get-EPMEndpoints -limit 2
