@@ -34,15 +34,15 @@ param (
     [Parameter(HelpMessage="Please enter valid EPM set name")]
     [string]$setName,
 
-    [Parameter(Mandatory = $true, HelpMessage="Please enter valid EPM tenant (eu, uk, ....)")]
+    [Parameter(Mandatory = $true, HelpMessage="Please enter valid EPM tenant")]
     [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch")]
     [string]$tenant,
 
-    [Parameter(HelpMessage="Please enter valid ISPSS SubDomanin")]
-    [string]$SubDomain,
+    [Parameter(HelpMessage="ISPSS Address")]
+    [string]$ISPSS,
     
-    [Parameter(HelpMessage="Please enter valid ISPSS OATH alias")]
-    [string]$AppAlias,
+    #[Parameter(HelpMessage="Please enter valid ISPSS OATH alias")]
+    #[string]$AppAlias,
     
     [Parameter(HelpMessage = "Enable logging to file and console")]
     [switch]$log,
@@ -331,15 +331,15 @@ A custom object with the properties "managerURL" and "auth" representing the EPM
         Username      = $credential.UserName
         Password      = $credential.GetNetworkCredential().Password
         ApplicationID = "Powershell"
-    } | ConvertTo-Json -Depth 3
+    } | ConvertTo-Json -Compress
 
     $authHeaders = @{
         "Content-Type" = "application/json"
     }
 
     try {
-        # Write-Log "Attempting to connect to EPM tenant: $epmTenant" INFO
-        $response = Invoke-EPMRestMethod -URI "https://$epmTenant.epm.cyberark.com/EPM/API/Auth/EPM/Logon" -Method 'POST' -Headers $authHeaders -Body $authBody
+        $URI = 'https://{0}.epm.cyberark.com/EPM/API/Auth/EPM/Logon' -f $epmTenant
+        $response = Invoke-EPMRestMethod -URI $URI -Method 'POST' -Headers $authHeaders -Body $authBody
 
         # Ensure the response contains the expected fields
         if (-not $response -or -not $response.ManagerURL -or -not $response.EPMAuthenticationResult) {
@@ -384,16 +384,10 @@ function Connect-EPM-ISPSS {
         [pscredential]$credential,
 
         [Parameter(Mandatory = $true)]
-        [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch")]
         [string]$epmTenant,
 
         [Parameter(Mandatory = $true)]
-        [ValidatePattern('^[a-zA-Z0-9\-]+$')]
-        [string]$SubDomain,
-
-        [Parameter(Mandatory = $true)]
-        [ValidatePattern('^[a-zA-Z0-9\-]+$')]
-        [string]$AppAlias
+        [string]$OATH2
     )
 
     $access_token = ""
@@ -401,7 +395,6 @@ function Connect-EPM-ISPSS {
     
     # Login ISPSS
     try {
-        $url = "https://{0}.id.cyberark.cloud/oauth2/token/{1}" -f $SubDomain, $AppAlias
 
         $rawCreds = "{0}:{1}" -f $credential.UserName, $credential.GetNetworkCredential().Password
         $base64   = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($rawCreds))
@@ -412,11 +405,11 @@ function Connect-EPM-ISPSS {
         $headers = @{ "Authorization" = "Basic $base64" }
         $body    = @{ grant_type = "client_credentials" }
 
-        $login = Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $body -ContentType "application/x-www-form-urlencoded"
+        $login = Invoke-RestMethod -Uri $OATH2 -Method Post -Headers $headers -Body $body -ContentType "application/x-www-form-urlencoded"
 
         # Ensure the response contains the expected fields
         if (-not $login -or -not $login.access_token -or -not $login.token_type -or -not $login.expires_in) {
-            $msg = "EPM authentication failed on {0}: Missing expected response fields." -f $url
+            $msg = "EPM authentication failed on {0}: Missing expected response fields." -f $OATH2
             Write-Log $msg ERROR
             throw $msg
         }
@@ -791,7 +784,9 @@ if ($null -eq $credential) {
 }
 
 # Authenticate
-if (-not $SubDomain -and -not $AppAlias) {
+if (-not $ISPSS){
+#if (-not $SubDomain -and -not $AppAlias) {
+    Write-Log "Legacy authetication..." INFO
     $login = Connect-EPM -credential $credential -epmTenant $tenant
 
     # Create a session header with the authorization token
@@ -799,19 +794,14 @@ if (-not $SubDomain -and -not $AppAlias) {
         "Authorization" = "basic {0}" -f $login.auth
     }
 
-} elseif ($SubDomain -and $AppAlias) {
-    $login = Connect-EPM-ISPSS -credential $credential -epmTenant $tenant -SubDomain $SubDomain -AppAlias $AppAlias
+} else {
+    Write-Log "Modern authetication to $ISPSS ..." INFO
+    $login = Connect-EPM-ISPSS -credential $credential -epmTenant $tenant -OATH2 $ISPSS
 
     $sessionHeader = @{
         "Authorization" = "Bearer {0}" -f $login.auth
     }
-
-} else {
-    $msg = 'Invalid configuration: Both SubDomain and AppAlias must be provided together for ISPSS auth, or both omitted for legacy auth.'
-    Write-Log $msg ERROR
-    throw $msg
 }
-
 # Get SetId
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
