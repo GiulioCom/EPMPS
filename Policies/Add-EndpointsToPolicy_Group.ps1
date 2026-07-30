@@ -28,7 +28,7 @@
     WIN11-1,Script
 
 .EXAMPLE
-    .\EPMAddComputertoPolicy.ps1 -username "admin@epm.com" -setName "Default Set" -tenant "eu" -policyFile "C:\temp\policy_assignments.csv"
+    .\EPMAddComputertoPolicy_Group.ps1 -username "admin@epm.com" -setName "Default Set" -tenant "eu" -CsvPath "C:\temp\policy_assignments.csv"
 
 .NOTES
     File: EPMAddComputertoPolicy.ps1
@@ -55,8 +55,9 @@ param (
     [Parameter(HelpMessage = "Specify the log file path")]
     [string]$logFolder,
 
-    [Parameter(Mandatory=$true)]
-    [string]$policyFile
+    [Parameter(Mandatory = $true)]
+    [ValidateScript({Test-Path $_ -PathType Leaf})]
+    [string]$CsvPath
 )
 
 # Function to log messages to console and file
@@ -129,6 +130,7 @@ function Write-Box {
     Write-Log $horizontalLine @textProp
 }
 
+## Invoke-RestMethod Wrapper
 function Invoke-EPMRestMethod {
     <#
     .SYNOPSIS
@@ -154,18 +156,18 @@ param (
         [string]$URI,
         [string]$Method,
         [object]$Body = $null,
-        [hashtable]$Headers = @{},
-        [int]$MaxRetries = 3,
-        [int]$RetryDelay = 120 # Default value, in case of the returned message doesn't contain the limit info
+        [hashtable]$Headers = @{}
     )
 
+    $MaxRetries = 3
+    $RetryDelay = 120 # Default value, in case of the returned message doesn't contain the limit info
     $retryCount = 0
 
-    $hErrorMsg = "API call failed at line $($MyInvocation.ScriptLineNumber)"
+    $hErrorMsg = "API call failed at line {0}" -f $MyInvocation.ScriptLineNumber
 
     while ($retryCount -lt $MaxRetries) {
         try {
-            return Invoke-RestMethod -Uri $Uri -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
+            return Invoke-RestMethod -Uri $URI -Method $Method -Body $Body -Headers $Headers -ErrorAction Stop
         }
         catch {
             $retryCount++
@@ -270,24 +272,24 @@ param (
     throw $MSG
 }
 
+## EPM RestAPI Wrappers
 function Connect-EPM {
-    <#
-    .SYNOPSIS
-    Connects to the EPM (Endpoint Privilege Manager) using the provided credentials and tenant information.
+<#
+.SYNOPSIS
+Connects to the EPM (Endponint Priviled Management) using the provided credentials and tenant information.
 
-    .DESCRIPTION
-    This function performs authentication with the EPM API to obtain the manager URL and authentication details.
+.DESCRIPTION
+This function performs authentication with the EPM API to obtain the manager URL and authentication details.
 
-    .PARAMETER credential
-    The credential object containing the username and password.
+.PARAMETER credential
+The credential object containing the username and password.
 
-    .PARAMETER epmTenant
-    The EPM tenant name.
+.PARAMETER epmTenant
+The EPM tenant name.
 
-    .OUTPUTS
-    A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
-
-    #>
+.OUTPUTS
+A custom object with the properties "managerURL" and "auth" representing the EPM connection information.
+#>
     param (
         [Parameter(Mandatory = $true)]
         [pscredential]$credential,  # Credential object containing the username and password
@@ -301,15 +303,15 @@ function Connect-EPM {
         Username      = $credential.UserName
         Password      = $credential.GetNetworkCredential().Password
         ApplicationID = "Powershell"
-    } | ConvertTo-Json -Depth 3
+    } | ConvertTo-Json -Compress
 
     $authHeaders = @{
         "Content-Type" = "application/json"
     }
 
     try {
-        # Write-Log "Attempting to connect to EPM tenant: $epmTenant" INFO
-        $response = Invoke-EPMRestMethod -URI "https://$epmTenant.epm.cyberark.com/EPM/API/Auth/EPM/Logon" -Method 'POST' -Headers $authHeaders -Body $authBody
+        $URI = 'https://{0}.epm.cyberark.com/EPM/API/Auth/EPM/Logon' -f $epmTenant
+        $response = Invoke-EPMRestMethod -URI $URI -Method 'POST' -Headers $authHeaders -Body $authBody
 
         # Ensure the response contains the expected fields
         if (-not $response -or -not $response.ManagerURL -or -not $response.EPMAuthenticationResult) {
@@ -330,40 +332,34 @@ function Connect-EPM {
     }
 }
 
+<#
+.SYNOPSIS
+    Connects to CyberArk EPM using the ISPSS OIDC/OAuth portal.
+.DESCRIPTION
+    Authenticates against CyberArk Identity ISPSS via client_credentials, retrieves an access token,
+    and queries the tenant's base manager URL. Keeps credentials secure in memory using byte arrays.
+.PARAMETER credential
+    The PSCredential object representing the client ID (Username) and client secret (Password).
+.PARAMETER epmTenant
+    The EPM tenant name (e.g., eu, uk).
+.PARAMETER SubDomain
+    The ISPSS identity portal subdomain.
+.PARAMETER AppAlias
+    The unique OAuth application alias configuration name.
+.OUTPUTS
+    [PSCustomObject] containing 'managerURL' (string) and 'auth' (string).
+#>
 function Connect-EPM-ISPSS {
-    <#
-    .SYNOPSIS
-        Connects to CyberArk EPM using the ISPSS OIDC/OAuth portal.
-    .DESCRIPTION
-        Authenticates against CyberArk Identity ISPSS via client_credentials, retrieves an access token,
-        and queries the tenant's base manager URL. Keeps credentials secure in memory using byte arrays.
-    .PARAMETER credential
-        The PSCredential object representing the client ID (Username) and client secret (Password).
-    .PARAMETER epmTenant
-        The EPM tenant name (e.g., eu, uk).
-    .PARAMETER SubDomain
-        The ISPSS identity portal subdomain.
-    .PARAMETER AppAlias
-        The unique OAuth application alias configuration name.
-    .OUTPUTS
-        [PSCustomObject] containing 'managerURL' (string) and 'auth' (string).
-    #>
     param (
         [Parameter(Mandatory = $true)]
         [ValidateNotNull()]
         [pscredential]$credential,
 
         [Parameter(Mandatory = $true)]
-        [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch")]
         [string]$epmTenant,
 
         [Parameter(Mandatory = $true)]
-        [ValidatePattern('^[a-zA-Z0-9\-]+$')]
-        [string]$SubDomain,
-
-        [Parameter(Mandatory = $true)]
-        [ValidatePattern('^[a-zA-Z0-9\-]+$')]
-        [string]$AppAlias
+        [string]$OATH2
     )
 
     $access_token = ""
@@ -371,7 +367,6 @@ function Connect-EPM-ISPSS {
     
     # Login ISPSS
     try {
-        $url = "https://{0}.id.cyberark.cloud/oauth2/token/{1}" -f $SubDomain, $AppAlias
 
         $rawCreds = "{0}:{1}" -f $credential.UserName, $credential.GetNetworkCredential().Password
         $base64   = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($rawCreds))
@@ -382,11 +377,11 @@ function Connect-EPM-ISPSS {
         $headers = @{ "Authorization" = "Basic $base64" }
         $body    = @{ grant_type = "client_credentials" }
 
-        $login = Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $body -ContentType "application/x-www-form-urlencoded"
+        $login = Invoke-RestMethod -Uri $OATH2 -Method Post -Headers $headers -Body $body -ContentType "application/x-www-form-urlencoded"
 
         # Ensure the response contains the expected fields
         if (-not $login -or -not $login.access_token -or -not $login.token_type -or -not $login.expires_in) {
-            $msg = "EPM authentication failed on {0}: Missing expected response fields." -f $url
+            $msg = "EPM authentication failed on {0}: Missing expected response fields." -f $OATH2
             Write-Log $msg ERROR
             throw $msg
         }
@@ -523,7 +518,7 @@ function Get-EPMSetID {
     throw "Maximum attempts reached. Exiting set selection."
 }
 
-Function Get-EPMComputers {
+Function Get-Endpoints {
     <#
     .SYNOPSIS
         Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
@@ -531,57 +526,80 @@ Function Get-EPMComputers {
     .DESCRIPTION
         This function acts as a wrapper for the CyberArk EPM REST API to get computers.
         It automatically manages pagination by making multiple API calls if the total number
-        of computers exceeds the API's maximum limit (5000). The function merges all
-        computers into a single PSCustomObject for easy management.
+        of computers exceeds the API limit. The results are merged efficiently into a single object.
 
+    .PARAMETER RootURI
+        The base URI of the EPM server.
+    .PARAMETER Headers
+        The authentication headers.
     .PARAMETER limit
-        The maximum number of computers to retrieve per API call. The default is 5000,
-        which is the maximum allowed by the CyberArk EPM API.
+        The maximum number of computers to retrieve per API call. Default: 1000.
+    .PARAMETER filter
+        The search string to filter endpoints.
 
     .EXAMPLE
-        Get-EPMTotalCount -limit 500
+        $allEndpoints = Get-Endpoints -RootURI $uri -Headers $auth -limit 1000
 
     .OUTPUTS
         This function returns an object containing the merged computers and metadata.
         The object has the following properties:
-            - Computers: An array of all policy objects.
-            - TotalCount: The total number of policies on the server.
-
-    .NOTES
-        This function requires a valid session header and manager URL to be accessible
-        in the execution context. It uses Invoke-EPMRestMethod.
+            - endpoints: An array of all policy objects.
+            - filteredCount: The total number of endpoints  based on the filter.
+            - returnedCount: The returned number of endpoints based on limit.
     #>
+    [CmdletBinding()]
     param (
-        [int]$limit = 5000  # Set limit to the max size if not declared
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$RootURI,
+
+        [Parameter(Mandatory=$true)]
+        [hashtable]$Headers,
+    
+        [int]$limit = 1000,     #Set limit to the max size if not declared
+        [string]$filter         #Set the search body
     )
 
-    $mergeComputers = [PSCustomObject]@{
-        Computers = @()
-        TotalCount = 0
+    $endpointList = [System.Collections.Generic.List[object]]::new()
+    $filteredCount = 0
+    $returnedCountTotal = 0
+
+    $bodyHashtable = @{}
+    if ((-not [string]::IsNullOrWhiteSpace($filter))) {
+        $bodyHashtable.filter = $filter
     }
+    $bodyJSON = $bodyHashtable | ConvertTo-Json -Compress
 
-    $offset = 0             # Offset
-    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
+    $offset = 0
 
-    while ($offset -lt $total) {
-        $getComputers = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Computers?offset=$offset&limit=$limit" -Method 'GET' -Headers $sessionHeader
+    do {
+        $URI = '{0}/Endpoints/search?offset={1}&limit={2}' -f $RootURI.TrimEnd('/'), $offset, $limit
+        $response = Invoke-EPMRestMethod -Uri $URI -Method 'POST' -Headers $Headers -Body $bodyJSON
         
-        $mergeComputers.Computers += $getComputers.Computers    # Merge the current computer list
-        $mergeComputers.TotalCount = $getComputers.TotalCount   # Update the TotalCount
+        if ($null -eq $response -or $null -eq $response.endpoints) {
+            Write-Log "API returned an empty or malformed response at offset $offset." WARN
+            break
+        }
+        
+        $endpointList.AddRange($response.endpoints)
 
-        $total = $getComputers.TotalCount   # Update the total with the real total
-        $offset += $getComputers.Computers.Count
+        $filteredCount = $response.filteredCount
+        $returnedCountTotal += $response.returnedCount
+        $offset += $response.returnedCount
 
-        # Progress  Bar
-        $Percent = [int](($offset / $total) * 100)
-        Write-Progress -Activity "Retrieving Computers $($total) total" -Status "Retrieved: $offset Computers" -PercentComplete $Percent
-    }
-    Write-Progress -Activity "Retrieving Computers $($total) total"  -Status "Completed: Successfully retrieved $($mergeComputers.TotalCount) Computers" -PercentComplete 100 -Completed
+    } while (
+        ($offset -lt $filteredCount) -and 
+        ($response.returnedCount -gt 0) # LOGIC: Failsafe to prevent an infinite loop if the API stalls and returns 0 items
+    )
     
-    return $mergeComputers
+    return [PSCustomObject]@{
+        endpoints     = $endpointList.ToArray()
+        filteredCount = $filteredCount
+        returnedCount = $returnedCountTotal
+    }
 }
 
-Function Get-EPMPolicies {
+Function Get-Policies {
     <#
     .SYNOPSIS
         Retrieves a list of EPM policies from a CyberArk EPM server, handling pagination automatically.
@@ -632,53 +650,132 @@ Function Get-EPMPolicies {
     #>
 
     param (
-        [int]$limit = 1000,         # Set limit to the max size if not declared
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$RootURI,
+
+        [Parameter(Mandatory=$true)]
+        [hashtable]$Headers,
+        
+        [int]$limit = 1000,             # Set limit to the max size if not declared
         [string]$sortBy = "Updated",
         [string]$sortDir = "desc",
-        [hashtable]$policyFilter
+        [string]$filter
     )
 
-    $mergePolicies = [PSCustomObject]@{
-        Policies = @()
-        ActiveCount = 0
-        TotalCount = 0
-        FilteredCount = 0
-    }
+    $policyList = [System.Collections.Generic.List[object]]::new()
+    $activeCount = 0
+    $totalCount = 0
+    $filteredCount = 0
 
-    if ($null -ne $policiesFilter) {
-        $policyFilterJSON = $policyFilter | ConvertTo-Json
+    $bodyHashtable = @{}
+    if ((-not [string]::IsNullOrWhiteSpace($filter))) {
+        $bodyHashtable.filter = $filter
     }
+    $bodyJSON = $bodyHashtable | ConvertTo-Json -Compress
+
+    $sort = 'sortBy={0}&sortDir={1}' -f $sortBy, $sortDir
 
     $offset = 0             # Offset
-    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
 
-    while ($offset -lt $total) {
-        $getPolicies = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search?offset=$offset&limit=$limit&sortBy=$sortBy&sortDir=$sortDir" -Method 'POST' -Headers $sessionHeader -Body $policyFilterJSON
+    do {
+        $URI = '{0}/Policies/Server/Search?offset={1}&limit={2}&{3}' -f $RootURI.TrimEnd('/'), $offset, $limit, $sort
+        $response = Invoke-EPMRestMethod -Uri $URI -Method 'POST' -Headers $Headers -Body $bodyJSON
+        #$getPolicies = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search?offset=$offset&limit=$limit&sortBy=$sortBy&sortDir=$sortDir" -Method 'POST' -Headers $sessionHeader -Body $bodyJSON
         
-        $mergePolicies.Policies += $getPolicies.Policies            # Merge the current computer list
-        $mergePolicies.ActiveCount = $getPolicies.ActiveCount       # Update the ActiveCount
-        $mergePolicies.TotalCount = $getPolicies.TotalCount         # Update the TotalCount
-        $mergePolicies.FilteredCount = $getPolicies.FilteredCount   # Update the FilteredCount
+        $policyList.AddRange($response.Policies)
+        $activeCount = $response.ActiveCount       # Update the ActiveCount
+        $totalCount = $response.TotalCount         # Update the TotalCount
+        $filteredCount = $response.FilteredCount   # Update the FilteredCount
 
-        $total = $getPolicies.FilteredCount                         # Update the total with the real total
-        $offset += $getPolicies.Policies.Count
+        #$total = $response.FilteredCount                         # Update the total with the real total
+        $offset += $response.Policies.Count
 
-        # Progress  Bar
-        $Percent = [int](($offset / $total) * 100)
-        Write-Progress -Activity "Retrieving Policies $($total) total" -Status "Retrieved: $offset Policies" -PercentComplete $Percent
+    } while (
+        ($offset -lt $filteredCount) #-and 
+        #($response.returnedCount -gt 0) # LOGIC: Failsafe to prevent an infinite loop if the API stalls and returns 0 items
+    )
+
+    return [PSCustomObject]@{
+        Policies = $policyList.ToArray()
+        ActiveCount = $activeCount
+        TotalCount = $totalCount
+        FilteredCount = $filteredCount
     }
-    Write-Progress -Activity "Retrieving Policies $($total) total"  -Status "Completed: Successfully retrieved $($mergePolicies.FilteredCount) Policies" -PercentComplete 100 -Completed
+   
+}
 
-    return $mergePolicies
+function Add-EndpointToPolicy {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$RootURI,
+
+        [Parameter(Mandatory=$true)]
+        [hashtable]$Headers,
+
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$EndpointId,
+
+        [Parameter(Mandatory=$true)]
+        [ValidatePattern('^[A-Za-z0-9\-]{1,15}$')]
+        [string]$EndpointName,
+
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$PolicyId
+    )
+        
+    $URI = '{0}/Policies/Server/{1}' -f $RootURI.TrimEnd('/'), $PolicyId
+    
+    $policyDetails = Invoke-EPMRestMethod -Uri $URI -Method 'GET' -Headers $Headers
+    $policy = $policyDetails.Policy
+
+    # Configure the policy for specific device
+    $policy.IsAppliedToAllComputers=$False
+
+    # Enable the policy
+    $policy.IsActive=$True
+
+    ## Add the computer in the policy definition
+    if ($policy.Executors.Name -contains $EndpointName) {
+        Write-Log "Endpoint '$($EndpointName)' already exists in the policy '$($policy.Name)'. Continue to the next..." WARN
+    } else {
+        Write-Log "Adding Endpoint '$($EndpointName)' to '$($policy.Name)'." INFO
+
+        # Define the executor
+        $newExecutor = [PSCustomObject]@{
+            "Id"           = $EndpointId
+            "Name"         = $EndpointName
+            "IsIncluded"   = $true
+            "ExecutorType" = 1
+        }
+
+        # Add the Computer in the policy
+        $executorList = [System.Collections.Generic.List[object]]::new()
+        if ($null -ne $policy.Executors) {
+            $executorList.AddRange($policy.Executors)
+        }
+        $executorList.Add($newExecutor)
+        $policy.Executors = $executorList.ToArray()
+
+        # Upload the policy
+        $newPolicyJSON = $policy | ConvertTo-Json -Depth 10 -Compress
+        $updatePolicy = Invoke-EPMRestMethod -Uri $URI -Method 'PUT' -Headers $Headers -Body $newPolicyJSON
+        
+        if ($null -ne $updatePolicy) {
+            Write-Log "Policy '$($policy.Name)' updated." INFO
+        } else {
+            Write-Log "Error Updating Policy '$($policy.Name)'." ERROR
+        }
+    }
 }
 
 ### Begin Script ###
 
 ## Prepare log folder and file
 $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
-
-## Prepare log folder and file
-# Set default log folder if not provided
 if ($log) {
     if (-not $PSBoundParameters.ContainsKey('logFolder')) {
         $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -697,13 +794,14 @@ if ($log) {
 
     Write-Log "Logging enabled. Log file: $logFilePath" INFO
 }
-##
+## Log file done
 
 Write-Box "$scriptName"
 
 # Request EPM Credentials
 $sessionHeader = @{}
 
+# Request EPM Credentials
 $credential = Get-Credential -UserName $username -Message "Enter password for $username"
 if ($null -eq $credential) {
     Write-Log "Failed to get credentials..." ERROR
@@ -711,7 +809,8 @@ if ($null -eq $credential) {
 }
 
 # Authenticate
-if (-not $SubDomain -and -not $AppAlias) {
+if (-not $ISPSS){
+    Write-Log "Legacy authetication..." INFO
     $login = Connect-EPM -credential $credential -epmTenant $tenant
 
     # Create a session header with the authorization token
@@ -719,54 +818,128 @@ if (-not $SubDomain -and -not $AppAlias) {
         "Authorization" = "basic {0}" -f $login.auth
     }
 
-} elseif ($SubDomain -and $AppAlias) {
-    $login = Connect-EPM-ISPSS -credential $credential -epmTenant $tenant -SubDomain $SubDomain -AppAlias $AppAlias
+} else {
+    Write-Log "Modern authetication to $ISPSS ..." INFO
+    $login = Connect-EPM-ISPSS -credential $credential -epmTenant $tenant -OATH2 $ISPSS
 
     $sessionHeader = @{
         "Authorization" = "Bearer {0}" -f $login.auth
     }
-
-} else {
-    $msg = 'Invalid configuration: Both SubDomain and AppAlias must be provided together for ISPSS auth, or both omitted for legacy auth.'
-    Write-Log $msg ERROR
-    throw $msg
 }
-
 # Get SetId
 $set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
 Write-Log "Entering SET: $($set.setName)..." INFO -ForegroundColor Blue
 
-# Check the policyFile
-if (-not (Test-Path $policyFile)) {
-    Write-Log "The specified CSV file '$policyFile' was not found." ERROR
-    exit 1
+# EPM Connection:
+$epmConnection = @{
+    RootURI = "$($login.managerURL)/EPM/API/Sets/$($set.setId)"
+    Headers = $sessionHeader
 }
 
-# Import the CSV
-try {
-    Write-Log "Reading csv file '$policyFile'" INFO
-    $policyContent = Import-Csv -Path $policyFile -Header ComputerName,Policies
-}
-catch {
-    Write-Log "Failed to import CSV file '$policyFile'. Please check its format." ERROR
-    throw $_.Exception.Message
-}
+# Keep track of the processed Endpoints to reduce the request
+#$endpointsProcFile = "EndpointsProcessed.txt"
+#$endpointsProc = @()
 
-$csvComputerNames = $policyContent | Select-Object -ExpandProperty ComputerName
-
-# Create or update the endpoint processed file
-$endpointsProcFile = "EndpointsProcessed.txt"
-$endpointsProc = @()
-# Check if the file exists
-if (Test-Path $endpointsProcFile -PathType Leaf) {
-    Write-Log "Found Endpoints processed file: $endpointsProcFile" INFO
+#if (Test-Path -Path $endpointsProcFile -PathType Leaf) {
+#    Write-Log "Found Endpoints processed file: $endpointsProcFile" INFO
     # Load the file content
-    $endpointsProc = Get-Content $endpointsProcFile
-} else {
-    Write-Log "Endpoints processed file '$endpointsProcFile' not found, create new one." WARN
-    Set-Content -Path $endpointsProcFile -Value $endpointsProc -Force
+#    $endpointsProc = Get-Content $endpointsProcFile
+#} else {
+#    Write-Log "Endpoints processed file '$endpointsProcFile' not found, create new one." WARN
+#    Set-Content -Path $endpointsProcFile -Value $endpointsProc -Force
+#}
+
+Write-Log "Loading and validating CSV data into memory..." INFO
+
+$CsvMap = @{}
+$Headers = @('ComputerName', 'RecordType', 'ItemList')
+
+Import-Csv -Path $CsvPath -Header $Headers | ForEach-Object {
+    $compName = $_.ComputerName.Trim().ToUpper()
+    
+    if ($compName -notmatch '^[A-Z0-9\-]{1,15}$') {
+        Write-Log "Invalid ComputerName skipped: $compName" WARN
+        return
+    }
+
+    $type = $_.RecordType.Trim().ToLower()
+    if ($type -notin @('policy', 'group')) {
+        Write-Log "Invalid RecordType '$type' for $compName. Skipping." WARN
+        return
+    }
+
+    $items = $_.ItemList.Split(';', [System.StringSplitOptions]::RemoveEmptyEntries)
+
+    if (-not $CsvMap.ContainsKey($compName)) {
+        $CsvMap[$compName] = [PSCustomObject]@{
+            Policies = [System.Collections.Generic.List[string]]::new()
+            Groups   = [System.Collections.Generic.List[string]]::new()
+        }
+    }
+
+    if ($type -eq 'policy') {
+        $CsvMap[$compName].Policies.AddRange($items)
+    } elseif ($type -eq 'group') {
+        $CsvMap[$compName].Groups.AddRange($items)
+    }
 }
+
+
+Write-Log "Fetching Endpoints validated in the CSV from the EPM Console..." INFO
+
+# There is a limit to 10000 char for the filter string
+# (https://docs.cyberark.com/epm/latest/en/content/webservices/endpoint-apis/delete-endpoint.htm#Bodyparameters)
+
+[string[]]$TargetComputers = $CsvMap.Keys
+$MaxCharLimit = 10000
+
+$CurrentBatch = [System.Collections.Generic.List[string]]::new()
+$LiveEndpoints = [System.Collections.Generic.List[object]]::new()
+$filterHeader = "name IN "
+$currentLength = $filterHeader.Length
+
+foreach ($comp in $TargetComputers) {
+    $addedLength = $comp.Length + 1
+
+    if (($currentLength + $addedLength) -gt $MaxCharLimit) {
+
+        $endpointsList = [string]::Join(',', $CurrentBatch)
+        $filterString = '{0}{1}' -f $filterHeader, $EndpointsList
+        $batchResults = Get-Endpoints @epmConnection -filter $filterString
+        if ($batchResults.returnedCount -ne 0) {
+            $LiveEndpoints.AddRange($batchResults.endpoints)
+        }
+        
+        # Reset the batch tracker for the next chunk
+        $CurrentBatch.Clear()
+        $currentLength = $filterHeader.Length
+    }
+
+    $CurrentBatch.Add($comp)
+    $currentLength += $addedLength
+
+}
+
+# Process Last Batch - Less than 10000
+if ($CurrentBatch.Count -gt 0) {
+    
+    $endpointsList = [string]::Join(',', $CurrentBatch)
+    $filterString = 'name IN {0}' -f $EndpointsList
+    $finalResults = Get-Endpoints @epmConnection -filter $filterString
+    if ($finalResults.returnedCount -ne 0) {
+        $LiveEndpoints.AddRange(@($finalResults.endpoints))
+    }
+}
+
+if ($LiveEndpoints.Count -eq 0) {
+    Write-Log "The Endpoints in the CSV are not in the EPM console yet. Exit." WARN
+    Exit
+}
+
+Write-Log "Successfully retrieved $($LiveEndpoints.Count) endpoints." INFO
+
+Write-Log "Fetching global policies into local cache..." INFO
 
 # Get the policies list
 # 11: Advanced Windows
@@ -774,25 +947,55 @@ if (Test-Path $endpointsProcFile -PathType Leaf) {
 # 37: User Policy Set Security Permissions for Services
 # 38: User Policy Set Security Permissions for Removable Storage (USB, Optical Discs)
 
-$policiesFilter = @{
-    "filter" = "PolicyType IN 11,36,37,38"
-}
+$policiesFilter = "PolicyType IN 11,36,37,38"
 
-$getPolicies = Get-EPMPolicies -policyFilter $policiesFilter
+$LivePolicies = Get-Policies @epmConnection -filter $policiesFilter
+Write-Log "Successfully retrieved $($LivePolicies.Count) policies." INFO
 
 # Store in hashtable for faster access
-$retrievedPoliciesMap = @{}
-
-foreach ($retrievedPolicy in $getPolicies.Policies) {
-    $retrievedPoliciesMap[$retrievedPolicy.PolicyName] = $retrievedPolicy.PolicyId
+$cachePolicies = @{}
+foreach ($policy in $LivePolicies.Policies) {
+    $cachePolicies[$policy.PolicyName] = $policy.PolicyId
 }
 
-# Get the computer list
-$getComputerList = Get-EPMComputers -limit 5000
+Write-Log "Successfully cached $($cachePolicies.Count) policies." INFO
 
-foreach ($computer in $getComputerList.Computers) {
-    $computerName = $computer.ComputerName
-    Write-Log "Processing computer: $($computerName)" INFO -ForegroundColor DarkCyan
+Write-Log "Applying configurations..." INFO
+
+foreach ($endpoint in $LiveEndpoints) {
+    $EndpointName = $endpoint.Name.ToUpper()
+    Write-Log "Processing Endpoint: $($EndpointName)" INFO
+    
+    $config = $CsvMap[$EndpointName]
+
+    if ($null -eq $config) {
+        Write-Log "Endpoint $EndpointName returned by API but not in CSV mapping. Skipping." WARN
+        continue
+    }
+    
+    foreach ($group in $config.Groups) {
+        # Execute your API call to add to group
+        Write-Log "Adding $epName to Group: $group" INFO
+        # Add-EndpointToGroup -EndpointId $endpoint.Id -GroupName $group
+    }
+
+    foreach ($policyName in $config.Policies) {
+        $policyId = $cachePolicies[$policyName]
+        if ($null -ne $policyId) {
+            Write-Log "Applying $policyName ($policyId) to $EndpointName" INFO
+            Add-EndpointToPolicy @epmConnection -EndpointId $endpoint.legacyId -EndpointName $endpoint.Name -PolicyId $policyId
+        }
+        else {
+            Write-Log "Policy '$policyName' not found in the EPM Console." WARN
+        }
+    }
+}
+
+
+
+
+
+ <#   
     # Search the Computer Name in the CSV file
     if ($csvComputerNames.Contains($computerName)) {
         Write-Log "- '$($computerName)' in the CSV policy file." INFO
@@ -811,46 +1014,7 @@ foreach ($computer in $getComputerList.Computers) {
                     Continue
                 }
                 
-                $getPolicy = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/$($retrievedPoliciesMap[$policy])" -Method 'GET' -Headers $sessionHeader
-                
-                # Configure the policy for specific device
-                $getPolicy.Policy.IsAppliedToAllComputers=$False
-                
-                # Enable the policy
-                $getPolicy.Policy.IsActive=$True
-
-                ## Add the computer in the policy definition
-                # Flag to determine if the computer was found in the existing executors
-                $computerFoundInExecutors = $false
-
-                # Iterate through existing executors to check if the computer name already exists
-                foreach ($executor in $getPolicy.Policy.Executors) {
-                    if ($executor.Name -eq $computerName) {
-                        $computerFoundInExecutors = $true
-                        break
-                    }
-                }
-
-                if ($computerFoundInExecutors) {
-                    Write-Log "- Computer '$($computerName)' already exists in the policy '$($policy)'. Continue to the next..." WARN
-                } else {
-                    Write-Log "- Computer '$($computerName)' not found in the policy '$($policy)'. Adding it now." INFO Magenta
-
-                    # Define the computer name
-                    $newExecutor = [PSCustomObject]@{
-                        "Id"           = $computer.AgentId
-                        "Name"         = $computerName
-                        "IsIncluded"   = $true
-                        "ExecutorType" = 1
-                    }
-
-                    # Add the Computer in the policy
-                    $getPolicy.Policy.Executors += $newExecutor
-
-                    # Upload the policy
-                    $newPolicyJSON = $getPolicy.Policy | ConvertTo-Json -Depth 10
-                    $updatePolicy = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/$($retrievedPoliciesMap[$policy])" -Method 'PUT' -Headers $sessionHeader -Body $newPolicyJSON
-                    Write-Log "- Policy '$($policy)' updated correctly." INFO
+ 
                 }
 
             }
@@ -862,4 +1026,4 @@ foreach ($computer in $getComputerList.Computers) {
         }
     }
 }
-
+#>
