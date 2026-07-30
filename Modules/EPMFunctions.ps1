@@ -604,165 +604,258 @@ Function Get-EPMComputers {
     return $mergeComputers
 }
 
-Function Get-EPMEndpoints {
-<#
-.SYNOPSIS
-    Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
+Function Get-Endpoints {
+    <#
+    .SYNOPSIS
+        Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
 
-.DESCRIPTION
-    This function acts as a wrapper for the CyberArk EPM REST API to get computers.
-    It automatically manages pagination by making multiple API calls if the total number
-    of computers exceeds the API's maximum limit (5000). The function merges all
-    computers into a single PSCustomObject for easy management.
+    .DESCRIPTION
+        This function acts as a wrapper for the CyberArk EPM REST API to get computers.
+        It automatically manages pagination by making multiple API calls if the total number
+        of computers exceeds the API limit. The results are merged efficiently into a single object.
 
-.PARAMETER limit
-    The maximum number of computers to retrieve per API call. The default is 5000,
-    which is the maximum allowed by the CyberArk EPM API.
+    .PARAMETER RootURI
+        The base URI of the EPM server.
+    .PARAMETER Headers
+        The authentication headers.
+    .PARAMETER limit
+        The maximum number of computers to retrieve per API call. Default: 1000.
+    .PARAMETER filter
+        The search string to filter endpoints.
 
-.EXAMPLE
-    Get-EPMTotalCount -limit 500
+    .EXAMPLE
+        $allEndpoints = Get-Endpoints -RootURI $uri -Headers $auth -limit 1000
 
-.OUTPUTS
-    This function returns an object containing the merged computers and metadata.
-    The object has the following properties:
-        - Computers: An array of all policy objects.
-        - TotalCount: The total number of policies on the server.
-
-.NOTES
-    This function requires a valid session header and manager URL to be accessible
-    in the execution context. It uses Invoke-EPMRestMethod.
-#>
+    .OUTPUTS
+        This function returns an object containing the merged computers and metadata.
+        The object has the following properties:
+            - endpoints: An array of all policy objects.
+            - filteredCount: The total number of endpoints  based on the filter.
+            - returnedCount: The returned number of endpoints based on limit.
+    #>
+    [CmdletBinding()]
     param (
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$RootURI,
+
+        [Parameter(Mandatory=$true)]
+        [hashtable]$Headers,
+    
         [int]$limit = 1000,     #Set limit to the max size if not declared
         [string]$filter         #Set the search body
     )
 
-    $mergeEndpoints = [PSCustomObject]@{
-        endpoints = @()
-        filteredCount = 0
-        returnedCount = 0
-    }
+    $endpointList = [System.Collections.Generic.List[object]]::new()
+    $filteredCount = 0
+    $returnedCountTotal = 0
 
+    $bodyHashtable = @{}
     if ((-not [string]::IsNullOrWhiteSpace($filter))) {
-        $filterJSON = @{
-            filter = $filter
-        } | ConvertTo-Json
+        $bodyHashtable.filter = $filter
     }
+    $bodyJSON = $bodyHashtable | ConvertTo-Json -Compress
 
-    $offset = 0             # Offset
-    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
+    $offset = 0
 
-    while ($offset -lt $total) {
-        $getEndpoints = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/search?offset=$offset&limit=$limit" -Method 'POST' -Headers $sessionHeader -Body $filterJSON
+    do {
+        $URI = '{0}/Endpoints/search?offset={1}&limit={2}' -f $RootURI.TrimEnd('/'), $offset, $limit
+        $response = Invoke-EPMRestMethod -Uri $URI -Method 'POST' -Headers $Headers -Body $bodyJSON
         
-        $mergeEndpoints.endpoints += $getEndpoints.endpoints    # Merge the current computer list
-        $mergeEndpoints.filteredCount = $getEndpoints.filteredCount   # Update the filteredCount (the total device based on the filter)
-        $mergeEndpoints.returnedCount = $getEndpoints.returnedCount   # Update the returnedCount
-
-        $total = $getEndpoints.filteredCount   # Update the total with the real total
-        $offset += $getEndpoints.returnedCount
-
-        # Manage 0 results
-        if ($total -eq 0 -and $offset -eq 0) { continue }
-        else {
-            # Progress Bar
-            $Percent = (($offset / $total) * 100)
-            Write-Progress -Activity "Retrieving Endpoints $($total) total" -Status "Retrieved: $offset Endpoints" -PercentComplete $Percent
+        if ($null -eq $response -or $null -eq $response.endpoints) {
+            Write-Log "API returned an empty or malformed response at offset $offset." WARN
+            break
         }
-    }
-    Write-Progress -Activity "Retrieving Endpoints $($total) total"  -Status "Completed: Successfully retrieved $($mergeEndpoints.filteredCount) Endpoints" -PercentComplete 100 -Completed
+        
+        $endpointList.AddRange($response.endpoints)
+
+        $filteredCount = $response.filteredCount
+        $returnedCountTotal += $response.returnedCount
+        $offset += $response.returnedCount
+
+    } while (
+        ($offset -lt $filteredCount) -and 
+        ($response.returnedCount -gt 0) # LOGIC: Failsafe to prevent an infinite loop if the API stalls and returns 0 items
+    )
     
-    return $mergeEndpoints
+    return [PSCustomObject]@{
+        endpoints     = $endpointList.ToArray()
+        filteredCount = $filteredCount
+        returnedCount = $returnedCountTotal
+    }
 }
 
-Function Get-EPMPolicies {
-<#
-.SYNOPSIS
-    Retrieves a list of EPM policies from a CyberArk EPM server, handling pagination automatically.
+Function Get-Policies {
+    <#
+    .SYNOPSIS
+        Retrieves a list of EPM policies from a CyberArk EPM server, handling pagination automatically.
 
-.DESCRIPTION
-    This function acts as a wrapper for the CyberArk EPM REST API to get policies.
-    It automatically manages pagination by making multiple API calls if the total number
-    of policies exceeds the API's maximum limit (1000). The function merges all
-    policies into a single PSCustomObject for easy management.
+    .DESCRIPTION
+        This function acts as a wrapper for the CyberArk EPM REST API to get policies.
+        It automatically manages pagination by making multiple API calls if the total number
+        of policies exceeds the API's maximum limit (1000). The function merges all
+        policies into a single PSCustomObject for easy management.
 
-.PARAMETER limit
-    The maximum number of policies to retrieve per API call. The default is 1000,
-    which is the maximum allowed by the CyberArk EPM API.
+    .PARAMETER limit
+        The maximum number of policies to retrieve per API call. The default is 1000,
+        which is the maximum allowed by the CyberArk EPM API.
 
-.PARAMETER sortBy
-    The field by which to sort the policies. Common values include "Updated", "Name",
-    and "PolicyType". The default is "Updated".
+    .PARAMETER sortBy
+        The field by which to sort the policies. Common values include "Updated", "Name",
+        and "PolicyType". The default is "Updated".
 
-.PARAMETER sortDir
-    The sorting direction. Valid values are "asc" (ascending) and "desc" (descending).
-    The default is "desc".
+    .PARAMETER sortDir
+        The sorting direction. Valid values are "asc" (ascending) and "desc" (descending).
+        The default is "desc".
 
-.PARAMETER policyFilter
-    A hashtable containing filter criteria for the policies. The keys and values
-    must match the JSON format expected by the EPM API's search endpoint.
-    Example: @{ "filter" = "PolicyType IN 11,36,37,38" }.
+    .PARAMETER policyFilter
+        A hashtable containing filter criteria for the policies. The keys and values
+        must match the JSON format expected by the EPM API's search endpoint.
+        Example: @{ "filter" = "PolicyType IN 11,36,37,38" }.
 
-.EXAMPLE
-    Get-EPMPolicies -limit 500 -sortBy "Name"
+    .EXAMPLE
+        Get-EPMPolicies -limit 500 -sortBy "Name"
 
-.EXAMPLE
-    $myFilter = @{
-        "filter" = "PolicyType IN 11,36"
-    }
-    Get-EPMPolicies -policyFilter $myFilter
+    .EXAMPLE
+        $myFilter = @{
+            "filter" = "PolicyType IN 11,36"
+        }
+        Get-EPMPolicies -policyFilter $myFilter
 
-.OUTPUTS
-    This function returns an object containing the merged policies and metadata.
-    The object has the following properties:
-        - Policies: An array of all policy objects.
-        - ActiveCount: The count of active policies.
-        - TotalCount: The total number of policies on the server.
-        - FilteredCount: The total number of policies that match the applied filter.
+    .OUTPUTS
+        This function returns an object containing the merged policies and metadata.
+        The object has the following properties:
+            - Policies: An array of all policy objects.
+            - ActiveCount: The count of active policies.
+            - TotalCount: The total number of policies on the server.
+            - FilteredCount: The total number of policies that match the applied filter.
 
-.NOTES
-    This function requires a valid session header and manager URL to be accessible
-    in the execution context. It uses Invoke-EPMRestMethod.
-#>
+    .NOTES
+        This function requires a valid session header and manager URL to be accessible
+        in the execution context. It uses Invoke-EPMRestMethod.
+    #>
+
     param (
-        [int]$limit = 1000,         # Set limit to the max size if not declared
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$RootURI,
+
+        [Parameter(Mandatory=$true)]
+        [hashtable]$Headers,
+        
+        [int]$limit = 1000,             # Set limit to the max size if not declared
         [string]$sortBy = "Updated",
         [string]$sortDir = "desc",
-        [hashtable]$policyFilter
+        [string]$filter
     )
 
-    $mergePolicies = [PSCustomObject]@{
-        Policies = @()
-        ActiveCount = 0
-        TotalCount = 0
-        FilteredCount = 0
-    }
+    $policyList = [System.Collections.Generic.List[object]]::new()
+    $activeCount = 0
+    $totalCount = 0
+    $filteredCount = 0
 
-    if ($null -ne $policiesFilter) {
-        $policyFilterJSON = $policyFilter | ConvertTo-Json
+    $bodyHashtable = @{}
+    if ((-not [string]::IsNullOrWhiteSpace($filter))) {
+        $bodyHashtable.filter = $filter
     }
+    $bodyJSON = $bodyHashtable | ConvertTo-Json -Compress
+
+    $sort = 'sortBy={0}&sortDir={1}' -f $sortBy, $sortDir
 
     $offset = 0             # Offset
-    $total = $offset + 1    # Define the total, setup as offset + 1 to start the while cycle
 
-    while ($offset -lt $total) {
-        $getPolicies = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search?offset=$offset&limit=$limit&sortBy=$sortBy&sortDir=$sortDir" -Method 'POST' -Headers $sessionHeader -Body $policyFilterJSON
+    do {
+        $URI = '{0}/Policies/Server/Search?offset={1}&limit={2}&{3}' -f $RootURI.TrimEnd('/'), $offset, $limit, $sort
+        $response = Invoke-EPMRestMethod -Uri $URI -Method 'POST' -Headers $Headers -Body $bodyJSON
+        #$getPolicies = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search?offset=$offset&limit=$limit&sortBy=$sortBy&sortDir=$sortDir" -Method 'POST' -Headers $sessionHeader -Body $bodyJSON
         
-        $mergePolicies.Policies += $getPolicies.Policies            # Merge the current computer list
-        $mergePolicies.ActiveCount = $getPolicies.ActiveCount       # Update the ActiveCount
-        $mergePolicies.TotalCount = $getPolicies.TotalCount         # Update the TotalCount
-        $mergePolicies.FilteredCount = $getPolicies.FilteredCount   # Update the FilteredCount
+        $policyList.AddRange($response.Policies)
+        $activeCount = $response.ActiveCount       # Update the ActiveCount
+        $totalCount = $response.TotalCount         # Update the TotalCount
+        $filteredCount = $response.FilteredCount   # Update the FilteredCount
 
-        $total = $getPolicies.FilteredCount                         # Update the total with the real total
-        $offset += $getPolicies.Policies.Count
+        #$total = $response.FilteredCount                         # Update the total with the real total
+        $offset += $response.Policies.Count
 
-        # Progress  Bar
-        $Percent = [int](($offset / $total) * 100)
-        Write-Progress -Activity "Retrieving Policies $($total) total" -Status "Retrieved: $offset Policies" -PercentComplete $Percent
+    } while (
+        ($offset -lt $filteredCount) #-and 
+        #($response.returnedCount -gt 0) # LOGIC: Failsafe to prevent an infinite loop if the API stalls and returns 0 items
+    )
+
+    return [PSCustomObject]@{
+        Policies = $policyList.ToArray()
+        ActiveCount = $activeCount
+        TotalCount = $totalCount
+        FilteredCount = $filteredCount
     }
-    Write-Progress -Activity "Retrieving Policies $($total) total"  -Status "Completed: Successfully retrieved $($mergePolicies.FilteredCount) Policies" -PercentComplete 100 -Completed
+   
+}
 
-    return $mergePolicies
+function Add-EndpointToPolicy {
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$RootURI,
+
+        [Parameter(Mandatory=$true)]
+        [hashtable]$Headers,
+
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$EndpointId,
+
+        [Parameter(Mandatory=$true)]
+        [ValidatePattern('^[A-Za-z0-9\-]{1,15}$')]
+        [string]$EndpointName,
+
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [string]$PolicyId
+    )
+        
+    $URI = '{0}/Policies/Server/{1}' -f $RootURI.TrimEnd('/'), $PolicyId
+    
+    $policyDetails = Invoke-EPMRestMethod -Uri $URI -Method 'GET' -Headers $Headers
+    $policy = $policyDetails.Policy
+
+    # Configure the policy for specific device
+    $policy.IsAppliedToAllComputers=$False
+
+    # Enable the policy
+    $policy.IsActive=$True
+
+    ## Add the computer in the policy definition
+    if ($policy.Executors.Name -contains $EndpointName) {
+        Write-Log "Endpoint '$($EndpointName)' already exists in the policy '$($policy.Name)'. Continue to the next..." WARN
+    } else {
+        Write-Log "Adding Endpoint '$($EndpointName)' to '$($policy.Name)'." INFO
+
+        # Define the executor
+        $newExecutor = [PSCustomObject]@{
+            "Id"           = $EndpointId
+            "Name"         = $EndpointName
+            "IsIncluded"   = $true
+            "ExecutorType" = 1
+        }
+
+        # Add the Computer in the policy
+        $executorList = [System.Collections.Generic.List[object]]::new()
+        if ($null -ne $policy.Executors) {
+            $executorList.AddRange($policy.Executors)
+        }
+        $executorList.Add($newExecutor)
+        $policy.Executors = $executorList.ToArray()
+
+        # Upload the policy
+        $newPolicyJSON = $policy | ConvertTo-Json -Depth 10 -Compress
+        $updatePolicy = Invoke-EPMRestMethod -Uri $URI -Method 'PUT' -Headers $Headers -Body $newPolicyJSON
+        
+        if ($null -ne $updatePolicy) {
+            Write-Log "Policy '$($policy.Name)' updated." INFO
+        } else {
+            Write-Log "Error Updating Policy '$($policy.Name)'." ERROR
+        }
+    }
 }
 
 
