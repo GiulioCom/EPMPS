@@ -528,7 +528,7 @@ Function Get-Endpoints {
         It automatically manages pagination by making multiple API calls if the total number
         of computers exceeds the API limit. The results are merged efficiently into a single object.
 
-    .PARAMETER RootURI
+    .PARAMETER URI
         The base URI of the EPM server.
     .PARAMETER Headers
         The authentication headers.
@@ -551,7 +551,7 @@ Function Get-Endpoints {
     param (
         [Parameter(Mandatory=$true)]
         [ValidateNotNullOrEmpty()]
-        [string]$RootURI,
+        [string]$URI,
 
         [Parameter(Mandatory=$true)]
         [hashtable]$Headers,
@@ -573,7 +573,7 @@ Function Get-Endpoints {
     $offset = 0
 
     do {
-        $URI = '{0}/Endpoints/search?offset={1}&limit={2}' -f $RootURI.TrimEnd('/'), $offset, $limit
+        $URI = '{0}/Endpoints/search?offset={1}&limit={2}' -f $URI.TrimEnd('/'), $offset, $limit
         $response = Invoke-EPMRestMethod -Uri $URI -Method 'POST' -Headers $Headers -Body $bodyJSON
         
         if ($null -eq $response -or $null -eq $response.endpoints) {
@@ -652,7 +652,7 @@ Function Get-Policies {
     param (
         [Parameter(Mandatory=$true)]
         [ValidateNotNullOrEmpty()]
-        [string]$RootURI,
+        [string]$URI,
 
         [Parameter(Mandatory=$true)]
         [hashtable]$Headers,
@@ -679,9 +679,8 @@ Function Get-Policies {
     $offset = 0             # Offset
 
     do {
-        $URI = '{0}/Policies/Server/Search?offset={1}&limit={2}&{3}' -f $RootURI.TrimEnd('/'), $offset, $limit, $sort
+        $URI = '{0}/Policies/Server/Search?offset={1}&limit={2}&{3}' -f $URI.TrimEnd('/'), $offset, $limit, $sort
         $response = Invoke-EPMRestMethod -Uri $URI -Method 'POST' -Headers $Headers -Body $bodyJSON
-        #$getPolicies = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search?offset=$offset&limit=$limit&sortBy=$sortBy&sortDir=$sortDir" -Method 'POST' -Headers $sessionHeader -Body $bodyJSON
         
         $policyList.AddRange($response.Policies)
         $activeCount = $response.ActiveCount       # Update the ActiveCount
@@ -709,7 +708,7 @@ function Add-EndpointToPolicy {
     [CmdletBinding()]
     param (
         [Parameter(Mandatory=$true)]
-        [string]$RootURI,
+        [string]$URI,
 
         [Parameter(Mandatory=$true)]
         [hashtable]$Headers,
@@ -727,7 +726,7 @@ function Add-EndpointToPolicy {
         [string]$PolicyId
     )
         
-    $URI = '{0}/Policies/Server/{1}' -f $RootURI.TrimEnd('/'), $PolicyId
+    $URI = '{0}/Policies/Server/{1}' -f $URI.TrimEnd('/'), $PolicyId
     
     $policyDetails = Invoke-EPMRestMethod -Uri $URI -Method 'GET' -Headers $Headers
     $policy = $policyDetails.Policy
@@ -833,7 +832,7 @@ Write-Log "Entering SET: $($set.setName)..." INFO -ForegroundColor Blue
 
 # EPM Connection:
 $epmConnection = @{
-    RootURI = "$($login.managerURL)/EPM/API/Sets/$($set.setId)"
+    URI = "$($login.managerURL)/EPM/API/Sets/$($set.setId)"
     Headers = $sessionHeader
 }
 
@@ -851,6 +850,13 @@ $epmConnection = @{
 #}
 
 Write-Log "Loading and validating CSV data into memory..." INFO
+
+$requiresPolicy = $false
+$requiresGroup = $false
+
+# Global Cache
+$cachePolicies = @{}
+$cacheGroups = @{}
 
 $CsvMap = @{}
 $Headers = @('ComputerName', 'RecordType', 'ItemList')
@@ -880,11 +886,12 @@ Import-Csv -Path $CsvPath -Header $Headers | ForEach-Object {
 
     if ($type -eq 'policy') {
         $CsvMap[$compName].Policies.AddRange($items)
+        $requiresPolicy = $true
     } elseif ($type -eq 'group') {
         $CsvMap[$compName].Groups.AddRange($items)
+        $requiresGroup = $true
     }
 }
-
 
 Write-Log "Fetching Endpoints validated in the CSV from the EPM Console..." INFO
 
@@ -939,26 +946,44 @@ if ($LiveEndpoints.Count -eq 0) {
 
 Write-Log "Successfully retrieved $($LiveEndpoints.Count) endpoints." INFO
 
-Write-Log "Fetching global policies into local cache..." INFO
+if ($requiresPolicy) {
+    Write-Log "Fetching global policies into local cache..." INFO
 
-# Get the policies list
-# 11: Advanced Windows
-# 36: User Policy Set Security Permissions for File System and Registry Keys
-# 37: User Policy Set Security Permissions for Services
-# 38: User Policy Set Security Permissions for Removable Storage (USB, Optical Discs)
+    # Get the policies list
+    # 11: Advanced Windows
+    # 36: User Policy Set Security Permissions for File System and Registry Keys
+    # 37: User Policy Set Security Permissions for Services
+    # 38: User Policy Set Security Permissions for Removable Storage (USB, Optical Discs)
 
-$policiesFilter = "PolicyType IN 11,36,37,38"
+    $policiesFilter = "PolicyType IN 11,36,37,38"
 
-$LivePolicies = Get-Policies @epmConnection -filter $policiesFilter
-Write-Log "Successfully retrieved $($LivePolicies.Count) policies." INFO
+    $LivePolicies = Get-Policies @epmConnection -filter $policiesFilter
+    Write-Log "Successfully retrieved $($LivePolicies.Count) policies." INFO
 
-# Store in hashtable for faster access
-$cachePolicies = @{}
-foreach ($policy in $LivePolicies.Policies) {
-    $cachePolicies[$policy.PolicyName] = $policy.PolicyId
+    foreach ($policy in $LivePolicies.Policies) {
+        $cachePolicies[$policy.PolicyName] = $policy.PolicyId
+    }
+
+    Write-Log "Successfully cached $($cachePolicies.Count) policies." INFO
 }
 
-Write-Log "Successfully cached $($cachePolicies.Count) policies." INFO
+if ($requiresGroup) {
+    Write-Log "Fetching static groups into local cache..." INFO
+
+    $URI = '{0}/Endpoints/groups/search' -f $epmConnection.URI.TrimEnd('/')
+    $filterGroups = @{
+        filter = "type EQ Static"
+    } | ConvertTo-Json -Compress
+    
+    $LiveGroups = Invoke-EPMRestMethod -URI $URI -Headers $sessionHeader -Method 'POST' -Body $filterGroups
+    
+    foreach ($group in $LiveGroups) {
+        $cacheGroups[$group.name] = $group.id
+    }
+
+    Write-Log "Successfully cached $($cacheGroups.Count) groups." INFO
+}
+
 
 Write-Log "Applying configurations..." INFO
 
@@ -974,9 +999,11 @@ foreach ($endpoint in $LiveEndpoints) {
     }
     
     foreach ($group in $config.Groups) {
-        # Execute your API call to add to group
-        Write-Log "Adding $epName to Group: $group" INFO
-        # Add-EndpointToGroup -EndpointId $endpoint.Id -GroupName $group
+        Write-Log "Adding $EndpointName to Group: $group" INFO
+        
+        $URI = '{0}/endpoints/Groups/{1}/members/{2}' -f $epmConnection.URI.TrimEnd('/'), $cacheGroups[$group], $endpoint.Id
+        [void](Invoke-EPMRestMethod -URI $URI -Headers $sessionHeader -Method 'POST')
+        Write-Log "'$EndpointName' added to '$group'" INFO
     }
 
     foreach ($policyName in $config.Policies) {
