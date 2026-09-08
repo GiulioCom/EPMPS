@@ -49,6 +49,9 @@ param (
     [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch")]
     [string]$tenant,
 
+    [Parameter(HelpMessage="ISPSS OATH2 Application Address")]
+    [string]$OATH2,
+    
     [Parameter(HelpMessage = "Enable logging to file")]
     [switch]$log,
 
@@ -332,6 +335,7 @@ A custom object with the properties "managerURL" and "auth" representing the EPM
     }
 }
 
+function Connect-EPM-ISPSS {
 <#
 .SYNOPSIS
     Connects to CyberArk EPM using the ISPSS OIDC/OAuth portal.
@@ -349,7 +353,6 @@ A custom object with the properties "managerURL" and "auth" representing the EPM
 .OUTPUTS
     [PSCustomObject] containing 'managerURL' (string) and 'auth' (string).
 #>
-function Connect-EPM-ISPSS {
     param (
         [Parameter(Mandatory = $true)]
         [ValidateNotNull()]
@@ -808,7 +811,7 @@ if ($null -eq $credential) {
 }
 
 # Authenticate
-if (-not $ISPSS){
+if (-not $OATH2){
     Write-Log "Legacy authetication..." INFO
     $login = Connect-EPM -credential $credential -epmTenant $tenant
 
@@ -818,8 +821,8 @@ if (-not $ISPSS){
     }
 
 } else {
-    Write-Log "Modern authetication to $ISPSS ..." INFO
-    $login = Connect-EPM-ISPSS -credential $credential -epmTenant $tenant -OATH2 $ISPSS
+    Write-Log "Modern authetication to $OATH2 ..." INFO
+    $login = Connect-EPM-ISPSS -credential $credential -epmTenant $tenant -OATH2 $OATH2
 
     $sessionHeader = @{
         "Authorization" = "Bearer {0}" -f $login.auth
