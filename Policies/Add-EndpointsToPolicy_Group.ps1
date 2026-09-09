@@ -24,18 +24,21 @@
         2. A semicolon-separated list of Policy Names to be applied.
     
     Example CSV format:
-    WIN10X64-1,Script;Shell;PM-Allow Edit Enviroment Variable
-    WIN11-1,Script
+        ComputerName,RecordType,ItemList
+        WIN11X64-1,policy,Script;Shell;[Volvo] Block USB
+        WIN11X64-1,group,Wind3
+        WIN11-1,policy,Script
 
 .EXAMPLE
     .\EPMAddComputertoPolicy_Group.ps1 -username "admin@epm.com" -setName "Default Set" -tenant "eu" -CsvPath "C:\temp\policy_assignments.csv"
 
 .NOTES
-    File: EPMAddComputertoPolicy.ps1
+    File: EPMAddComputertoPolicy_Groups.ps1
     Author: Giulio Compagnone
     Company: CyberArk
     Version: 2
-    Created: 07/2023
+    Created: 10/2025
+    Latest: 09/2026
 #>
 
 param (
@@ -92,7 +95,7 @@ function Write-Log {
     Write-Host $logMessage -ForegroundColor $ForegroundColor
 
     if ($log) {
-        Add-Content -Path $LogPath -Value $logMessage
+        Add-Content -Path $logFilePath -Value $logMessage
     }
 }
 
@@ -346,12 +349,10 @@ function Connect-EPM-ISPSS {
     The PSCredential object representing the client ID (Username) and client secret (Password).
 .PARAMETER epmTenant
     The EPM tenant name (e.g., eu, uk).
-.PARAMETER SubDomain
-    The ISPSS identity portal subdomain.
-.PARAMETER AppAlias
-    The unique OAuth application alias configuration name.
+.PARAMETER OATH2
+    OATH2 full address.
 .OUTPUTS
-    [PSCustomObject] containing 'managerURL' (string) and 'auth' (string).
+    [PSCustomObject] containing 'managerURL' (string) and 'access_token' (string).
 #>
     param (
         [Parameter(Mandatory = $true)]
@@ -371,10 +372,15 @@ function Connect-EPM-ISPSS {
     # Login ISPSS
     try {
 
-        $rawCreds = "{0}:{1}" -f $credential.UserName, $credential.GetNetworkCredential().Password
+        $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($credential.Password)
+        $plainPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+        
+        $rawCreds = "{0}:{1}" -f $credential.UserName, $plainPassword
         $base64   = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($rawCreds))
         
-        # Clean up the clear text variable
+        # Clean up the password
+        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+        $plainPassword = $null
         $rawCreds = $null
         
         $headers = @{ "Authorization" = "Basic $base64" }
@@ -393,7 +399,7 @@ function Connect-EPM-ISPSS {
 
     }
     catch {
-        $msg = "Failed to connect to EPM tenant: {0}. Error: {1}" -f $url, $_.Exception.Message
+        $msg = "Failed to connect to EPM tenant: {0}. Error: {1}" -f $OATH2, $_.Exception.Message
         Write-Log $msg ERROR
         throw $msg
     }
@@ -805,6 +811,7 @@ $sessionHeader = @{}
 
 # Request EPM Credentials
 $credential = Get-Credential -UserName $username -Message "Enter password for $username"
+
 if ($null -eq $credential) {
     Write-Log "Failed to get credentials..." ERROR
     exit
@@ -838,19 +845,6 @@ $epmConnection = @{
     URI = "$($login.managerURL)/EPM/API/Sets/$($set.setId)"
     Headers = $sessionHeader
 }
-
-# Keep track of the processed Endpoints to reduce the request
-#$endpointsProcFile = "EndpointsProcessed.txt"
-#$endpointsProc = @()
-
-#if (Test-Path -Path $endpointsProcFile -PathType Leaf) {
-#    Write-Log "Found Endpoints processed file: $endpointsProcFile" INFO
-    # Load the file content
-#    $endpointsProc = Get-Content $endpointsProcFile
-#} else {
-#    Write-Log "Endpoints processed file '$endpointsProcFile' not found, create new one." WARN
-#    Set-Content -Path $endpointsProcFile -Value $endpointsProc -Force
-#}
 
 Write-Log "Loading and validating CSV data into memory..." INFO
 
@@ -1020,40 +1014,3 @@ foreach ($endpoint in $LiveEndpoints) {
         }
     }
 }
-
-
-
-
-
- <#   
-    # Search the Computer Name in the CSV file
-    if ($csvComputerNames.Contains($computerName)) {
-        Write-Log "- '$($computerName)' in the CSV policy file." INFO
-        # Check if the endpoint has been processed already by reading the file
-        if ($endpointsProc -notcontains $computerName){
-            Write-Log "- '$($computerName)' is not in the processed file." WARN
-
-            # Identify the polcies list from the CSV file
-            $csvPoliciesList = ($policyContent | Where-Object { $_.ComputerName -eq $computerName }).Policies -split ';' | ForEach-Object { $_.Trim() }
-            foreach ($policy in $csvPoliciesList) {
-                Write-Log "- Processing policy '$($policy)'" INFO
-
-                # Check if the policy exist
-                If ($null -eq $($retrievedPoliciesMap[$policy])) {
-                    Write-Log "- '$($policy)' not available in set '$($set.SetName)'" ERROR
-                    Continue
-                }
-                
- 
-                }
-
-            }
-            # Add the Endopoint in the tracker file
-            Add-Content -Path $endpointsProcFile -Value $computerName
-            Write-Log "- Tracker file $endpointsProcFile updated for '$($computerName)'." INFO
-        } else {
-            Write-Log "- Computer '$($computerName)' already processed (in file $endpointsProcFile). Continue to the next..." WARN
-        }
-    }
-}
-#>
