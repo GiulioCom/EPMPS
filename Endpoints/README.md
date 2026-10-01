@@ -8,17 +8,10 @@ The following table summarizes the scripts available in this directory and their
 
 |Script|Description|Example|
 |-|-|-|
-|`EPMDeleteDuplicateComputer`|Remove Duplicate Computer (MyComputer) or Endpoints (Endpoints) in EPM Console|
-|`EPMDeleteDuplicateEndpointsFromFile.ps1`|Remove Duplicate Endpoints (Endpoints) reading from the report.|
 |`EPMGetEndpointDetails.ps1`|Retrieve Endpoints Details|
+|`EPMMoveComputer.ps1`| Move Computer between SET (old script, rely on old API)|
 |`EPMPKGDownloader.ps1`| Download latest EPM Agent Software Package|
-| `EPMSyncComputerGroup.ps1`|Sync computer group by reading a CSV file.|
-
-
-## 🚀 Usage Example
-
-To run a script, provide any required parameters:
-
-```powershell
-# Assuming you are in the root directory:
-./ScriptName.ps1 -username "LoginUserUPN" -tenant "tenant"
+|`Get-EPMEndpoints`|Retrieve Endpoints Data|
+|`Remove-DuplicateEndpoints.ps1`|Remove Duplicate Endpoints by reading the EPM Report|
+|`Remove-EPMEndpoints.ps1`|Remove Endpoints by reading the EPM Report|
+|`Sync-EPMEndpointGroup.ps1`|Sync Endpoint Group group by reading a CSV file.|
