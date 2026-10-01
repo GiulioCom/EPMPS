@@ -104,8 +104,8 @@ function Write-Log {
 
     Write-Host $logMessage -ForegroundColor $ForegroundColor
 
-    if ($log) {
-        Add-Content -Path $logFilePath -Value $logMessage
+    if ($script:EnableLogging) {
+        [System.IO.File]::AppendAllText($script:LogFilePath, "$logMessage`r`n")
     }
 }
 
@@ -563,7 +563,6 @@ function Invoke-EPMMemberUpload {
     if ($Endpoints.Count -eq 1) {
         $FilterString = "name EQ '$($Endpoints[0])'"
     } else {
-        #$FilterString = "name IN '$($Endpoints -join "','")'"
         $FilterString = 'name IN "{0}"' -f ($Endpoints -join '","')
     }
 
@@ -575,41 +574,38 @@ function Invoke-EPMMemberUpload {
     } | ConvertTo-Json -Compress
 
     $addMembers = Invoke-EPMRestMethod -Uri "$URI/Endpoints/Groups/$GroupId/members" -Method 'POST' -Headers $sessionHeader -Body $UpdateGroupBody
-    
-    if ($addMembers.count -ge $Endpoints.Count) {
-        Write-Log "Successfully uploaded: $($addMembers.count)/$($Endpoints.Count) members." INFO
-    } elseif ($addMembers.count -lt $Endpoints.Count) {
-        Write-Log "Successfully uploaded: $($addMembers.count)/$($Endpoints.Count) members." WARN
-    } else {
-        Write-Log "API responded but no members were updated for Group $GroupId." WARN
-    }
+
+    return $addMembers
 }
 
 ### Begin Script ###
 
-$scriptName = [System.IO.Path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
-
 ## Prepare log folder and file
-# Set default log folder if not provided
-if ($log) {
+$scriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
+
+$script:EnableLogging = $Log.IsPresent
+$script:LogFilePath   = $null
+
+if ($script:EnableLogging) {
     if (-not $PSBoundParameters.ContainsKey('logFolder')) {
-        $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
-        $logFolder = Join-Path $scriptDirectory "log"
+        # Default to a 'log' folder in the same directory as the script
+        $LogFolder = Join-Path -Path $PSScriptRoot -ChildPath "log"
     }
 
     # Ensure the log folder exists
-    if (-not (Test-Path $logFolder)) {
-        New-Item -Path $logFolder -ItemType Directory -Force
+if (-not (Test-Path -Path $LogFolder -PathType Container)) {
+        [void](New-Item -Path $LogFolder -ItemType Directory -Force)
     }
 
     # Create log file name based on timestamp and script name
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $logFileName = "$timestamp`_$scriptName.log"
-    $logFilePath = Join-Path $logFolder $logFileName
+    $logFileName = "${timestamp}_${scriptName}.log"
+    
+    $script:LogFilePath = Join-Path -Path $LogFolder -ChildPath $logFileName
 
-    Write-Log "Logging enabled. Log file: $logFilePath" INFO
+    Write-Log "Logging enabled. Log file: $($script:LogFilePath)" INFO
 }
-##
+## Log file done
 
 Write-Box "$scriptName"
 
@@ -674,6 +670,8 @@ ConvertTo-EpmGroupData -Path $MappingCsvPath -GroupLookup $EndpointsGroupMap | F
     Write-Log "Adding $($_.Endpoints.Count) members to '$($_.GroupName)'." INFO
 
     # Managing the filter lenght limitation = 5120
+
+    $SuccessfulAgentIds = [System.Collections.Generic.List[string]]::new()
     
     $CurrentBatch = [System.Collections.Generic.List[string]]::new()
     $CurrentLength = 10 # Starting overhead for "name IN ()"
@@ -682,12 +680,24 @@ ConvertTo-EpmGroupData -Path $MappingCsvPath -GroupLookup $EndpointsGroupMap | F
     $BatchNumber = 0
     
     foreach ($Endpoint in $_.Endpoints) {
-        $EntryLength = $Endpoint.Length + 3 # for each Endpoint single quote and comma: '',
+
+        $EntryLength = $Endpoint.Length + 3 # for each Endpoint consider single quote and comma added by Invoke-EPMMemberUpload: '',
     
         if (($CurrentLength + $EntryLength) -gt 5100) {
             $BatchNumber++
             Write-Log "Processing Batch $BatchNumber ($($CurrentBatch.Count) items). Overall: $TotalProcessedCount/$($_.Endpoints.Count)" INFO
-            Invoke-EPMMemberUpload -Endpoints $CurrentBatch -GroupId $GroupID -Override $IsFirstBatch
+            $BatchResult = Invoke-EPMMemberUpload -Endpoints $CurrentBatch -GroupId $GroupID -Override $IsFirstBatch
+
+            $AddGroupMsg = 'Successfully uploaded: {0}/{1} members.' -f $BatchResult.Count, $Endpoints.Count
+            if ($BatchResult.count -ge $CurrentBatch.Count) {
+                Write-Log $AddGroupMsg INFO
+            } else {
+                Write-Log $AddGroupMsg WARN
+            }
+
+            if ($null -ne $BatchResult) {
+                $SuccessfulAgentIds.AddRange([string[]]$BatchResult)
+            }
         
             $IsFirstBatch = $false
             $CurrentBatch.Clear()
@@ -706,151 +716,19 @@ ConvertTo-EpmGroupData -Path $MappingCsvPath -GroupLookup $EndpointsGroupMap | F
         } else {
             Write-Log "Processing $($_.Endpoints.Count)." INFO
         }
-        Invoke-EPMMemberUpload -Endpoints $CurrentBatch -GroupId $GroupID -Override $IsFirstBatch
-    }    
-    
-    <#
-    $EndpointsList = $_.Endpoints -join ','
-    Write-Log "Endpoints: $EndpointsList" INFO
-
-    if ($_.Endpoints.Count -eq 1) {
-        $filter = "name EQ $EndpointsList"
-    } else {
-        $filter = "name IN $EndpointsList"
-    }
-
-    $UpdateGroupBody = @{
-        "filter" = $filter
-        "override" = $true
-    } | ConvertTo-Json
-    
-    $addMembers = Invoke-EPMRestMethod -Uri "$URI/Endpoints/Groups/$GroupID/members" -Method 'POST' -Headers $sessionHeader -Body $UpdateGroupBody
-
-    if ($addMembers.count -ge $_.Endpoints.Count) {
-        Write-Log "Successfully added $($addMembers.Count) members in '$($_.GroupName)'." INFO    
-    } elseif ($addMembers.count -lt $_.Endpoints.Count){
-        Write-Log "Only $($addMembers.count) of $($_.Endpoints.Count) uploaded." WARN
-    } else {
-        Write-Log "Error uploading..." ERROR
-    }
-    #>
-}
-
-
-<#
-# Get Endpoints
-## Initialize a Hashtable to store ComputerName as the Key
-## and an ArrayList of IDs.
-## If there are more value for the same Endpoint name (duplicated)
-## The ID will be added to the same ComputerName
-
-$EndpointLookup = @{}
-
-# Adding Map logic
-$AddInfoToMap = {
-    param($CompName, $AgentId)
-    $CleanName = $CompName.Trim()
-    $CleanId = [string]$AgentId.Trim()
-
-    if (-not [string]::IsNullOrWhiteSpace($CleanName)) {
-        if (-not $EndpointLookup.ContainsKey($CleanName)) {
-            $EndpointLookup[$CleanName] = [System.Collections.Generic.List[string]]::new()
-        }
-        $EndpointLookup[$CleanName].Add($CleanId)
-    }
-}
-
-if ($null -ne $LookupCsvPath) {
-
-    Write-Log "Importing data from $LookupCsvPath..." INFO
-
-    # Validate CSV
-    $HeaderChecked = $false
-    Import-Csv -Path $LookupCsvPath | ForEach-Object {
-        if (-not $HeaderChecked) {
-            $RawHeaders = $_.psobject.properties.name
-                if ('Computer' -notin $RawHeaders -or 'New Agent Id' -notin $RawHeaders) {
-                    throw "Schema Error: Missing required columns in $LookupCsvPath"
-                }
-            $HeaderChecked = $true
-        }
-        &$AddInfoToMap -CompName $_.Computer -AgentId $_.'New Agent Id'
-    }
-} else {
-
-    Write-Log "WARNING: No Endpoints Report (LookupCsvPath) was provided." WARN
-    Write-Log "- The script will query the EPM Console directly." WARN
-    Write-Log "- RISK: This may hit the 100,000 daily API request limit." WARN
-    Write-Log "- ADVICE: For large-scale operations, use a CSV report to save API quota." WARN
-    $Confirmation = Read-Host "Are you sure you want to continue with direct API access? (y/N)"
-
-    if ($Confirmation -ne 'y') {
-        Write-Log "Operation cancelled by user to preserve API quota." INFO
-        return
-    }
-
-    $getEndpoints = Get-EPMEndpoints
-
-    foreach ($endpoint in $getEndpoints.endpoints) {
-        &$AddInfoToMap -CompName $_.Computer -AgentId $_.'New Agent Id'
-    }
-}
-
-#>
-
-<#
-ConvertTo-EpmGroupData -Path $source -GroupLookup $EndpointsGroupMap | ForEach-Object {
-    
-    Write-Log "Processing Group: $($_.GroupName)..." INFO
-    Write-Log "  Computers: ($($_.Endpoints -join ', '))" DEBUG
-
-    # Convert ComputerName to Computer ID
-    $memberIDsList = [System.Collections.Generic.List[string]]::new()
-    foreach ($Endpoint in $_.Endpoints) {
-        if ($EndpointLookup.ContainsKey($Endpoint)) {
-            $memberIDsList.AddRange($EndpointLookup[$Endpoint])
-
+        $BatchResult = Invoke-EPMMemberUpload -Endpoints $CurrentBatch -GroupId $GroupID -Override $IsFirstBatch
+        
+        $AddGroupMsg = 'Successfully uploaded: {0}/{1} members.' -f $BatchResult.Count, $Endpoints.Count
+        if ($BatchResult.count -ge $CurrentBatch.Count) {
+            Write-Log $AddGroupMsg INFO
         } else {
-            Write-Log "Endpoint '$computerName' not found in EPM inventory. Skipping for group '$($_.GroupName)'." WARN
+            Write-Log $AddGroupMsg WARN
+        }
+        
+        if ($null -ne $BatchResult) {
+            $SuccessfulAgentIds.AddRange([string[]]$BatchResult)
         }
     }
     
-    # Check if we have any valid IDs left to process
-    if ($memberIDsList.Count -eq 0) {
-        Write-Log "Skipping group '$($_.GroupName)': No members found in EPM inventory." WARN
-        return # Skip to the next group
-    }
-
-    # Prepare Body for Update Group
-    $memberIDs = @{
-        "membersIds" = $memberIDsList
-    } | ConvertTo-Json
-    
-    if ($null -eq $_.GroupId) {
-        # Group missing - Create New Group
-        Write-Log -Message "Group '$($GroupObject.EpmGroupName)' does not exist. Creating..." INFO
-       
-        $compGroupAdd = @{
-            "type" = "Static"
-            "name" = $($GroupObject.EpmGroupName)
-            "description" = "Created by script"
-        } | ConvertTo-Json
-        
-        $createCompGroups = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/Groups" -Method 'POST' -Headers $sessionHeader -Body $compGroupAdd
-        if ($null -eq $createCompGroups -or -not $createCompGroups.id) {
-            Write-Log "Group creation for '$($_.EpmGroupName)' failed. API returned no ID." ERROR
-            continue
-        }
-        Write-Log "Group '$($GroupObject.EpmGroupName)' created successfully with ID: $($createCompGroups.id)." INFO
-        
-        $addMembersIDs = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/Groups/$($createCompGroups.id)/members/ids" -Method 'POST' -Headers $sessionHeader -Body $memberIDs
-        Write-Log "Successfully added $($addMembersIDs.Count) members to new group '$($GroupObject.EpmGroupName)'." INFO    
-    }
-    else {
-        # Group present
-        Write-Log "Group '$($_.EpmGroupName)' (ID: $($_.GroupId)) exists. Updating members..." INFO
-        $addMembersIDs = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Endpoints/Groups/$($GroupObject.GroupId)/members/ids" -Method 'POST' -Headers $sessionHeader -Body $memberIDs
-        Write-Log "Successfully added $($addMembersIDs.Count) members to new group '$($GroupObject.EpmGroupName)'." INFO    
-    }
+    Write-Log "List of added IDs:$([Environment]::NewLine)$($SuccessfulAgentIds -join [Environment]::NewLine)" INFO
 }
-#>
