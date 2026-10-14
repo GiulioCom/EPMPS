@@ -685,67 +685,72 @@ Function Get-Endpoints {
     }
 }
 
-Function Get-Policies {
-    <#
-    .SYNOPSIS
-        Retrieves a list of EPM policies from a CyberArk EPM server, handling pagination automatically.
+Function Get-PoliciesAppGroup {
+<#
+.SYNOPSIS
+    Retrieves a list of EPM policies from a CyberArk EPM server, handling pagination automatically.
+.DESCRIPTION
+    This function acts as a wrapper for the CyberArk EPM REST API to get policies.
+    It automatically manages pagination by making multiple API calls if the total number
+    of policies exceeds the API's maximum limit (1000). The function merges all
+    policies into a single PSCustomObject for easy management.
+.PARAMETER RootUri
+    The base URI of the EPM API.
+.PARAMETER Headers
+    The authorization headers for the API request.
+.PARAMETER TargetType
+    The type of policy to search into, it can be Policy or ApplicationGroup
+.PARAMETER limit
+    The maximum number of policies to retrieve per API call. The default is 1000,
+    which is the maximum allowed by the CyberArk EPM API.
+.PARAMETER sortBy
+    The field by which to sort the policies. Common values include "Updated", "Name",
+    and "PolicyType". The default is "Updated".
+.PARAMETER sortDir
+    The sorting direction. Valid values are "asc" (ascending) and "desc" (descending).
+    The default is "desc".
+.PARAMETER filter
+    A string containing filter criteria for the policies. 
+    Check Filter options: https://docs.cyberark.com/epm/latest/en/content/webservices/getpolicies.htm#Filteroptions
+.EXAMPLE
+    Get-EPMPolicies -limit 500 -sortBy "Name"
+.OUTPUTS
+    This function returns an object containing the merged policies and metadata.
+    The object has the following properties:
+        - Policies: An array of all policy objects.
+        - ActiveCount: The count of active policies.
+        - TotalCount: The total number of policies on the server.
+        - FilteredCount: The total number of policies that match the applied filter.
 
-    .DESCRIPTION
-        This function acts as a wrapper for the CyberArk EPM REST API to get policies.
-        It automatically manages pagination by making multiple API calls if the total number
-        of policies exceeds the API's maximum limit (1000). The function merges all
-        policies into a single PSCustomObject for easy management.
-
-    .PARAMETER limit
-        The maximum number of policies to retrieve per API call. The default is 1000,
-        which is the maximum allowed by the CyberArk EPM API.
-
-    .PARAMETER sortBy
-        The field by which to sort the policies. Common values include "Updated", "Name",
-        and "PolicyType". The default is "Updated".
-
-    .PARAMETER sortDir
-        The sorting direction. Valid values are "asc" (ascending) and "desc" (descending).
-        The default is "desc".
-
-    .PARAMETER policyFilter
-        A hashtable containing filter criteria for the policies. The keys and values
-        must match the JSON format expected by the EPM API's search endpoint.
-        Example: @{ "filter" = "PolicyType IN 11,36,37,38" }.
-
-    .EXAMPLE
-        Get-EPMPolicies -limit 500 -sortBy "Name"
-
-    .EXAMPLE
-        $myFilter = @{
-            "filter" = "PolicyType IN 11,36"
-        }
-        Get-EPMPolicies -policyFilter $myFilter
-
-    .OUTPUTS
-        This function returns an object containing the merged policies and metadata.
-        The object has the following properties:
-            - Policies: An array of all policy objects.
-            - ActiveCount: The count of active policies.
-            - TotalCount: The total number of policies on the server.
-            - FilteredCount: The total number of policies that match the applied filter.
-
-    .NOTES
-        This function requires a valid session header and manager URL to be accessible
-        in the execution context. It uses Invoke-EPMRestMethod.
-    #>
+.NOTES
+    This function requires a valid session header and manager URL to be accessible
+    in the execution context. It uses Invoke-EPMRestMethod.
+#>
 
     param (
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
-        [string]$RootURI,
+        [ValidateScript({ $_.Scheme -eq 'https' })]
+        [System.Uri]$RootUri,
 
         [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
         [hashtable]$Headers,
+
+        [ValidateSet('Policy', 'ApplicationGroup', IgnoreCase = $true)]
+        [string]$TargetType,
         
-        [int]$limit = 1000,             # Set limit to the max size if not declared
-        [string]$sortBy = "Updated",
-        [string]$sortDir = "desc",
+        [ValidateRange(1, 1000)]
+        [int]$limit = 1000,
+        
+        [int]$offset = 0,
+
+        [ValidateSet('Name','PolicyName','ServerPolicyName','Type','PolicyType','ServerPolicyType','IsActive','Active','Status','Action','OsType','Platform','Precedence','Order','Computers','Allcomputers','Executors','IsAppliedToAllComputers','Created','Updated','LastModified','ModifiedDate')]
+        [string]$sortBy,
+        
+        [ValidateSet('asc','desc')]
+        [string]$sortDir,
+        
         [string]$filter
     )
 
@@ -754,41 +759,323 @@ Function Get-Policies {
     $totalCount = 0
     $filteredCount = 0
 
-    $bodyHashtable = @{}
-    if ((-not [string]::IsNullOrWhiteSpace($filter))) {
-        $bodyHashtable.filter = $filter
+    # API Param
+    $RequestParam = @{
+        Method  = 'POST'
+        Headers = $Headers
     }
-    $bodyJSON = $bodyHashtable | ConvertTo-Json -Compress
 
-    $sort = 'sortBy={0}&sortDir={1}' -f $sortBy, $sortDir
+    # Prepare Body Filter
+    if (-not [string]::IsNullOrWhiteSpace($filter)) {
+    
+        $Payload = [pscustomobject]@{
+            filter = $filter
+        }
+        $RequestParam.Body = ConvertTo-Json -InputObject $Payload -Compress
+    }
 
-    $offset = 0             # Offset
+    switch ($TargetType) {
+        'Policy' {
+            $TargetTypeURL = 'Policies/Server/Search'
+        }
+        'ApplicationGroup' {
+            $TargetTypeURL = 'Policies/ApplicationGroups/Search'
+        }
+    }
+
+    $baseEndpoint = [System.Uri]::new($RootUri, $TargetTypeURL)
+    $uriBuilder = [System.UriBuilder]::new($baseEndpoint)
 
     do {
-        $URI = '{0}/Policies/Server/Search?offset={1}&limit={2}&{3}' -f $RootURI.TrimEnd('/'), $offset, $limit, $sort
-        $response = Invoke-EPMRestMethod -Uri $URI -Method 'POST' -Headers $Headers -Body $bodyJSON
-        #$getPolicies = Invoke-EPMRestMethod -Uri "$($login.managerURL)/EPM/API/Sets/$($set.setId)/Policies/Server/Search?offset=$offset&limit=$limit&sortBy=$sortBy&sortDir=$sortDir" -Method 'POST' -Headers $sessionHeader -Body $bodyJSON
+        # Prepare Query
+        $QueryElements = [System.Collections.Generic.List[string]]::new()
+        $QueryElements.Add("offset=$offset")
+        $QueryElements.Add("limit=$limit")
+        
+        if (-not [string]::IsNullOrWhiteSpace($sortBy)) { $QueryElements.Add("sortBy=$sortBy") }
+        if (-not [string]::IsNullOrWhiteSpace($sortDir)) { $QueryElements.Add("sortDir=$sortDir") }
+
+        $uriBuilder.Query = [string]::Join('&', $QueryElements)
+        $RequestParam.URI = $uriBuilder.Uri
+        
+        $response = Invoke-EPMRestMethod @RequestParam
+       
+        $returnedItemsCount = $response.Policies.Count
+
+        if ($returnedItemsCount -eq 0) {
+            Write-Log "API returned 0 items. Reached the true end of the dataset." DEBUG
+            break 
+        }        
         
         $policyList.AddRange($response.Policies)
         $activeCount = $response.ActiveCount       # Update the ActiveCount
         $totalCount = $response.TotalCount         # Update the TotalCount
         $filteredCount = $response.FilteredCount   # Update the FilteredCount
 
-        #$total = $response.FilteredCount                         # Update the total with the real total
-        $offset += $response.Policies.Count
+        $offset += $returnedItemsCount
 
-    } while (
-        ($offset -lt $filteredCount) #-and 
-        #($response.returnedCount -gt 0) # LOGIC: Failsafe to prevent an infinite loop if the API stalls and returns 0 items
-    )
+    } while ($offset -lt $filteredCount)
 
-    return [PSCustomObject]@{
+    [PSCustomObject]@{
         Policies = $policyList.ToArray()
         ActiveCount = $activeCount
         TotalCount = $totalCount
         FilteredCount = $filteredCount
     }
-   
+}
+Function Get-AppGroups {
+<#
+.SYNOPSIS
+    Retrieves a list of EPM Application Groups from a CyberArk EPM server, handling pagination automatically.
+
+.DESCRIPTION
+    This function acts as a wrapper for the CyberArk EPM REST API to get Application Groups.
+    It automatically manages pagination by making multiple API calls if the total number
+    of policies exceeds the API's maximum limit (1000). The function merges all
+    policies into a single PSCustomObject for easy management.
+
+.PARAMETER limit
+    The maximum number of policies to retrieve per API call. The default is 1000,
+    which is the maximum allowed by the CyberArk EPM API.
+
+.PARAMETER sortBy
+    The field by which to sort the policies. Common values include "Updated", "Name",
+    and "PolicyType". The default is "Updated".
+
+.PARAMETER sortDir
+    The sorting direction. Valid values are "asc" (ascending) and "desc" (descending).
+    The default is "desc".
+
+.PARAMETER filter
+    A string containing filter criteria for the policies. 
+    Check Filter options: https://docs.cyberark.com/epm/latest/en/content/webservices/getappgroups.htm#Filteroptions
+
+.EXAMPLE
+    Get-AppGroups -limit 500 -sortBy "Name"
+
+.OUTPUTS
+    This function returns an object containing the merged policies and metadata.
+    The object has the following properties:
+        - Policies: An array of all policy objects.
+        - ActiveCount: The count of active policies.
+        - TotalCount: The total number of policies on the server.
+        - FilteredCount: The total number of policies that match the applied filter.
+
+.NOTES
+    This function requires a valid session header and manager URL to be accessible
+    in the execution context. It uses Invoke-EPMRestMethod.
+#>
+
+    param (
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [ValidateScript({ $_.Scheme -eq 'https' })]
+        [System.Uri]$RootUri,
+
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [hashtable]$Headers,
+        
+        [ValidateRange(1, 1000)]
+        [int]$limit = 1000,
+        
+        [int]$offset = 0,
+
+        [ValidateSet('Name','PolicyName','ServerPolicyName','Type','PolicyType','ServerPolicyType','IsActive','Active','Status','Action','OsType','Platform','Precedence','Order','Computers','Allcomputers','Executors','IsAppliedToAllComputers','Created','Updated','LastModified','ModifiedDate')]
+        [string]$sortBy,
+        
+        [ValidateSet('asc','desc')]
+        [string]$sortDir,
+        
+        [string]$filter
+    )
+
+    $policyList = [System.Collections.Generic.List[object]]::new()
+    $activeCount = 0
+    $totalCount = 0
+    $filteredCount = 0
+
+    # API Param
+    $RequestParam = @{
+        Method  = 'POST'
+        Headers = $Headers
+    }
+
+    # Prepare Body Filter
+    if (-not [string]::IsNullOrWhiteSpace($filter)) {
+    
+        $Payload = [pscustomobject]@{
+            filter = $filter
+        }
+        $RequestParam.Body = ConvertTo-Json -InputObject $Payload -Compress
+    }
+
+    $baseEndpoint = [System.Uri]::new($RootUri, 'Policies/ApplicationGroups/Search')
+    $uriBuilder = [System.UriBuilder]::new($baseEndpoint)
+
+    do {
+        # Prepare Query
+        $QueryElements = [System.Collections.Generic.List[string]]::new()
+        $QueryElements.Add("offset=$offset")
+        $QueryElements.Add("limit=$limit")
+        
+        if (-not [string]::IsNullOrWhiteSpace($sortBy)) { $QueryElements.Add("sortBy=$sortBy") }
+        if (-not [string]::IsNullOrWhiteSpace($sortDir)) { $QueryElements.Add("sortDir=$sortDir") }
+
+        $uriBuilder.Query = [string]::Join('&', $QueryElements)
+        $RequestParam.URI = $uriBuilder.Uri
+        
+        $response = Invoke-EPMRestMethod @RequestParam
+        
+        $returnedItemsCount = $response.Policies.Count
+
+        if ($returnedItemsCount -eq 0) {
+            Write-Log "API returned 0 items. Reached the true end of the dataset." DEBUG
+            break 
+        }        
+        
+        $policyList.AddRange($response.Policies)
+        $activeCount = $response.ActiveCount       # Update the ActiveCount
+        $totalCount = $response.TotalCount         # Update the TotalCount
+        $filteredCount = $response.FilteredCount   # Update the FilteredCount
+
+        $offset += $returnedItemsCount
+
+    } while ($offset -lt $filteredCount)
+
+    [PSCustomObject]@{
+        Policies = $policyList.ToArray()
+        ActiveCount = $activeCount
+        TotalCount = $totalCount
+        FilteredCount = $filteredCount
+    }
+}
+Function Get-Policies {
+<#
+.SYNOPSIS
+    Retrieves a list of EPM policies from a CyberArk EPM server, handling pagination automatically.
+
+.DESCRIPTION
+    This function acts as a wrapper for the CyberArk EPM REST API to get policies.
+    It automatically manages pagination by making multiple API calls if the total number
+    of policies exceeds the API's maximum limit (1000). The function merges all
+    policies into a single PSCustomObject for easy management.
+
+.PARAMETER limit
+    The maximum number of policies to retrieve per API call. The default is 1000,
+    which is the maximum allowed by the CyberArk EPM API.
+
+.PARAMETER sortBy
+    The field by which to sort the policies. Common values include "Updated", "Name",
+    and "PolicyType". The default is "Updated".
+
+.PARAMETER sortDir
+    The sorting direction. Valid values are "asc" (ascending) and "desc" (descending).
+    The default is "desc".
+
+.PARAMETER filter
+    A string containing filter criteria for the policies. 
+    Check Filter options: https://docs.cyberark.com/epm/latest/en/content/webservices/getpolicies.htm#Filteroptions
+
+.EXAMPLE
+    Get-EPMPolicies -limit 500 -sortBy "Name"
+
+.OUTPUTS
+    This function returns an object containing the merged policies and metadata.
+    The object has the following properties:
+        - Policies: An array of all policy objects.
+        - ActiveCount: The count of active policies.
+        - TotalCount: The total number of policies on the server.
+        - FilteredCount: The total number of policies that match the applied filter.
+
+.NOTES
+    This function requires a valid session header and manager URL to be accessible
+    in the execution context. It uses Invoke-EPMRestMethod.
+#>
+
+    param (
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [ValidateScript({ $_.Scheme -eq 'https' })]
+        [System.Uri]$RootUri,
+
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]
+        [hashtable]$Headers,
+        
+        [ValidateRange(1, 1000)]
+        [int]$limit = 1000,
+        
+        [int]$offset = 0,
+
+        [ValidateSet('Name','PolicyName','ServerPolicyName','Type','PolicyType','ServerPolicyType','IsActive','Active','Status','Action','OsType','Platform','Precedence','Order','Computers','Allcomputers','Executors','IsAppliedToAllComputers','Created','Updated','LastModified','ModifiedDate')]
+        [string]$sortBy,
+        
+        [ValidateSet('asc','desc')]
+        [string]$sortDir,
+        
+        [string]$filter
+    )
+
+    $policyList = [System.Collections.Generic.List[object]]::new()
+    $activeCount = 0
+    $totalCount = 0
+    $filteredCount = 0
+
+    # API Param
+    $RequestParam = @{
+        Method  = 'POST'
+        Headers = $Headers
+    }
+
+    # Prepare Body Filter
+    if (-not [string]::IsNullOrWhiteSpace($filter)) {
+    
+        $Payload = [pscustomobject]@{
+            filter = $filter
+        }
+        $RequestParam.Body = ConvertTo-Json -InputObject $Payload -Compress
+    }
+
+    $baseEndpoint = [System.Uri]::new($RootUri, 'Policies/Server/Search')
+    $uriBuilder = [System.UriBuilder]::new($baseEndpoint)
+
+    do {
+        # Prepare Query
+        $QueryElements = [System.Collections.Generic.List[string]]::new()
+        $QueryElements.Add("offset=$offset")
+        $QueryElements.Add("limit=$limit")
+        
+        if (-not [string]::IsNullOrWhiteSpace($sortBy)) { $QueryElements.Add("sortBy=$sortBy") }
+        if (-not [string]::IsNullOrWhiteSpace($sortDir)) { $QueryElements.Add("sortDir=$sortDir") }
+
+        $uriBuilder.Query = [string]::Join('&', $QueryElements)
+        $RequestParam.URI = $uriBuilder.Uri
+        
+        $response = Invoke-EPMRestMethod @RequestParam
+        
+        $returnedItemsCount = $response.Policies.Count
+
+        if ($returnedItemsCount -eq 0) {
+            Write-Log "API returned 0 items. Reached the true end of the dataset." DEBUG
+            break 
+        }        
+        
+        $policyList.AddRange($response.Policies)
+        $activeCount = $response.ActiveCount       # Update the ActiveCount
+        $totalCount = $response.TotalCount         # Update the TotalCount
+        $filteredCount = $response.FilteredCount   # Update the FilteredCount
+
+        $offset += $returnedItemsCount
+
+    } while ($offset -lt $filteredCount)
+
+    [PSCustomObject]@{
+        Policies = $policyList.ToArray()
+        ActiveCount = $activeCount
+        TotalCount = $totalCount
+        FilteredCount = $filteredCount
+    }
 }
 
 function Add-EndpointToPolicy {
