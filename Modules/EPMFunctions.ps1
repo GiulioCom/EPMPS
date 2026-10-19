@@ -6,12 +6,13 @@
 
 .PARAMETER username
     The EPM username (e.g., user@domain).
-
 .PARAMETER setName
     The name of the EPM set.
-
 .PARAMETER tenant
     The EPM tenant name (e.g., eu, uk).
+.PARAMETER TokenUri
+    The fully qualified OAuth 2.0 token endpoint URI 
+    (e.g., 'https://ACI1234.id.cyberark.cloud/oauth2/token/epmapi'
 
 .PARAMETER destinationFolder
 
@@ -38,11 +39,8 @@ param (
     [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch")]
     [string]$tenant,
 
-    [Parameter(HelpMessage="ISPSS Address")]
-    [string]$ISPSS,
-    
-    #[Parameter(HelpMessage="Please enter valid ISPSS OATH alias")]
-    #[string]$AppAlias,
+    [Parameter(HelpMessage="The fully qualified OAuth 2.0 token endpoint URI")]
+    [string]$TokenUri,
     
     [Parameter(HelpMessage = "Enable logging to file and console")]
     [switch]$log,
@@ -159,7 +157,209 @@ function Initialize-Log {
 }
 
 ## Invoke-RestMethod Wrapper
-function Invoke-EPMRestMethod {
+function Invoke-EpmHttpClient {
+<#
+.SYNOPSIS
+    High-performance REST client using native .NET HttpClient with payload support.
+.DESCRIPTION
+    Leverages .NET HttpClient to perform synchronous HTTP queries. It natively supports
+    JSON payloads, guarantees UTF-8 encoding on both outbound and inbound streams, 
+    and offers a -Raw switch to bypass memory-heavy JSON deserialization.
+.PARAMETER Uri
+    The validated HTTPS URI of the EPM endpoint.
+.PARAMETER Method
+    The HTTP verb to execute (e.g., GET, POST, PUT, DELETE).
+.PARAMETER Headers
+    Hashtable containing authorization headers.
+.PARAMETER Body
+    The JSON string payload to upload (for POST/PUT requests).
+.PARAMETER Raw
+    Switch to return the raw JSON string instead of a deserialized PowerShell object.
+.OUTPUTS
+    [object] Deserialized PSCustomObject, or [string] if -Raw is used.
+#>
+    [CmdletBinding()]
+    param (
+        [Parameter(Mandatory = $true)]
+        [System.Uri]$Uri,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('GET', 'POST', 'PUT', 'DELETE', 'PATCH')]
+        [string]$Method,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Headers,
+
+        [Parameter(Mandatory = $false)]
+        [string]$Body,
+
+        [Parameter(Mandatory = $false)]
+        [switch]$Raw
+    )
+
+    # 1. Security Pillar: Enforce TLS 1.2+ and HTTPS
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls13
+    
+    if ($Uri.Scheme -ne [System.Uri]::UriSchemeHttps) {
+        throw [System.Security.SecurityException]::new("Insecure transmission blocked. HTTPS is required.")
+    }
+
+    # 2. Resource Pillar: Instantiate Http client structures
+    $Handler = [System.Net.Http.HttpClientHandler]::new()
+    $Client  = [System.Net.Http.HttpClient]::new($Handler)
+
+    # Translate string method to .NET HttpMethod object
+    $NetMethod = [System.Net.Http.HttpMethod]::new($Method)
+    $Request   = [System.Net.Http.HttpRequestMessage]::new($NetMethod, $Uri)
+
+    try {
+        # 3. Secure Header Attachment (Prevents CRLF Injection)
+        foreach ($Key in $Headers.Keys) {
+            # Skip Content-Type if present; HttpClient sets it at the Content level
+            if ($Key -eq 'Content-Type') { continue }
+            $null = $Request.Headers.TryAddWithoutValidation($Key, [string]$Headers[$Key])
+        }
+
+        # 4. Outbound Payload Construction (UTF-8 Enforced)
+        if (-not [string]::IsNullOrEmpty($Body)) {
+            # StringContent automatically encodes to UTF-8 and sets the Content-Type header
+            $Request.Content = [System.Net.Http.StringContent]::new(
+                $Body, 
+                [System.Text.Encoding]::UTF8, 
+                "application/json"
+            )
+        }
+
+        # 5. Execute HTTP Call synchronously (Zero PowerShell ETS pipeline overhead)
+        $Response = $Client.SendAsync($Request).GetAwaiter().GetResult()
+        #$null = $Response.EnsureSuccessStatusCode()
+
+        # 6. Inbound Payload Decoding (Strict UTF-8 Byte Extraction)
+        $Bytes = $Response.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+        $JsonString = [System.Text.Encoding]::UTF8.GetString($Bytes)
+
+        if (-not $Response.IsSuccessStatusCode) {
+            throw [System.Management.Automation.RuntimeException]::new($JsonString)
+        }
+
+        # 7. Memory Optimization: Return raw string if requested
+        if ($Raw.IsPresent) {
+            return $JsonString
+        }
+
+        return ($JsonString | ConvertFrom-Json)
+    }
+    catch {
+        #Write-Error -Message "EPM HttpClient request failed: $_" -Category ConnectionError
+        throw
+    }
+    finally {
+        # 8. Resource Pillar: Deterministic disposal of unmanaged OS resources
+        if ($null -ne $Request.Content) { $Request.Content.Dispose() }
+        $Request.Dispose()
+        $Client.Dispose()
+        $Handler.Dispose()
+    }
+}
+
+function Invoke-EpmRestMethod {
+<#
+.SYNOPSIS
+    Domain orchestration wrapper for EPM REST API calls, managing retry logic and error parsing.
+.DESCRIPTION
+    Delegates the actual HTTP transport to the high-performance Invoke-EpmHttpClient.
+    Handles rate-limiting (EPM00000AE) and specific API state errors cleanly.
+#>
+    param (
+        [Parameter(Mandatory = $true)]
+        [System.Uri]$Uri,
+
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('GET', 'POST', 'PUT', 'DELETE', 'PATCH')]
+        [string]$Method,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Headers,
+
+        [Parameter(Mandatory = $false)]
+        [string]$Body
+    )
+
+    $RetryDelay = 120
+
+    $MaxRetries = 3
+    $retryCount = 0
+
+    while ($retryCount -lt$MaxRetries) {
+        try {
+            return Invoke-EpmHttpClient -Uri $URI -Method $Method -Body $Body -Headers $Headers
+        }
+        catch {
+            $ErrorDetailsMessage = $null
+            
+            # Because of our tweak to Invoke-EpmHttpClient, the exception message IS the raw EPM JSON.
+            $rawErrorString = $_.Exception.Message
+            
+            # Try to parse the thrown string as JSON
+            if (-not [string]::IsNullOrWhiteSpace($rawErrorString)) {
+                $ErrorDetailsMessage = $rawErrorString | ConvertFrom-Json -ErrorAction SilentlyContinue
+            }
+
+            # If it's not JSON, it might be a DNS or connection failure (e.g., host unreachable)
+            if ($null -eq $ErrorDetailsMessage) {
+                # SECURITY PILLAR: Sanitize string to prevent log forging (newline injection)
+                $safeUri = $URI.ToString() -replace "`r|`n", ""
+                $safeRawError = $rawErrorString -replace "`r|`n", " "
+                
+                Write-Log "API call failed for URI: $safeUri. Raw HTTP Error: $safeRawError" "ERROR"
+                throw $_.Exception.Message
+            }
+
+            # Handle rate limit error (EPM00000AE)
+            if ($ErrorDetailsMessage.ErrorCode -eq "EPM00000AE") {
+                # RESOURCE PILLAR: Use Regex named capture group instead of creating a secondary array with -replace
+                $pattern = "(?<minutes>\d+)\s+minute"
+                $match = [regex]::Match($ErrorDetailsMessage.ErrorMessage, $pattern)
+                
+                if ($match.Success) {
+                    $minutes = [int]$match.Groups['minutes'].Value
+                    $RetryDelay = $minutes * 60
+                    Write-Log "Rate limit hit. Retrying in $RetryDelay seconds..." "WARN"
+                } else {
+                    Write-Log "Rate limit hit. Retrying in $RetryDelay seconds (default)..." "WARN"
+                }
+                
+                Start-Sleep -Seconds $RetryDelay
+                $retryCount++
+            } 
+            else {
+                # Handle filter errors or target mismatch errors
+                $safeErrorCode = $ErrorDetailsMessage.ErrorCode -replace "`r|`n", ""
+                $safeErrorMsg  = $ErrorDetailsMessage.ErrorMessage -replace "`r|`n", " "
+
+                if ($safeErrorCode -eq "EPM000002E" -and $null -ne$Body) {
+                    Write-Log "ErrorCode: $safeErrorCode, ErrorMessage: $safeErrorMsg" ERROR
+                    Write-Log "Please verify the filter body if present, as it could be the cause of this error." ERROR
+                    throw "ErrorCode: $safeErrorCode, ErrorMessage:$safeErrorMsg"
+                } 
+                elseif ($safeErrorCode -eq "EPM000012E") {
+                    Write-Log "ErrorCode: $safeErrorCode, ErrorMessage:$safeErrorMsg" "ERROR"
+                    return
+                }
+                else {
+                    # Log and throw any other unhandled API error
+                    Write-Log "ErrorCode: $safeErrorCode, ErrorMessage: $safeErrorMsg" "ERROR"
+                    throw "ErrorCode: $safeErrorCode, ErrorMessage: $safeErrorMsg"
+                }
+            }
+        }
+    }
+
+    Write-Log "API call failed after $MaxRetries retries. URI: $($URI -replace '[\r\n]', '')" ERROR
+    throw "API call failed after $MaxRetries retries."
+}
+
+function Invoke-EPMRestMethod-Old {
 <#
 .SYNOPSIS
     Invokes a REST API method with automatic retry logic in case of transient failures.
@@ -184,11 +384,12 @@ param (
         [string]$URI,
         [string]$Method,
         [object]$Body = $null,
-        [hashtable]$Headers = @{},
-        [int]$MaxRetries = 3,
-        [int]$RetryDelay = 120 # Default value, in case of the returned message doesn't contain the limit info
+        [hashtable]$Headers
     )
 
+    $RetryDelay = 60 # Default value, in case of the returned message doesn't contain the limit info
+
+    $MaxRetries = 3
     $retryCount = 0
 
     $hErrorMsg = "API call failed at line $($MyInvocation.ScriptLineNumber)"
@@ -301,7 +502,7 @@ param (
 }
 
 ## EPM RestAPI Wrappers
-function Connect-EPM {
+function Connect-Epm {
 <#
 .SYNOPSIS
 Connects to the EPM (Endponint Priviled Management) using the provided credentials and tenant information.
@@ -360,61 +561,62 @@ A custom object with the properties "managerURL" and "auth" representing the EPM
     }
 }
 
+function Connect-EpmIspss {
 <#
 .SYNOPSIS
     Connects to CyberArk EPM using the ISPSS OIDC/OAuth portal.
 .DESCRIPTION
     Authenticates against CyberArk Identity ISPSS via client_credentials, retrieves an access token,
     and queries the tenant's base manager URL. Keeps credentials secure in memory using byte arrays.
-.PARAMETER credential
+.PARAMETER Credential
     The PSCredential object representing the client ID (Username) and client secret (Password).
-.PARAMETER epmTenant
+.PARAMETER EpmTenant
     The EPM tenant name (e.g., eu, uk).
-.PARAMETER SubDomain
-    The ISPSS identity portal subdomain.
-.PARAMETER AppAlias
-    The unique OAuth application alias configuration name.
+.PARAMETER TokenUri
+    The fully qualified OAuth 2.0 token endpoint URI 
+    (e.g., 'https://ACI4617.id.cyberark.cloud/oauth2/token/epmapiapp').
 .OUTPUTS
-    [PSCustomObject] containing 'managerURL' (string) and 'auth' (string).
+    [PSCustomObject] Authetication Result.
 #>
-function Connect-EPM-ISPSS {
     param (
         [Parameter(Mandatory = $true)]
         [ValidateNotNull()]
-        [pscredential]$credential,
+        [pscredential]$Credential,
+
+        #[Parameter(Mandatory = $true)]
+        #[string]$EpmTenant,
 
         [Parameter(Mandatory = $true)]
-        [string]$epmTenant,
-
-        [Parameter(Mandatory = $true)]
-        [string]$OATH2
+        [ValidateNotNullOrEmpty()]
+        [System.Uri]$TokenUri
     )
 
-    $access_token = ""
-    $tenantUrl = ""
-    
     # Login ISPSS
     try {
-
         $rawCreds = "{0}:{1}" -f $credential.UserName, $credential.GetNetworkCredential().Password
         $base64   = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($rawCreds))
         
         # Clean up the clear text variable
         $rawCreds = $null
         
-        $headers = @{ "Authorization" = "Basic $base64" }
-        $body    = @{ grant_type = "client_credentials" }
+        $headers = @{ 
+            "Authorization" = "Basic $base64"
+        }
+        $body = @{
+             grant_type = "client_credentials" 
+        }
 
-        $login = Invoke-RestMethod -Uri $OATH2 -Method Post -Headers $headers -Body $body -ContentType "application/x-www-form-urlencoded"
+        $login = Invoke-RestMethod -Uri $TokenUri -Method Post -Headers $headers -Body $body -ContentType "application/x-www-form-urlencoded"
 
         # Ensure the response contains the expected fields
         if (-not $login -or -not $login.access_token -or -not $login.token_type -or -not $login.expires_in) {
-            $msg = "EPM authentication failed on {0}: Missing expected response fields." -f $OATH2
+            $msg = "EPM authentication failed on {0}: Missing expected response fields." -f $TokenUri
             Write-Log $msg ERROR
             throw $msg
         }
 
-        $access_token = $login.access_token
+        return $login
+        #$access_token = $login.access_token
 
     }
     catch {
@@ -423,6 +625,7 @@ function Connect-EPM-ISPSS {
         throw $msg
     }
 
+<#
     # Get the tenant URL
     try {
         $url = "https://api-{0}.epm.cyberark.cloud/epm/api/accounts/tenanturl" -f $epmTenant
@@ -451,8 +654,10 @@ function Connect-EPM-ISPSS {
         managerURL = $tenantUrl
         auth       = $access_token
     }
+#>
 }
 
+function Get-EpmSetID {
 <#
 .SYNOPSIS
     Retrieves the ID and name of an EPM set based on the provided parameters.
@@ -468,10 +673,11 @@ function Connect-EPM-ISPSS {
 .OUTPUTS
     [PSCustomObject] containing 'setId' and 'setName'.
 #>
-function Get-EPMSetID {
     param (
         [Parameter(Mandatory = $true)]
-        [string]$managerURL,
+        [ValidateNotNullOrEmpty()]
+        [ValidateScript({ $_.Scheme -eq 'https' })]
+        [System.Uri]$EpmBaseUri,
 
         [Parameter(Mandatory = $true)]
         [hashtable]$Headers,
@@ -481,8 +687,7 @@ function Get-EPMSetID {
 
     # Retrieve list of sets
     try {
-        $uri = "{0}/EPM/API/Sets" -f $managerURL.TrimEnd('/')
-        $setsResponse = Invoke-EPMRestMethod -URI $uri -Method 'GET' -Headers $Headers
+        $setsResponse = Invoke-EPMRestMethod -URI $EpmBaseUri -Method 'GET' -Headers $Headers
         $setsArray = @($setsResponse.Sets)
 
         if (-not $setsArray -or $setsArray.Count -eq 0) {
@@ -544,6 +749,7 @@ function Get-EPMSetID {
     $msg = "Maximum attempts reached. Exiting set selection."
     Write-Log $msg ERROR
     throw "Maximum attempts reached. Exiting set selection."
+
 }
 
 Function Get-EPMComputers {
@@ -605,34 +811,31 @@ Function Get-EPMComputers {
 }
 
 Function Get-Endpoints {
-    <#
-    .SYNOPSIS
-        Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
+<#
+.SYNOPSIS
+    Retrieves a list of EPM Computers from a CyberArk EPM server, handling pagination automatically.
 
-    .DESCRIPTION
-        This function acts as a wrapper for the CyberArk EPM REST API to get computers.
-        It automatically manages pagination by making multiple API calls if the total number
-        of computers exceeds the API limit. The results are merged efficiently into a single object.
-
-    .PARAMETER RootURI
-        The base URI of the EPM server.
-    .PARAMETER Headers
-        The authentication headers.
-    .PARAMETER limit
-        The maximum number of computers to retrieve per API call. Default: 1000.
-    .PARAMETER filter
-        The search string to filter endpoints.
-
-    .EXAMPLE
-        $allEndpoints = Get-Endpoints -RootURI $uri -Headers $auth -limit 1000
-
-    .OUTPUTS
-        This function returns an object containing the merged computers and metadata.
-        The object has the following properties:
-            - endpoints: An array of all policy objects.
-            - filteredCount: The total number of endpoints  based on the filter.
-            - returnedCount: The returned number of endpoints based on limit.
-    #>
+.DESCRIPTION
+    This function acts as a wrapper for the CyberArk EPM REST API to get computers.
+    It automatically manages pagination by making multiple API calls if the total number
+    of computers exceeds the API limit. The results are merged efficiently into a single object.
+.PARAMETER RootURI
+    The base URI of the EPM server.
+.PARAMETER Headers
+    The authentication headers.
+.PARAMETER limit
+    The maximum number of computers to retrieve per API call. Default: 1000.
+.PARAMETER filter
+    The search string to filter endpoints.
+.EXAMPLE
+    $allEndpoints = Get-Endpoints -RootURI $uri -Headers $auth -limit 1000
+.OUTPUTS
+    This function returns an object containing the merged computers and metadata.
+    The object has the following properties:
+        - endpoints: An array of all policy objects.
+        - filteredCount: The total number of endpoints  based on the filter.
+        - returnedCount: The returned number of endpoints based on limit.
+#>
     [CmdletBinding()]
     param (
         [Parameter(Mandatory=$true)]
@@ -694,7 +897,7 @@ Function Get-PoliciesAppGroup {
     It automatically manages pagination by making multiple API calls if the total number
     of policies exceeds the API's maximum limit (1000). The function merges all
     policies into a single PSCustomObject for easy management.
-.PARAMETER RootUri
+.PARAMETER EpmSetUri
     The base URI of the EPM API.
 .PARAMETER Headers
     The authorization headers for the API request.
@@ -731,7 +934,7 @@ Function Get-PoliciesAppGroup {
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [ValidateScript({ $_.Scheme -eq 'https' })]
-        [System.Uri]$RootUri,
+        [System.Uri]$EpmSetUri,
 
         [Parameter(Mandatory=$true)]
         [ValidateNotNullOrEmpty()]
@@ -783,8 +986,8 @@ Function Get-PoliciesAppGroup {
         }
     }
 
-    $baseEndpoint = [System.Uri]::new($RootUri, $TargetTypeURL)
-    $uriBuilder = [System.UriBuilder]::new($baseEndpoint)
+    $BaseEndpoint = [System.Uri]::new($EpmSetUri, $TargetTypeURL)
+    $UriBuilder = [System.UriBuilder]::new($BaseEndpoint)
 
     do {
         # Prepare Query
@@ -795,8 +998,8 @@ Function Get-PoliciesAppGroup {
         if (-not [string]::IsNullOrWhiteSpace($sortBy)) { $QueryElements.Add("sortBy=$sortBy") }
         if (-not [string]::IsNullOrWhiteSpace($sortDir)) { $QueryElements.Add("sortDir=$sortDir") }
 
-        $uriBuilder.Query = [string]::Join('&', $QueryElements)
-        $RequestParam.URI = $uriBuilder.Uri
+        $UriBuilder.Query = [string]::Join('&', $QueryElements)
+        $RequestParam.URI = $UriBuilder.Uri
         
         $response = Invoke-EPMRestMethod @RequestParam
        
@@ -1145,67 +1348,80 @@ function Add-EndpointToPolicy {
     }
 }
 
-
 ### Begin Script ###
-$ScriptName = [System.IO.Path]::GetFileNameWithoutExtension((Split-Path -leaf $MyInvocation.MyCommand.Path))
-## Prepare log if needed
-if ($log) {
-    $LogFilePath = Initialize-Log -LogFolder $LogFolder
-    Write-Log "Logging enabled. File: $LogFilePath" INFO
-}
 
-Write-Box "$ScriptName"
+## Prepare log folder and file
+$scriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
+
+$script:EnableLogging = $EnableLogging.IsPresent
+$script:LogFilePath   = $null
+
+if ($script:EnableLogging) {
+    if (-not $PSBoundParameters.ContainsKey('LogFolderPath')) {
+        # Default to a 'log' folder in the same directory as the script
+        $LogFolder = Join-Path -Path $PSScriptRoot -ChildPath "log"
+    }
+
+    # Ensure the log folder exists
+if (-not (Test-Path -Path $LogFolder -PathType Container)) {
+        [void](New-Item -Path $LogFolder -ItemType Directory -Force)
+    }
+
+    # Create log file name based on timestamp and script name
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $logFileName = "${timestamp}_${scriptName}.log"
+    
+    $script:LogFilePath = Join-Path -Path $LogFolder -ChildPath $logFileName
+
+    Write-Log "Logging enabled. Log file: $($script:LogFilePath)" INFO
+}
+## Log file done
+
+Write-Box "$scriptName"
 
 # Request EPM Credentials
 $credential = Get-Credential -UserName $username -Message "Enter password for $username"
+
 if ($null -eq $credential) {
     Write-Log "Failed to get credentials..." ERROR
     exit
 }
 
-# Authenticate
-if (-not $ISPSS){
-#if (-not $SubDomain -and -not $AppAlias) {
+[uri]$EpmBaseUri = $null
+
+# Authentication
+if (-not $TokenUri){
     Write-Log "Legacy authetication..." INFO
     $login = Connect-EPM -credential $credential -epmTenant $tenant
-
-    # Create a session header with the authorization token
-    $sessionHeader = @{
-        "Authorization" = "basic {0}" -f $login.auth
-    }
+    $Auth = 'basic {0}' -f $login.auth
+    $EpmBaseUri = "$($login.managerURL)/EPM/API/Sets/"
 
 } else {
-    Write-Log "Modern authetication to $ISPSS ..." INFO
-    $login = Connect-EPM-ISPSS -credential $credential -epmTenant $tenant -OATH2 $ISPSS
-
-    $sessionHeader = @{
-        "Authorization" = "Bearer {0}" -f $login.auth
-    }
+    Write-Log "Modern authetication to $($TokenUri)..." INFO
+    $login = Connect-EpmIspss -credential $credential -TokenUri $TokenUri
+    $Auth = '{0} {1}' -f $login.token_type, $login.access_token
+    $EpmBaseUri = "https://api-$($tenant).epm.cyberark.cloud/api/sets/"
 }
-# Get SetId
-$set = Get-EPMSetID -managerURL $($login.managerURL) -Headers $sessionHeader -setName $setName
 
-Write-Log "Entering SET: $($set.setName)..." INFO -ForegroundColor Blue
+# Store the auth header
+$SessionHeader = @{
+    "Authorization" = "$Auth"
+}
 
-Write-Log $login.managerURL INFO
-Write-Log $set.SetName INFO
-Write-Log $set.SetId INFO
+$EpmSetData = Get-EpmSetID -EpmBaseUri $EPMBaseUri -Headers $SessionHeader -setName $SetName
 
-<#
-Write-Log "This is an INFO" INFO
-Write-Log "This is a WARNING" WARN
-Write-Log "This is an ERROR" ERROR
-Write-Log "This is an INFO" INFO -ForegroundColor DarkCyan
-#>
+$EpmSetUri = [System.Uri]::new($EPMBaseUri, "$($EpmSetData.setId)/")
+
+Write-Log "Entering SET: $($EpmSetData.setName)..." INFO -ForegroundColor Blue
 
 #Example Request 
 
 # Test GetPolicies
 $i = 1
 while ($true) {
-    $policies = Get-EPMPolicies -limit 50
+    $policies = Get-PoliciesAppGroup -EpmSetUri $EpmSetUri -Headers $SessionHeader -TargetType Policy
     $policies
-    Write-Log $i INFO
+    Write-Log "Attempt $i" INFO
     $i++
 }
 
