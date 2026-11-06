@@ -1400,7 +1400,7 @@ if (-not $TokenUri){
     Write-Log "Modern authetication to $($TokenUri)..." INFO
     $login = Connect-EpmIspss -credential $credential -TokenUri $TokenUri
     $Auth = '{0} {1}' -f $login.token_type, $login.access_token
-    $EpmBaseUri = "https://api-$($tenant).epm.cyberark.cloud/api/sets/"
+    $EpmBaseUri = 'https://api-{0}.epm.cyberark.cloud/api/sets/' -f $tenant
 }
 
 # Store the auth header

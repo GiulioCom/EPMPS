@@ -37,21 +37,22 @@
 
 .EXAMPLE
     .\Move-EpmEndpoint.ps1 -username user@domain -tenant eu -set "Set Name" -computerList "file" -destSetName "dest Set Name" -log
+    .\Move-EpmEndpoint.ps1 -username user@domain -tenant eu -TokenUri "" -set "Set Name" -computerList "file" -destSetName "dest Set Name" -log
 #>
 
 param (
     [Parameter(Mandatory = $true, HelpMessage="Please enter valid EPM username (For example: user@domain)")]
-    [string]$username,
+    [string]$UserName,
 
     [Parameter(HelpMessage="Please enter valid EPM set name")]
-    [string]$setName,
+    [string]$SetName,
 
     [Parameter(Mandatory = $true, HelpMessage="Please enter valid EPM tenant (eu, uk, ....)")]
     [ValidateSet("login", "eu", "uk", "au", "ca", "in", "jp", "sg", "it", "ch")]
-    [string]$tenant,
+    [string]$Tenant,
 
-    [Parameter(HelpMessage="ISPSS OATH2 Application Address")]
-    [string]$OATH2,
+    [Parameter(HelpMessage="The fully qualified OAuth 2.0 token endpoint URI")]
+    [string]$TokenUri,
 
     [Parameter(Mandatory = $true, HelpMessage="CSV file list of computers")]
     [ValidateScript({
@@ -61,16 +62,16 @@ param (
             throw "File not found or is a directory: $_"
         }
     })]
-    [string]$computerList,
+    [string]$ComputerList,
 
     [Parameter(Mandatory = $true, HelpMessage="Destination Set")]
-    [string]$destSetName,
+    [string]$DestSetName,
 
     [Parameter(HelpMessage = "Enable logging to file and console")]
-    [switch]$log,
+    [switch]$Log,
 
     [Parameter(HelpMessage = "Specify the log file path")]
-    [string]$logFolder
+    [string]$LogFolder
 )
 
 ## Write-Host Wrapper and log management
@@ -344,121 +345,88 @@ A custom object with the properties "managerURL" and "auth" representing the EPM
     }
 }
 
-function Connect-EPM-ISPSS {
+function Connect-EpmIspss {
 <#
 .SYNOPSIS
     Connects to CyberArk EPM using the ISPSS OIDC/OAuth portal.
 .DESCRIPTION
     Authenticates against CyberArk Identity ISPSS via client_credentials, retrieves an access token,
     and queries the tenant's base manager URL. Keeps credentials secure in memory using byte arrays.
-.PARAMETER credential
+.PARAMETER Credential
     The PSCredential object representing the client ID (Username) and client secret (Password).
-.PARAMETER epmTenant
+.PARAMETER EpmTenant
     The EPM tenant name (e.g., eu, uk).
-.PARAMETER OATH2
-    OATH2 full address.
+.PARAMETER TokenUri
+    The fully qualified OAuth 2.0 token endpoint URI 
+    (e.g., 'https://ACI4617.id.cyberark.cloud/oauth2/token/epmapiapp').
 .OUTPUTS
-    [PSCustomObject] containing 'managerURL' (string) and 'access_token' (string).
+    [PSCustomObject] Authetication Result.
 #>
     param (
         [Parameter(Mandatory = $true)]
         [ValidateNotNull()]
-        [pscredential]$credential,
+        [pscredential]$Credential,
 
         [Parameter(Mandatory = $true)]
-        [string]$epmTenant,
-
-        [Parameter(Mandatory = $true)]
-        [string]$OATH2
+        [ValidateNotNullOrEmpty()]
+        [System.Uri]$TokenUri
     )
 
-    $access_token = ""
-    $tenantUrl = ""
-    
     # Login ISPSS
     try {
-
-        $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($credential.Password)
-        $plainPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-        
-        $rawCreds = "{0}:{1}" -f $credential.UserName, $plainPassword
+        $rawCreds = "{0}:{1}" -f $credential.UserName, $credential.GetNetworkCredential().Password
         $base64   = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($rawCreds))
         
-        # Clean up the password
-        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
-        $plainPassword = $null
+        # Clean up the clear text variable
         $rawCreds = $null
         
-        $headers = @{ "Authorization" = "Basic $base64" }
-        $body    = @{ grant_type = "client_credentials" }
+        $headers = @{ 
+            "Authorization" = "Basic $base64"
+        }
+        $body = @{
+             grant_type = "client_credentials" 
+        }
 
-        $login = Invoke-RestMethod -Uri $OATH2 -Method Post -Headers $headers -Body $body -ContentType "application/x-www-form-urlencoded"
+        $login = Invoke-RestMethod -Uri $TokenUri -Method Post -Headers $headers -Body $body -ContentType "application/x-www-form-urlencoded"
 
         # Ensure the response contains the expected fields
         if (-not $login -or -not $login.access_token -or -not $login.token_type -or -not $login.expires_in) {
-            $msg = "EPM authentication failed on {0}: Missing expected response fields." -f $OATH2
+            $msg = "EPM authentication failed on {0}: Missing expected response fields." -f $TokenUri
             Write-Log $msg ERROR
             throw $msg
         }
 
-        $access_token = $login.access_token
-
+        Write-Log "Successfully authenticated to '$TokenUri'" INFO
+        return $login
     }
     catch {
-        $msg = "Failed to connect to EPM tenant: {0}. Error: {1}" -f $OATH2, $_.Exception.Message
+        $msg = "Authentication Failuer to {0}. Error: {1}" -f $TokenUri, $_.Exception.Message
         Write-Log $msg ERROR
         throw $msg
-    }
-
-    # Get the tenant URL
-    try {
-        $url = "https://api-{0}.epm.cyberark.cloud/epm/api/accounts/tenanturl" -f $epmTenant
-        $headers = @{ "Authorization" = "Bearer $access_token" }
-
-        $tenant = Invoke-RestMethod -Uri $url -Method GET -Headers $headers
-
-        # Ensure the response contains the expected fields
-        if (-not $tenant -or -not $tenant.tenantUrl) {
-            $msg = "Failed get the tenant URL on {0}: Missing expected response fields." -f $url
-            Write-Log $msg ERROR
-            throw $msg
-        }
-
-        $tenantUrl = $tenant.tenantUrl
-
-    }
-    catch {
-        $msg = "Failed to connect to EPM tenant: {0}. Error: {1}" -f $url, $_.Exception.Message
-        Write-Log $msg ERROR
-        throw $msg
-    }
-
-    # Return a custom object with connection information
-    return [PSCustomObject]@{
-        managerURL = $tenantUrl
-        auth       = $access_token
     }
 }
 
-function Get-EPMSetID {
-    <#
-    .SYNOPSIS
-        Retrieves the ID and name of an EPM set based on the provided parameters.
-    .DESCRIPTION
-        Interacts with the EPM API to retrieve sets. If a name is provided, it extracts it cleanly.
-        Otherwise, it provides an interactive prompt for the user.
-    .PARAMETER managerURL
-        The base URL of the EPM manager.
-    .PARAMETER Headers
-        The hashtable containing the Authorization token.
-    .PARAMETER setName
-        The exact name of the EPM set to retrieve.
-    .OUTPUTS
-        [PSCustomObject] containing 'setId' and 'setName'.
-    #>
+function Get-EpmSetID {
+<#
+.SYNOPSIS
+    Retrieves the ID and name of an EPM set based on the provided parameters.
+.DESCRIPTION
+    Interacts with the EPM API to retrieve sets. If a name is provided, it extracts it cleanly.
+    Otherwise, it provides an interactive prompt for the user.
+.PARAMETER managerURL
+    The base URL of the EPM manager.
+.PARAMETER Headers
+    The hashtable containing the Authorization token.
+.PARAMETER setName
+    The exact name of the EPM set to retrieve.
+.OUTPUTS
+    [PSCustomObject] containing 'setId' and 'setName'.
+#>
     param (
         [Parameter(Mandatory = $true)]
-        [uri]$managerURL,
+        [ValidateNotNullOrEmpty()]
+        [ValidateScript({ $_.Scheme -eq 'https' })]
+        [System.Uri]$EpmBaseUri,
 
         [Parameter(Mandatory = $true)]
         [hashtable]$Headers,
@@ -468,10 +436,7 @@ function Get-EPMSetID {
 
     # Retrieve list of sets
     try {
-        #$uri = "{0}/EPM/API/Sets" -f $managerURL.TrimEnd('/')
-        $URI = [System.Uri]::new($managerURL, "EPM/API/Sets/")
-        
-        $setsResponse = Invoke-EPMRestMethod -URI $URI -Method 'GET' -Headers $Headers
+        $setsResponse = Invoke-EPMRestMethod -URI $EpmBaseUri -Method 'GET' -Headers $Headers
         $setsArray = @($setsResponse.Sets)
 
         if (-not $setsArray -or $setsArray.Count -eq 0) {
@@ -533,6 +498,7 @@ function Get-EPMSetID {
     $msg = "Maximum attempts reached. Exiting set selection."
     Write-Log $msg ERROR
     throw "Maximum attempts reached. Exiting set selection."
+
 }
 
 function Move-EPMEndpoint {
@@ -577,6 +543,8 @@ function Move-EPMEndpoint {
         [string]$DestSetId
     )
 
+    $SessionHeader["Content-Type"] = "application/json"
+
     $MoveEndpointsParam = @{
         Uri = [System.Uri]::new($BaseUri, 'Endpoints/moveset')
         Method = 'POST' 
@@ -616,8 +584,6 @@ function Move-EPMEndpoint {
                 "targetSet" = $DestSetId
             } -Compress
 
-            Write-Log "Moving batch of $CurrentBatchSize endpoints" INFO
-
             $Result = Invoke-EPMRestMethod @MoveEndpointsParam
 
             if ($Result.statuses.psobject.Properties.Count -gt 0) {
@@ -650,8 +616,6 @@ function Move-EPMEndpoint {
             "targetSet" = $DestSetId
         } -Compress
 
-        Write-Log "Moving batch of $CurrentBatchSize endpoints" INFO
-
         $Result = Invoke-EPMRestMethod @MoveEndpointsParam
 
         if ($Result.statuses.psobject.Properties.Count -gt 0) {
@@ -661,11 +625,9 @@ function Move-EPMEndpoint {
             }
         } else {
             Write-Log "No Endpoints founds to be moved." WARN
-            }
+        }
     }
-        
 }
-
 
 ### Begin Script ###
 
@@ -707,45 +669,48 @@ if ($null -eq $credential) {
 }
 
 # Authentication
-if (-not $OATH2){
-    Write-Log "Legacy authetication..." INFO
+if (-not $TokenUri) {
+    Write-Log "Legacy authentication..." INFO
+
     $login = Connect-EPM -credential $credential -epmTenant $tenant
-    $AuthPrefix = "basic"    
 
-} else {
-    Write-Log "Modern authetication to $OATH2 ..." INFO
-    $login = Connect-EPM-ISPSS -credential $credential -epmTenant $tenant -OATH2 $OATH2
-    $AuthPrefix = "Bearer"
+    $Auth = "Basic $($login.auth)"
+    $EpmBaseUri = [uri]"$(([string]$login.managerURL).TrimEnd('/'))/EPM/API/Sets"
+}
+else {
+    Write-Log "Modern authentication to $TokenUri..." INFO
+
+    $login = Connect-EpmIspss -credential $credential -TokenUri $TokenUri
+
+    $Auth = "$($login.token_type) $($login.access_token)"
+    $EpmBaseUri = [uri]"https://api-$tenant.epm.cyberark.cloud/api/sets"
 }
 
-# Store the auth header
-$sessionHeader = @{
-    "Authorization" = "$AuthPrefix {0}" -f $login.auth
+# Authentication header
+$SessionHeader = @{
+    Authorization = $Auth
 }
 
-# Define the root endpoint
-$EPMBaseEndpoint = $login.managerURL
-if (-not $EPMBaseEndpoint.EndsWith('/')) {
-    $EPMBaseEndpoint += '/'
-}
+# Retrieve Set ID
+$EpmSetData = Get-EpmSetID -EpmBaseUri $EpmBaseUri -Headers $SessionHeader -setName $SetName
 
-[System.Uri]$EPMBaseUri = $EPMBaseEndpoint
+# Build resource URI
+$SetId = [uri]::EscapeDataString([string]$EpmSetData.setId)
+$EpmSetUri = [uri]"$($EpmBaseUri.AbsoluteUri.TrimEnd('/'))/$SetId/"
 
-# Retrieve Source SetId
-$SourceSet = Get-EPMSetID -managerURL $EPMBaseUri -Headers $sessionHeader -setName $SourceSetName
-$SafeSourceSetId = [uri]::EscapeDataString($SourceSet.setId)
-
-$SourceURI = [System.Uri]::new($EPMBaseUri, "EPM/API/Sets/$SafeSourceSetId/")
+Write-Log "Source Set Name '$($EpmSetData.setName)' - Set ID '$($EpmSetData.setId)'" INFO
 
 # Retrieve Detination SetId
-$DestSet = Get-EPMSetID -managerURL $EPMBaseUri -Headers $sessionHeader -setName $DestSetName
-$SafeDestSetId = [uri]::EscapeDataString($DestSet.setId)
+$EpmDestSet = Get-EpmSetID -EpmBaseUri $EPMBaseUri -Headers $sessionHeader -setName $DestSetName
 
+Write-Log "Destination Set Name '$($EpmDestSet.setName)' - Set ID '$($EpmDestSet.setId)'" INFO
 
 $MoveList = [System.Collections.Generic.List[string]]::new(
             [System.IO.File]::ReadAllLines($computerList)
         )
 
+Write-Log "Loaded the coumputer list in '$computerList' - Found '$($MoveList.Count)' entries..." INFO
+
 $Operator = if ($MoveList.Count -eq 1) { "EQ" } else { "IN" }
 
-Move-EPMEndpoint -BaseUri $SourceURI -SessionHeader $sessionHeader -DestSetId $SafeDestSetId -FilterType name -FilterArray $MoveList -FilterOperator $Operator
+Move-EPMEndpoint -BaseUri $EpmSetUri -SessionHeader $sessionHeader -DestSetId $($EpmDestSet.setId) -FilterType name -FilterArray $MoveList -FilterOperator $Operator
