@@ -115,372 +115,6 @@ function Write-Box {
     Write-Log $horizontalLine @textProp
 }
 
-function Evaluate-Patterns {
-    param (
-        [object]$Application,
-        [string]$PatternName,
-        [int]$Priority
-    )
-
-    $result = [PSCustomObject]@{
-        PatternName = $PatternName
-        Weight = 0
-        value = ""
-    }
-
-    $compareAsMapping = @{
-        0 = "exact"
-        1 = "prefix"
-        2 = "contains"
-        3 = "wildcards"
-        4 = "regExp"
-    }
-
-    # Manage use case
-    if (!$Application.patterns.$PatternName.isEmpty) {
-        
-        $result.Weight = $Priority
-        $result.value = $Application.patterns.$PatternName.content
-
-        # Manage exceptions
-
-        # Reduce weight if the compareAs is not EXACTLY
-        # But before, check compareAs is available (for example the property LOCATION doesn't have it)
-        if ($null -ne $Application.patterns.$PatternName -and $null -ne $Application.patterns.$PatternName.compareAs) {
-            if ($Application.patterns.$PatternName.compareAs -ne 0) {
-                $result.Weight = $result.Weight / 2
-            }
-        }
-        
-        # Publisher: Reduce weight if the publisher is not SPECIFIC
-        if ($PatternName -eq "PUBLISHER") {
-            if ($Application.patterns.PUBLISHER.signatureLevel -ne 2) {
-                $result.Weight = $result.Weight / 2
-            }
-        }
-        # Location: Reduce the weight if subfolders are enabled
-        if ($PatternName -eq "LOCATION") {
-            if ($Application.patterns.LOCATION.withSubfolders -eq $true) {
-                $result.Weight = $result.Weight / 2
-            }
-        }
-        # Owner: Get the correct value
-        if ($PatternName -eq "OWNER") {
-            foreach ($account in $Application.patterns.$PatternName.accounts){
-                $result.value += "$($account.name) "
-            }
-        }
-    }
-
-    return $result
-}
-
-function Process-Application{
-    param (
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNullOrEmpty()]
-        [object]$Application,
-        [string]$PolicyType,
-        [string]$Action
-    )
-
-    $AppTypeMapping = @{
-        2 = "Group"             # Patterns: None
-        3 = "EXE"               # Patterns: File name, Arguments, Location, Location Type, Owner, Publisher, Product name, File description, Company name, Original file name, File version, Product version, File origin (Source), Parent, Service name (must be empty)
-        4 = "Script"            # Patterns: File name, Arguments, Location, Location Type, Owner, Publisher, File origin (Source), Parent
-        5 = "MSI"               # Patterns: File name, Arguments, Location, Location Type, Owner, Publisher, Product name, Company name, Product code, Upgrade code, Product version, File origin (Source), Parent
-        6 = "MSU"               # Patterns: File name, Arguments, Location, Location Type, Owner, Publisher, File origin (Source), Parent
-        7 = "WebApp"            # Patterns: URL
-        8 = "WinAdminTask"      # Patterns: Admin task ID
-        9 = "ActiveX"           # Patterns: File name, Publisher, Code URL, Mime type, CLSID, Version
-        13 = "FileSystemNode"   # Patterns: File name or Location
-        14 = "Registry Key"     # Patterns: Registry key
-        15 = "COM"              # Patterns: File name, Arguments, Location, Location Type, Owner, Publisher, CLSID
-        17 = "WinService"       # Patterns: Service name
-        18 = "USB Device"       # Patterns: Vendor Id, Vendor Name, Product Id, Product Name, Instance Id
-        19 = "Optical Disc2"    # Patterns: Instance Id
-        20 = "WinApp"           # Patterns: Publisher, App package name, App package version, Capabilities
-        21 = "DLL"              # Patterns: File name, Arguments, Location, Location Type, Owner, Publisher, Product name, File description, Company name, Original file name, File version, Product version, File origin (Source), Parent
-        22 = "macPKG"           # Patterns: File name, Location, Publisher, Mac DMG image
-        23 = "MacSysPref"       # Patterns: Admin task ID
-        24 = "MacApplication"   # Patterns: File name, Location, Publisher, Bundle ID, Bundle version
-        26 = "MacDMG"           # Patterns: File name, Location, Publisher
-        28 = "Linux command"    # Patterns: File name, Arguments, Location, Linux link name, Linux script interpreter, Linux run as user
-        104 = "MacSUDO"         # Patterns: File name, Arguments, Publisher
-    }
-   
-    # Define the priority weight
-    $priority1 = 30
-    $priority2 = 20
-    $priority3 = 10
-
-    # Set the threshold, the value can change based on policy type or policy action
-    $threshold = 0
-    
-    # Policy type Linux or MacOS 60, Windows = 90
-    if ($PolicyType -eq 12 -or $PolicyType -eq 13) {
-        $threshold = 60
-    } else {
-        $threshold = 90
-    }
-    
-    # Policy action allow or deny
-    if ($action -eq 2 -or $action -eq 1) {
-        $threshold = 30
-    }
-    
-    $unspportedAppType = $false    
-
-    $matchedConditions = @()
-    $totalWeight = 0
-
-    $appTypeName = $AppTypeMapping[$Application.applicationType]
-
-    # Evaluate Patterns based on application type, 
-    switch ($appTypeName) {
-        'EXE' {
-            $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "ARGUMENTS" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "LOCATION" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "LOCATION_TYPE" $priority2
-            $matchedConditions += Evaluate-Patterns $Application "OWNER" $priority3
-            $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "PRODUCT_NAME" $priority3
-            $matchedConditions += Evaluate-Patterns $Application "FILE_DESCRIPTION" $priority2
-            $matchedConditions += Evaluate-Patterns $Application "COMPANY_NAME" $priority2
-            $matchedConditions += Evaluate-Patterns $Application "ORIGINAL_FILE_NAME" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "PARENT_PROCESS" $priority3
-        }
-        'Script' {
-            $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "ARGUMENTS" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "LOCATION" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "LOCATION_TYPE" $priority2
-            $matchedConditions += Evaluate-Patterns $Application "OWNER" $priority3
-            $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "PARENT_PROCESS" $priority3
-        }
-        'MSI' {
-            $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "ARGUMENTS" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "LOCATION" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "LOCATION_TYPE" $priority2
-            $matchedConditions += Evaluate-Patterns $Application "OWNER" $priority3
-            $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "PRODUCT_NAME" $priority3
-            $matchedConditions += Evaluate-Patterns $Application "COMPANY_NAME" $priority2
-            $matchedConditions += Evaluate-Patterns $Application "PARENT_PROCESS" $priority3
-        }
-        'MSU' {
-            $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "ARGUMENTS" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "LOCATION" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "LOCATION_TYPE" $priority2
-            $matchedConditions += Evaluate-Patterns $Application "OWNER" $priority3
-            $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "PARENT_PROCESS" $priority3
-        }
-        'ActiveX' {
-            $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "CLSID" $priority3
-        }
-        'COM' {
-            $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "ARGUMENTS" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "LOCATION" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "LOCATION_TYPE" $priority2
-            $matchedConditions += Evaluate-Patterns $Application "OWNER" $priority3
-            $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "CLSID" $priority3
-        }
-        'WinApp' {
-            $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
-        }
-        'DLL' {
-            $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "ARGUMENTS" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "LOCATION" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "LOCATION_TYPE" $priority2
-            $matchedConditions += Evaluate-Patterns $Application "OWNER" $priority3
-            $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "PRODUCT_NAME" $priority3
-            $matchedConditions += Evaluate-Patterns $Application "FILE_DESCRIPTION" $priority2
-            $matchedConditions += Evaluate-Patterns $Application "COMPANY_NAME" $priority2
-            $matchedConditions += Evaluate-Patterns $Application "ORIGINAL_FILE_NAME" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "PARENT_PROCESS" $priority3
-        }
-        'macPKG' {
-            $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "LOCATION" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
-        }
-        'MacApplication' {
-            $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "LOCATION" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
-        }
-        'MacDMG' {
-            $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "LOCATION" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
-        }
-        'MacSUDO' {
-            $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "ARGUMENTS" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "PUBLISHER" $priority1
-        }
-        'Linux command' {
-            $matchedConditions += Evaluate-Patterns $Application "FILE_NAME" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "LOCATION" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "ARGUMENTS" $priority1
-            $matchedConditions += Evaluate-Patterns $Application "LINUX_LINK_NAME" $priority3
-            $matchedConditions += Evaluate-Patterns $Application "LINUX_SCRIPT_INTERPRETER" $priority2
-        }
-        default {
-            # Default action if none of the conditions match
-            Write-Log "Application Type '$appTypeName' not supported." WARN
-            $unspportedAppType = $true
-        }
-    }
-
-    if (!$unspportedAppType) {
-        # Evaluate common pattern, such as HASH
-        switch ($appTypeName) {
-            { ($_ -eq "EXE") -or ($_ -eq "Script") -or ($_ -eq "MSI") -or ($_ -eq "MSU") -or ($_ -eq "COM") -or ($_ -eq "DLL") -or 
-              ($_ -eq "Linux command") -or ($_ -eq "macPKG") -or ($_ -eq "MacApplication") -or ($_ -eq "MacDMG") -or ($_ -eq "MacSUDO")} {
-                if ($Application.patterns.FILE_NAME.hash) {
-                    $matchedConditions += [PSCustomObject]@{
-                        PatternName = "HASH"
-                        Weight = "90"
-                        value = $Application.patterns.FILE_NAME.hash
-                    }
-                }
-            }
-        }
-    
-        # Calculate Total value
-        $totalWeight = ($matchedConditions | Measure-Object -Property Weight -Sum).Sum
-  
-        # Evaluate global pattern, such as child process
-        switch ($appTypeName) {
-            { ($_ -eq "EXE") -or ($_ -eq "Script") -or ($_ -eq "DLL") } {
-            # If child process is enabled divide the total
-                if ($Application.childProcess -eq $true) {
-                    $totalWeight = $totalWeight / 2
-                    $matchedConditions += [PSCustomObject]@{
-                        PatternName = "WIN_CHILD_PROCESS"
-                        Weight = -$totalWeight
-                        value = "Enabled"
-                    } 
-                } else {
-                    $matchedConditions += [PSCustomObject]@{
-                        PatternName = "WIN_CHILD_PROCESS"
-                        Weight = -0
-                        value = "Disabled"
-                    }
-                }                
-            }
-            'Linux command' {
-                # Linux  Child Process   
-                $linuxChildProcessMapping = @{
-                    0 = "Deny"
-                    1 = "Allow"
-                    2 = "Allow and Restrict"
-                }
-
-                switch ($Application.LinuxChildProcess) {
-                    0 { $totalWeight = $totalWeight }
-                    1 { $totalWeight = $totalWeight / 2 }
-                    2 { $totalWeight = $totalWeight / 2 }
-                }
-                $linuxChildProcessName = $linuxChildProcessMapping[$Application.LinuxChildProcess]
-                $matchedConditions += [PSCustomObject]@{
-                    PatternName = "LIN_CHILD_PROCESS"
-                    Weight = -$totalWeight
-                    value = "$linuxChildProcessName"
-                }
-            
-                # Linux Sudo no password
-                if ($Application.linuxSudoNoPassword -eq $true) {
-                    $totalWeight = $totalWeight / 2
-                    $matchedConditions += [PSCustomObject]@{
-                        PatternName = "LIN_SUDO_NO_PASSWORD"
-                        Weight = -$totalWeight / 2
-                        value = "Enabled"
-                    }
-                } else {
-                    $matchedConditions += [PSCustomObject]@{
-                        PatternName = "LIN_SUDO_NO_PASSWORD"
-                        Weight = -0
-                        value = "Disabled"
-                    }
-                }
-            }
-        }
-        
-        # Define the application name for better output
-        $applicationName = $null
-
-        # Define the priority order for pattern names
-        $priorityPatterns = @("FILE_NAME", "ORIGINAL_FILE_NAME", "PUBLISHER")
-
-        foreach ($pattern in $priorityPatterns) {
-            $matchingCondition = $matchedConditions | Where-Object { $_.PatternName -eq $pattern }
-
-            if ($matchingCondition) {
-                $applicationName = $Application.patterns.$($pattern).content
-                break
-            }
-        }
-       
-        if (-not $applicationName) {
-            # If none of the conditions matched, assign $Application.id
-            $applicationName = $Application.id
-        }      
-        
-<#
-        If ($totalWeight -ge $threshold) {
-            if (!$notCompliant) {
-                Write-Log "> $applicationName - $totalWeight - Compliant to Policy Standards" -severity INFO -ForegroundColor Green
-                Write-Log "|-> Application Type: $appTypeName" -severity INFO -ForegroundColor Gray
-                Write-Log "|-> Application Description: $($Application.description)" -severity INFO -ForegroundColor Gray
-                # Iterate through each $matchedConditions
-                foreach ($condition in $matchedConditions) {
-                    # Print PatternName when weight is greater than 0
-                    if ($condition.Weight -ne 0) {
-                        Write-Log "|-> $($condition.PatternName): $($condition.value) = $($condition.Weight)" -severity INFO -ForegroundColor Gray
-                    }
-                }
-            }
-        } else {
-            Write-Log "> $applicationName - $totalWeight - Not Compliant to Policy Standards" -severity WARN -ForegroundColor Yellow
-            Write-Log "|-> Application Type: $appTypeName" -severity WARN -ForegroundColor Gray
-            Write-Log "|-> Application Description: $($Application.description)" -severity WARN -ForegroundColor Gray
-            # Iterate through $matchedConditions
-            foreach ($condition in $matchedConditions) {
-                # Print PatternName if Weight is greater than 0
-                if ($condition.Weight -ne 0) {
-                    Write-Log "|-> $($condition.PatternName): $($condition.value) = $($condition.Weight)" -severity WARN -ForegroundColor Gray
-                }
-            }
-        }
-#>
-    }
-
-    if ($pause) {
-        Write-Host "Press Enter to continue..."
-        $null = Read-Host
-    }
-
-    return [PSCustomObject]@{
-        ApplicationName         = $applicationName
-        ApplicationType         = $appTypeName
-        TotalWeight             = $totalWeight
-        ApplicationDefinition   = $matchedConditions
-    }
-}
-
 ## Mapping EPM Data
 $actionMap = @{
     1 = "Allow"
@@ -538,6 +172,31 @@ $policyTypeMap = @{
     47 = "Deception"
 }
 
+$AppTypeMapping = @{
+    2 = "Group"             # Patterns: None
+    3 = "EXE"               # Patterns: File name, Arguments, Location, Location Type, Owner, Publisher, Product name, File description, Company name, Original file name, File version, Product version, File origin (Source), Parent, Service name (must be empty)
+    4 = "Script"            # Patterns: File name, Arguments, Location, Location Type, Owner, Publisher, File origin (Source), Parent
+    5 = "MSI"               # Patterns: File name, Arguments, Location, Location Type, Owner, Publisher, Product name, Company name, Product code, Upgrade code, Product version, File origin (Source), Parent
+    6 = "MSU"               # Patterns: File name, Arguments, Location, Location Type, Owner, Publisher, File origin (Source), Parent
+    7 = "WebApp"            # Patterns: URL
+    8 = "WinAdminTask"      # Patterns: Admin task ID
+    9 = "ActiveX"           # Patterns: File name, Publisher, Code URL, Mime type, CLSID, Version
+    13 = "FileSystemNode"   # Patterns: File name or Location
+    14 = "Registry Key"     # Patterns: Registry key
+    15 = "COM"              # Patterns: File name, Arguments, Location, Location Type, Owner, Publisher, CLSID
+    17 = "WinService"       # Patterns: Service name
+    18 = "USB Device"       # Patterns: Vendor Id, Vendor Name, Product Id, Product Name, Instance Id
+    19 = "Optical Disc2"    # Patterns: Instance Id
+    20 = "WinApp"           # Patterns: Publisher, App package name, App package version, Capabilities
+    21 = "DLL"              # Patterns: File name, Arguments, Location, Location Type, Owner, Publisher, Product name, File description, Company name, Original file name, File version, Product version, File origin (Source), Parent
+    22 = "macPKG"           # Patterns: File name, Location, Publisher, Mac DMG image
+    23 = "MacSysPref"       # Patterns: Admin task ID
+    24 = "MacApplication"   # Patterns: File name, Location, Publisher, Bundle ID, Bundle version
+    26 = "MacDMG"           # Patterns: File name, Location, Publisher
+    28 = "Linux command"    # Patterns: File name, Arguments, Location, Linux link name, Linux script interpreter, Linux run as user
+    104 = "MacSUDO"         # Patterns: File name, Arguments, Publisher
+}
+
 $accountTypeMap = @{
     0 = "Group"
     1 = "Single"
@@ -555,7 +214,394 @@ $executorTypeMap = @{
     0 = "Computer Group"
     1 = "Single Computer"
 }
+
+$EpmPatternMatrix = @{
+    'EXE'            = @(
+        @{ Name = 'FILE_NAME';          Priority = 30 }
+        @{ Name = 'ARGUMENTS';          Priority = 30 }
+        @{ Name = 'LOCATION';           Priority = 30 }
+        @{ Name = 'LOCATION_TYPE';      Priority = 20 }
+        @{ Name = 'OWNER';              Priority = 10 }
+        @{ Name = 'PUBLISHER';          Priority = 30 }
+        @{ Name = 'PRODUCT_NAME';       Priority = 10 }
+        @{ Name = 'FILE_DESCRIPTION';   Priority = 20 }
+        @{ Name = 'COMPANY_NAME';       Priority = 20 }
+        @{ Name = 'ORIGINAL_FILE_NAME'; Priority = 30 }
+        @{ Name = 'PARENT_PROCESS';     Priority = 10 }
+    )
+    'Script'         = @(
+        @{ Name = 'FILE_NAME';      Priority = 30 }
+        @{ Name = 'ARGUMENTS';      Priority = 30 }
+        @{ Name = 'LOCATION';       Priority = 30 }
+        @{ Name = 'LOCATION_TYPE';  Priority = 20 }
+        @{ Name = 'OWNER';          Priority = 10 }
+        @{ Name = 'PUBLISHER';      Priority = 30 }
+        @{ Name = 'PARENT_PROCESS'; Priority = 10 }
+    )
+    'MSI'            = @(
+        @{ Name = 'FILE_NAME';      Priority = 30 }
+        @{ Name = 'ARGUMENTS';      Priority = 30 }
+        @{ Name = 'LOCATION';       Priority = 30 }
+        @{ Name = 'LOCATION_TYPE';  Priority = 20 }
+        @{ Name = 'OWNER';          Priority = 10 }
+        @{ Name = 'PUBLISHER';      Priority = 30 }
+        @{ Name = 'PRODUCT_NAME';   Priority = 10 }
+        @{ Name = 'COMPANY_NAME';   Priority = 20 }
+        @{ Name = 'PARENT_PROCESS'; Priority = 10 }
+    )
+    'ActiveX'        = @(
+        @{ Name = 'FILE_NAME'; Priority = 30 }
+        @{ Name = 'PUBLISHER'; Priority = 30 }
+        @{ Name = 'CLSID';     Priority = 10 }
+    )
+    'COM'            = @(
+        @{ Name = 'FILE_NAME';     Priority = 30 }
+        @{ Name = 'ARGUMENTS';     Priority = 30 }
+        @{ Name = 'LOCATION';      Priority = 30 }
+        @{ Name = 'LOCATION_TYPE'; Priority = 20 }
+        @{ Name = 'OWNER';         Priority = 10 }
+        @{ Name = 'PUBLISHER';     Priority = 30 }
+        @{ Name = 'CLSID';         Priority = 10 }
+    )
+    'WinApp'         = @(
+        @{ Name = 'PUBLISHER'; Priority = 30 }
+    )
+    'MacBundle'      = @(
+        @{ Name = 'FILE_NAME'; Priority = 30 }
+        @{ Name = 'LOCATION';  Priority = 30 }
+        @{ Name = 'PUBLISHER'; Priority = 30 }
+    )
+    'MacSUDO'        = @(
+        @{ Name = 'FILE_NAME'; Priority = 30 }
+        @{ Name = 'ARGUMENTS'; Priority = 30 }
+        @{ Name = 'PUBLISHER'; Priority = 30 }
+    )
+    'Linux command'  = @(
+        @{ Name = 'FILE_NAME';                Priority = 30 }
+        @{ Name = 'LOCATION';                 Priority = 30 }
+        @{ Name = 'ARGUMENTS';                Priority = 30 }
+        @{ Name = 'LINUX_LINK_NAME';          Priority = 10 }
+        @{ Name = 'LINUX_SCRIPT_INTERPRETER'; Priority = 20 }
+    )
+}
+
+# Identical rule arrays
+$EpmPatternMatrix['DLL']            = $EpmPatternMatrix['EXE']
+$EpmPatternMatrix['MSU']            = $EpmPatternMatrix['Script']
+$EpmPatternMatrix['macPKG']         = $EpmPatternMatrix['MacBundle']
+$EpmPatternMatrix['MacApplication'] = $EpmPatternMatrix['MacBundle']
+$EpmPatternMatrix['MacDMG']         = $EpmPatternMatrix['MacBundle']
+
+$EpmHashSupportedTypes = [System.Collections.Generic.HashSet[string]]::new(
+    [string[]]@('EXE', 'Script', 'MSI', 'MSU', 'COM', 'DLL', 'Linux command', 'macPKG', 'MacApplication', 'MacDMG', 'MacSUDO'),
+    [System.StringComparer]::OrdinalIgnoreCase
+)
+
+$LinuxChildProcessMap = @{
+    0 = 'Deny';
+    1 = 'Allow';
+    2 = 'Allow and Restrict'
+}
 ###
+
+function Measure-EpmApplicationPattern {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param (
+        [Parameter(Mandatory)]
+        [ValidateNotNull()]
+        [object]$Application,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$PatternName,
+
+        [Parameter(Mandatory)]
+        [ValidateRange(0, [int]::MaxValue)]
+        [int]$Priority
+    )
+
+    $weight = 0.0
+    $value  = ''
+
+    # Resolve the target pattern node once (StrictMode-safe) to avoid repeated dynamic lookups
+    $pattern = $null
+    if ($null -ne $Application.PSObject.Properties['patterns'] -and $null -ne $Application.patterns) {
+        $patternProp = $Application.patterns.PSObject.Properties[$PatternName]
+        if ($null -ne $patternProp) { $pattern = $patternProp.Value }
+    }
+
+    $isEmptyProp = if ($null -ne $pattern) { $pattern.PSObject.Properties['isEmpty'] }
+
+    if ($null -ne $pattern -and $null -ne $isEmptyProp -and -not $isEmptyProp.Value) {
+        $weight = [double]$Priority
+        $value  = [string]$pattern.content
+
+        # Halve weight if compareAs exists and is not Exact (0)
+        $compareAsProp = $pattern.PSObject.Properties['compareAs']
+        if ($null -ne $compareAsProp -and $null -ne $compareAsProp.Value -and $compareAsProp.Value -ne 0) {
+            $weight /= 2
+        }
+
+        # Mutually exclusive evaluation for pattern-specific modifiers
+        switch ($PatternName) {
+            'PUBLISHER' {
+                $sigProp = $pattern.PSObject.Properties['signatureLevel']
+                if ($null -ne $sigProp -and $sigProp.Value -ne 2) {
+                    $weight /= 2
+                }
+            }
+            'LOCATION' {
+                $subProp = $pattern.PSObject.Properties['withSubfolders']
+                if ($null -ne $subProp -and $subProp.Value -eq $true) {
+                    $weight /= 2
+                }
+            }
+            'OWNER' {
+                $accountsProp = $pattern.PSObject.Properties['accounts']
+                if ($null -ne $accountsProp -and $null -ne $accountsProp.Value) {
+                    $names = foreach ($account in $accountsProp.Value) {
+                        if (-not [string]::IsNullOrWhiteSpace($account.name)) { $account.name }
+                    }
+                    $joinedNames = $names -join ' '
+                    $value = (@($value, $joinedNames) | Where-Object { $_ -ne '' }) -join ' '
+                }
+            }
+        }
+    }
+
+    # Construct output object once with consistent PascalCase properties
+    [pscustomobject]@{
+        PatternName = $PatternName
+        Weight      = $weight
+        Value       = $value
+    }
+}
+
+function Measure-EpmApplication {
+    <#
+    .SYNOPSIS
+        Evaluates all security patterns and risk modifiers for a single EPM application definition.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param (
+        [Parameter(Mandatory)]
+        [ValidateNotNull()]
+        [object]$Application,
+
+        [Parameter()]
+        [switch]$Pause
+    )
+
+    try {
+        $appTypeName       = $script:AppTypeMapping[$Application.applicationType]
+        $matchedConditions = [System.Collections.Generic.List[object]]::new()
+        $totalWeight       = 0.0
+        $applicationName   = $null
+
+        if ([string]::IsNullOrEmpty($appTypeName) -or -not $script:EpmPatternMatrix.ContainsKey($appTypeName)) {
+            Write-Log "Application Type '$($Application.applicationType)' ($appTypeName) not supported." WARN
+        }
+        else {
+            # 1. Evaluate all pattern rules for this application type in a single pass
+            foreach ($rule in $script:EpmPatternMatrix[$appTypeName]) {
+                $condition = Measure-EpmApplicationPattern -Application $Application -PatternName $rule.Name -Priority $rule.Priority
+                $matchedConditions.Add($condition)
+                $totalWeight += $condition.Weight
+            }
+
+            # 2. Evaluate file hash (StrictMode-safe property check + numeric weight)
+            if ($script:EpmHashSupportedTypes.Contains($appTypeName) -and
+                $null -ne $Application.PSObject.Properties['patterns'] -and
+                $null -ne $Application.patterns -and
+                $null -ne $Application.patterns.PSObject.Properties['FILE_NAME'] -and
+                $null -ne $Application.patterns.FILE_NAME -and
+                $null -ne $Application.patterns.FILE_NAME.PSObject.Properties['hash'] -and
+                -not [string]::IsNullOrEmpty($Application.patterns.FILE_NAME.hash)) {
+
+                $matchedConditions.Add([pscustomobject]@{
+                    PatternName = 'HASH'
+                    Weight      = 90.0
+                    Value       = $Application.patterns.FILE_NAME.hash
+                })
+                $totalWeight += 90.0
+            }
+
+            # 3. Apply global risk modifiers (accurate penalty tracking)
+            switch ($appTypeName) {
+                { $_ -in 'EXE', 'Script', 'DLL' } {
+                    $cpProp = $Application.PSObject.Properties['childProcess']
+                    if ($null -ne $cpProp -and $cpProp.Value -eq $true) {
+                        $penalty = $totalWeight / 2
+                        $totalWeight -= $penalty
+                        $matchedConditions.Add([pscustomobject]@{
+                            PatternName = 'WIN_CHILD_PROCESS'
+                            Weight      = -$penalty
+                            Value       = 'Enabled'
+                        })
+                    } else {
+                        $matchedConditions.Add([pscustomobject]@{
+                            PatternName = 'WIN_CHILD_PROCESS'
+                            Weight      = 0.0
+                            Value       = 'Disabled'
+                        })
+                    }
+                }
+                'Linux command' {
+                    $lcpProp  = $Application.PSObject.Properties['LinuxChildProcess']
+                    $lcpCode  = if ($null -ne $lcpProp -and $null -ne $lcpProp.Value) { [int]$lcpProp.Value } else { 0 }
+                    $lcpLabel = if ($script:LinuxChildProcessMap.ContainsKey($lcpCode)) { $script:LinuxChildProcessMap[$lcpCode] } else { "Unknown ($lcpCode)" }
+
+                    $lcpPenalty = 0.0
+                    if ($lcpCode -in 1, 2) {
+                        $lcpPenalty = $totalWeight / 2
+                        $totalWeight -= $lcpPenalty
+                    }
+                    $matchedConditions.Add([pscustomobject]@{
+                        PatternName = 'LIN_CHILD_PROCESS'
+                        Weight      = -$lcpPenalty
+                        Value       = $lcpLabel
+                    })
+
+                    $sudoProp = $Application.PSObject.Properties['linuxSudoNoPassword']
+                    if ($null -ne $sudoProp -and $sudoProp.Value -eq $true) {
+                        $sudoPenalty = $totalWeight / 2
+                        $totalWeight -= $sudoPenalty
+                        $matchedConditions.Add([pscustomobject]@{
+                            PatternName = 'LIN_SUDO_NO_PASSWORD'
+                            Weight      = -$sudoPenalty
+                            Value       = 'Enabled'
+                        })
+                    } else {
+                        $matchedConditions.Add([pscustomobject]@{
+                            PatternName = 'LIN_SUDO_NO_PASSWORD'
+                            Weight      = 0.0
+                            Value       = 'Disabled'
+                        })
+                    }
+                }
+            }
+
+            # 4. Resolve display name from the first non-empty priority pattern (no pipeline overhead)
+            foreach ($priorityName in 'FILE_NAME', 'ORIGINAL_FILE_NAME', 'PUBLISHER') {
+                foreach ($cond in $matchedConditions) {
+                    if ($cond.PatternName -eq $priorityName -and -not [string]::IsNullOrWhiteSpace($cond.Value)) {
+                        $applicationName = $cond.Value
+                        break
+                    }
+                }
+                if ($null -ne $applicationName) { break }
+            }
+        }
+
+        if ([string]::IsNullOrWhiteSpace($applicationName)) {
+            $idProp = $Application.PSObject.Properties['id']
+            $applicationName = if ($null -ne $idProp -and -not [string]::IsNullOrWhiteSpace($idProp.Value)) { $idProp.Value } else { 'Unknown' }
+        }
+
+        if ($Pause) {
+            $null = Read-Host -Prompt 'Press Enter to continue'
+        }
+
+        [pscustomobject]@{
+            ApplicationName       = $applicationName
+            ApplicationType       = $appTypeName
+            TotalWeight           = $totalWeight
+            ApplicationDefinition = $matchedConditions
+        }
+    }
+    catch {
+        $PSCmdlet.ThrowTerminatingError($_)
+    }
+}
+
+function Get-EpmApplicationData {
+    <#
+    .SYNOPSIS
+        Evaluates all application definitions in an EPM policy or Application Group and returns CSV-ready rows.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject[]])]
+    param (
+        [Parameter(Mandatory)]
+        [ValidateNotNull()]
+        [object]$Policy
+    )
+
+    try {
+        $applicationsRows = [System.Collections.Generic.List[object]]::new()
+
+        $policyName = $Policy.Name
+        $policyType = $script:policyTypeMap[$Policy.PolicyType]
+
+        # Action is absent on Application Group entries; explicit $null check preserves enum value 0 on policies
+        $policyAction = ''
+        $actionProp   = $Policy.PSObject.Properties['Action']
+        if ($null -ne $actionProp -and $null -ne $actionProp.Value) {
+            $policyAction = $script:actionMap[$actionProp.Value]
+        }
+
+        # Stamp a fixed-schema ordered dictionary per row so Export-Csv columns stay identical and ordered
+        $newRowTemplate = {
+            [ordered]@{
+                PolicyName               = $policyName
+                PolicyType               = $policyType
+                PolicyAction             = $policyAction
+                ApplicationName          = $null
+                ApplicationType          = $null
+                TotalWeight              = $null
+                FILE_NAME                = $null
+                ARGUMENTS                = $null
+                LOCATION                 = $null
+                LOCATION_TYPE            = $null
+                OWNER                    = $null
+                PUBLISHER                = $null
+                PRODUCT_NAME             = $null
+                FILE_DESCRIPTION         = $null
+                COMPANY_NAME             = $null
+                ORIGINAL_FILE_NAME       = $null
+                PARENT_PROCESS           = $null
+                CLSID                    = $null
+                LINUX_LINK_NAME          = $null
+                LINUX_SCRIPT_INTERPRETER = $null
+                HASH                     = $null
+                WIN_CHILD_PROCESS        = $null
+                LIN_CHILD_PROCESS        = $null
+                LIN_SUDO_NO_PASSWORD     = $null
+            }
+        }
+
+        if ($null -ne $Policy.Applications) {
+            foreach ($application in $Policy.Applications) {
+                $row    = & $newRowTemplate
+                $result = Measure-EpmApplication -Application $application
+
+                $row['ApplicationName'] = $result.ApplicationName
+                $row['ApplicationType'] = $result.ApplicationType
+                $row['TotalWeight']     = $result.TotalWeight
+
+                foreach ($definition in $result.ApplicationDefinition) {
+                    if ($row.Contains($definition.PatternName)) {
+                        $row[$definition.PatternName] = $definition.Value
+                    }
+                }
+
+                $applicationsRows.Add([pscustomobject]$row)
+            }
+        }
+
+        # Emit a baseline row when a policy or group has zero application definitions
+        if ($applicationsRows.Count -eq 0) {
+            $applicationsRows.Add([pscustomobject](& $newRowTemplate))
+        }
+
+        return $applicationsRows
+    }
+    catch {
+        $PSCmdlet.ThrowTerminatingError($_)
+    }
+}
 
 function Get-PolicyTargets {
     param (
@@ -566,8 +612,8 @@ function Get-PolicyTargets {
     
     $targetsData = [PSCustomObject]@{
         PolicyName                      = $policy.Name
-        PolicyType                      = $policyTypeMap[$policy.PolicyType]
-        PolicyAction                    = $actionMap[$policy.Action]
+        PolicyType                      = $script:policyTypeMap[$policy.PolicyType]
+        PolicyAction                    = $script:actionMap[$policy.Action]
         AppliedToAll                    = $policy.IsAppliedToAllComputers
         IncludeExecutor                 = $null
         ExcludeExecutor                 = $null
@@ -585,7 +631,7 @@ function Get-PolicyTargets {
             
             $executorData = $TargetsData.PSObject.Copy()
             
-            $executorData.ExecutorType = $executorTypeMap[$executor.ExecutorType]
+            $executorData.ExecutorType = $script:executorTypeMap[$executor.ExecutorType]
             if ($executor.IsIncluded) {
                 $executorData.IncludeExecutor = $executor.Name
             } else {
@@ -602,7 +648,7 @@ function Get-PolicyTargets {
             $accountData = $TargetsData.PSObject.Copy()
 
             $accountData.IncludeUsersGroupsSid = $account.Sid
-            $accountData.IncludeUsersGroupsAccountType = $accountTypeMap[$account.AccountType]
+            $accountData.IncludeUsersGroupsAccountType = $script:accountTypeMap[$account.AccountType]
             $accountData.IncludeUsersGroupsDisplayName = $account.DisplayName
             $accountData.IncludeUsersGroupsSamName = $account.SamName
                         
@@ -617,67 +663,6 @@ function Get-PolicyTargets {
     return $targetsRows
 }
 
-function Get-ApplicationData {
-    param (
-        [object]$policy
-    )
-
-    $applicationsRows = @()
-
-    $PolicyAction = ""
-    if ($policy.Action) {
-        $PolicyAction = $actionMap[$policy.Action]
-    }
-    
-    $baseApplicationData = [PSCustomObject]@{
-        PolicyName                  = $policy.Name
-        PolicyType                  = $policyTypeMap[$policy.PolicyType]
-        PolicyAction                = $PolicyAction
-        ApplicationName             = $null
-        ApplicationType             = $null
-        TotalWeight                 = $null
-        FILE_NAME                   = $null
-        ARGUMENTS                   = $null
-        LOCATION                    = $null
-        LOCATION_TYPE               = $null
-        OWNER                       = $null
-        PUBLISHER                   = $null
-        PRODUCT_NAME                = $null
-        FILE_DESCRIPTION            = $null
-        COMPANY_NAME                = $null
-        ORIGINAL_FILE_NAME          = $null
-        PARENT_PROCESS              = $null
-        CLSID                       = $null
-        LINUX_LINK_NAME             = $null
-        LINUX_SCRIPT_INTERPRETER    = $null
-        HASH                        = $null
-        WIN_CHILD_PROCESS           = $null
-        LIN_CHILD_PROCESS           = $null
-        LIN_SUDO_NO_PASSWORD        = $null
-    }
-
-    foreach ($application in $policy.Applications) {
-        $applicationData = $baseApplicationData.PSObject.Copy()
-        $result = Process-Application -Application $application -PolicyType $($policy.PolicyType) -action $($policy.Action)
-        
-        $applicationData.ApplicationName = $result.ApplicationName
-        $applicationData.ApplicationType = $result.ApplicationType
-        $applicationData.TotalWeight     = $result.totalWeight
-
-        foreach ($definition in $result.ApplicationDefinition){
-            $applicationData.($definition.PatternName) = $definition.value
-        }
-        
-        $applicationsRows += $applicationData
-    }
-
-    if ($applicationsRows.Count -eq 0) {
-        $applicationsRows += $baseApplicationData
-    }
-
-    return $applicationsRows
-}
-
 function Get-PolicyProperties {
     param (
         [object]$policy
@@ -686,13 +671,44 @@ function Get-PolicyProperties {
     $properties = [PSCustomObject]@{
         name                            = $policy.Name
         Description                     = $policy.Description
-        Type                            = $policyTypeMap[$policy.PolicyType]
-        Action                          = $actionMap[$policy.Action]
+        Type                            = $script:policyTypeMap[$policy.PolicyType]
+        Action                          = $script:actionMap[$policy.Action]
         Audit                           = $policy.Audit
         IsActive                        = $policy.IsActive
         Priority                        = $policy.Priority
     }
     return $properties
+}
+
+function Export-EpmCsv {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [AllowEmptyCollection()]
+        [System.Collections.ICollection]$Data,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$LiteralPath,
+
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Label
+    )
+
+    if ($Data.Count -eq 0) {
+        Write-Log "No $Label found to export to CSV." WARN
+        return
+    }
+
+    try {
+        Write-Log "Storing $Label in $LiteralPath..." INFO
+        $Data | Export-Csv -LiteralPath $LiteralPath -NoTypeInformation -Force -Encoding UTF8
+    }
+    catch {
+        Write-Log "Failed to export $Label to $LiteralPath : $_" ERROR
+        throw
+    }
 }
 
 function appCounter {
@@ -788,12 +804,16 @@ $countPolicy = 1
 
 foreach ($policy in $EPMPolicies.Policies) {
     Write-Log "Processing Policy [$countPolicy/$totalPolicy] - $($policy.Name)" INFO
+
     Write-Log "Processing Targets..." INFO
     $policiesTarget += Get-PolicyTargets $policy
+
     Write-Log "Processing Applications..." INFO
-    $policiesApplication += Get-ApplicationData $policy
+    $policiesApplication += Get-EpmApplicationData $policy
+
     Write-Log "Processing Properties..." INFO
     $policiesProperties += Get-PolicyProperties $policy
+
     $countPolicy++
 }
 
@@ -806,47 +826,25 @@ $countAppGroup = 1
 foreach ($appGroup in $EPMPolicies.AppGroups) {
     Write-Log "Processing Application Group [$countAppGroup/$totalAppGroups] - $($appGroup.Name)" INFO
     Write-Log "Processing Applications..." INFO
-    $appGroupApplication += Get-ApplicationData $appGroup
+    $appGroupApplication += Get-EpmApplicationData $appGroup
     $countAppGroup++
 }
 
 # Export Data to CSV
 
-$FileNameHead = '{0}_{1}' -f $timestamp, [System.IO.Path]::GetFileNameWithoutExtension($EpmPoliciesExport)
+$fileNameHead = '{0}_{1}' -f $timestamp, [System.IO.Path]::GetFileNameWithoutExtension($EpmPoliciesExport)
 
-$OutPolTarget             = Join-Path $exportCsvPath "${FileNameHead}_PolicyTarget.csv"
-$OutPolApplications       = Join-Path $exportCsvPath "${FileNameHead}_PolicyApplications.csv"
-$OutPolProperties         = Join-Path $exportCsvPath "${FileNameHead}_PolicyProperties.csv"
-$OutAppGroupsApplications = Join-Path $exportCsvPath "${FileNameHead}_AppGroupsApplications.csv"
+$exports = @(
+    @{ Data = $policiesTarget;      Suffix = 'PolicyTarget';          Label = 'Policies Target' }
+    @{ Data = $policiesApplication; Suffix = 'PolicyApplications';    Label = 'Policies Applications' }
+    @{ Data = $policiesProperties;  Suffix = 'PolicyProperties';      Label = 'Policies Properties' }
+    @{ Data = $appGroupApplication; Suffix = 'AppGroupsApplications'; Label = 'Application Group Definitions' }
+)
 
-if ($policiesTarget.Count -gt 0) {
-    $policiesTarget | Export-Csv -Path $OutPolTarget -NoTypeInformation -Force -Encoding UTF8
-    Write-Log "Storing Target data in $OutPolTarget..." INFO
-} else {
-    Write-Log "No Policies Target found to export to CSV." WARN
-}
-
-if ($policiesApplication.Count -gt 0) {
-    $policiesApplication | Export-Csv -Path $OutPolApplications -NoTypeInformation -Force -Encoding UTF8
-    Write-Log "Storing Target data in $OutPolApplications..." INFO
-} else {
-    Write-Log "No Policies Applications found to export to CSV." WARN
-}
-
-if ($policiesProperties.Count -gt 0) {
-    $policiesProperties | Export-Csv -Path $OutPolProperties -NoTypeInformation -Force -Encoding UTF8
-    Write-Log "Storing Target data in $OutPolProperties..." INFO
-} else {
-    Write-Log "No Policies Target found to export to CSV." WARN
-}
-
-if ($appGroupApplication.Count -gt 0) {
-    $appGroupApplication | Export-Csv -Path $OutAppGroupsApplications -NoTypeInformation -Force -Encoding UTF8
-    Write-Log "Storing Application definition identified in the Application Group in $OutAppGroupsApplications..." INFO
-} else {
-    Write-Log "No Application definition identified in the Application Group found to export to CSV." WARN
+foreach ($item in $exports) {
+    $outPath = Join-Path -Path $exportCsvPath -ChildPath ('{0}_{1}.csv' -f $fileNameHead, $item.Suffix)
+    Export-EpmCsv -Data $item.Data -LiteralPath $outPath -Label $item.Label
 }
 
 
 #appCounter $EPMPolicies
-
