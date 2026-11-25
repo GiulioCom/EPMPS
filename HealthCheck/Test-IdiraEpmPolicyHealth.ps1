@@ -29,8 +29,8 @@
     - Add gathering Application Group application definition
 #>
 
+[CmdletBinding()]
 param (
-
     [Parameter(Mandatory, HelpMessage = "EPM Policies export")]
     [ValidateScript({
         if (Test-Path -LiteralPath $_ -PathType Leaf) {
@@ -603,81 +603,115 @@ function Get-EpmApplicationData {
     }
 }
 
-function Get-PolicyTargets {
+function Get-EpmPolicyTarget {
+    <#
+    .SYNOPSIS
+        Extracts target endpoints, executors, and accounts from an EPM policy into CSV-ready rows.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject[]])]
     param (
-        [object]$policy
+        [Parameter(Mandatory)]
+        [ValidateNotNull()]
+        [object]$Policy
     )
-    
-    $targetsRows = @()
-    
-    $targetsData = [PSCustomObject]@{
-        PolicyName                      = $policy.Name
-        PolicyType                      = $script:policyTypeMap[$policy.PolicyType]
-        PolicyAction                    = $script:actionMap[$policy.Action]
-        AppliedToAll                    = $policy.IsAppliedToAllComputers
-        IncludeExecutor                 = $null
-        ExcludeExecutor                 = $null
-        ExecutorType                    = $null
-        IncludeUsersGroupsSid           = $null
-        IncludeUsersGroupsAccountType   = $null
-        IncludeUsersGroupsDisplayName   = $null
-        IncludeUsersGroupsSamName       = $null
-    }
 
-    # Process Executors if they exist
-    if ($policy.Executors.Count -gt 0 ){
-        Write-Log "Processing Executors..." INFO
-        foreach ($executor in $policy.Executors) {
-            
-            $executorData = $TargetsData.PSObject.Copy()
-            
-            $executorData.ExecutorType = $script:executorTypeMap[$executor.ExecutorType]
-            if ($executor.IsIncluded) {
-                $executorData.IncludeExecutor = $executor.Name
-            } else {
-                $executorData.ExcludeExecutor = $executor.Name
+    try {
+        $targetsRows = [System.Collections.Generic.List[object]]::new()
+
+        $policyName   = $Policy.Name
+        $policyType   = $script:policyTypeMap[$Policy.PolicyType]
+        $appliedToAll = $Policy.IsAppliedToAllComputers
+        $policyAction = $script:actionMap[$Policy.Action]
+
+        $newTargetRow = {
+            [ordered]@{
+                PolicyName                    = $policyName
+                PolicyType                    = $policyType
+                PolicyAction                  = $policyAction
+                AppliedToAll                  = $appliedToAll
+                IncludeExecutor               = $null
+                ExcludeExecutor               = $null
+                ExecutorType                  = $null
+                IncludeUsersGroupsSid         = $null
+                IncludeUsersGroupsAccountType = $null
+                IncludeUsersGroupsDisplayName = $null
+                IncludeUsersGroupsSamName     = $null
             }
-            $targetsRows += $executorData
         }
-    }
 
-    # Check the Accounts
-    if ($policy.Accounts.Count -gt 0 ){
-        Write-Log "Processing Accounts..." INFO
-        foreach ($account in $policy.Accounts) {
-            $accountData = $TargetsData.PSObject.Copy()
+        # Process Executors if present
+        $executorsProp = $Policy.PSObject.Properties['Executors']
+        if ($null -ne $executorsProp -and $null -ne $executorsProp.Value -and $executorsProp.Value.Count -gt 0) {
+            foreach ($executor in $executorsProp.Value) {
+                $row = & $newTargetRow
+                $row['ExecutorType'] = $script:executorTypeMap[$executor.ExecutorType]
 
-            $accountData.IncludeUsersGroupsSid = $account.Sid
-            $accountData.IncludeUsersGroupsAccountType = $script:accountTypeMap[$account.AccountType]
-            $accountData.IncludeUsersGroupsDisplayName = $account.DisplayName
-            $accountData.IncludeUsersGroupsSamName = $account.SamName
-                        
-            $targetsRows += $accountData
+                if ($executor.IsIncluded) {
+                    $row['IncludeExecutor'] = $executor.Name
+                } else {
+                    $row['ExcludeExecutor'] = $executor.Name
+                }
+
+                $targetsRows.Add([pscustomobject]$row)
+            }
         }
-    }
 
-    if ($targetsRows.Count -eq 0) {
-        $targetsRows += $TargetsData
-    }
+        # Process Accounts if present
+        $accountsProp = $Policy.PSObject.Properties['Accounts']
+        if ($null -ne $accountsProp -and $null -ne $accountsProp.Value -and $accountsProp.Value.Count -gt 0) {
+            foreach ($account in $accountsProp.Value) {
+                $row = & $newTargetRow
+                $row['IncludeUsersGroupsSid']         = $account.Sid
+                $row['IncludeUsersGroupsAccountType'] = $script:accountTypeMap[$account.AccountType]
+                $row['IncludeUsersGroupsDisplayName'] = $account.DisplayName
+                $row['IncludeUsersGroupsSamName']     = $account.SamName
 
-    return $targetsRows
+                $targetsRows.Add([pscustomobject]$row)
+            }
+        }
+
+        # Emit a single baseline row if neither Executors nor Accounts are defined
+        if ($targetsRows.Count -eq 0) {
+            $targetsRows.Add([pscustomobject](& $newTargetRow))
+        }
+
+        return $targetsRows
+    }
+    catch {
+        $PSCmdlet.ThrowTerminatingError($_)
+    }
 }
 
-function Get-PolicyProperties {
+function Get-EpmPolicyProperty {
+    <#
+    .SYNOPSIS
+        Extracts principal policy properties from an EPM policy into CSV-ready row.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject[]])]
     param (
-        [object]$policy
+        [Parameter(Mandatory)]
+        [ValidateNotNull()]
+        [object]$Policy
     )
-    
-    $properties = [PSCustomObject]@{
-        name                            = $policy.Name
-        Description                     = $policy.Description
-        Type                            = $script:policyTypeMap[$policy.PolicyType]
-        Action                          = $script:actionMap[$policy.Action]
-        Audit                           = $policy.Audit
-        IsActive                        = $policy.IsActive
-        Priority                        = $policy.Priority
+
+    try {
+        $properties = [PSCustomObject]@{
+            name                            = $policy.Name
+            Description                     = $policy.Description
+            Type                            = $script:policyTypeMap[$policy.PolicyType]
+            Action                          = $script:actionMap[$policy.Action]
+            Audit                           = $policy.Audit
+            IsActive                        = $policy.IsActive
+            Priority                        = $policy.Priority
+        }
+
+        return $properties
     }
-    return $properties
+    catch {
+        $PSCmdlet.ThrowTerminatingError($_)
+    }
 }
 
 function Export-EpmCsv {
@@ -786,48 +820,57 @@ function appCounter {
 
 ### Begin Script ###
 
-$scriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
-Write-Box "$scriptName"
+try {
+    $scriptName = [System.IO.Path]::GetFileNameWithoutExtension($PSCommandPath)
+    Write-Box "$scriptName"
 
-$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 
-$epmPolicies = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($EpmPoliciesExport))
+    $epmPolicies = ConvertFrom-Json -InputObject ([System.IO.File]::ReadAllText($EpmPoliciesExport))
 
-# Policies Analisys
+    # Policies Analisys
 
-$policiesTarget      = @()
-$policiesApplication = @()
-$policiesProperties  = @()
+    $policiesTarget      = [System.Collections.Generic.List[object]]::new()
+    $policiesApplication = [System.Collections.Generic.List[object]]::new()
+    $policiesProperties  = [System.Collections.Generic.List[object]]::new()
+    $appGroupApplication = [System.Collections.Generic.List[object]]::new()
 
-$totalPolicy = $EPMPolicies.Policies.Count
-$countPolicy = 1
+    $policyList  = @($epmPolicies.Policies)
+    $totalPolicy = $policyList.Count
+    $countPolicy = 0
 
-foreach ($policy in $EPMPolicies.Policies) {
-    Write-Log "Processing Policy [$countPolicy/$totalPolicy] - $($policy.Name)" INFO
+    foreach ($policy in $policyList) {
+        $countPolicy++
 
-    Write-Log "Processing Targets..." INFO
-    $policiesTarget += Get-PolicyTargets $policy
+        Write-Log "Processing Policy [$countPolicy/$totalPolicy] - $($policy.Name)" INFO
 
-    Write-Log "Processing Applications..." INFO
-    $policiesApplication += Get-EpmApplicationData $policy
+        [object[]]$targets = Get-EpmPolicyTarget -Policy $policy
+        if ($targets.Count -gt 0) { $policiesTarget.AddRange($targets) }
 
-    Write-Log "Processing Properties..." INFO
-    $policiesProperties += Get-PolicyProperties $policy
+        [object[]]$apps = Get-EpmApplicationData -Policy $policy
+        if ($apps.Count -gt 0) { $policiesApplication.AddRange($apps) }
 
-    $countPolicy++
+        $prop = Get-EpmPolicyProperty -Policy $policy
+        if ($null -ne $prop) { $policiesProperties.Add($prop) }
+    }
+
+    # Application Groups Analysis
+    $appGroupList   = @($epmPolicies.AppGroups)
+    $totalAppGroups = $appGroupList.Count
+    $countAppGroup  = 0
+
+    foreach ($appGroup in $appGroupList) {
+        $countAppGroup++
+        
+        Write-Log "Processing Application Group [$countAppGroup/$totalAppGroups] - $($appGroup.Name)" INFO
+
+        [object[]]$groupApps = Get-EpmApplicationData -Policy $appGroup
+        if ($groupApps.Count -gt 0) { $appGroupApplication.AddRange($groupApps) }
+    }
 }
-
-# Application Groups Analysis
-$appGroupApplication = @()
-
-$totalAppGroups = $EPMPolicies.AppGroups.Count
-$countAppGroup = 1
-
-foreach ($appGroup in $EPMPolicies.AppGroups) {
-    Write-Log "Processing Application Group [$countAppGroup/$totalAppGroups] - $($appGroup.Name)" INFO
-    Write-Log "Processing Applications..." INFO
-    $appGroupApplication += Get-EpmApplicationData $appGroup
-    $countAppGroup++
+catch {
+    Write-Log -Message "EPM analysis failed: $_" -Level ERROR
+    throw
 }
 
 # Export Data to CSV
