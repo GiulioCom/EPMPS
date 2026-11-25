@@ -1,32 +1,33 @@
 <#
 .SYNOPSIS
-    Policy export file analysis EPM
-    Users \ Groups - OK
-    Application details - OK
+    Exports CyberArk EPM policy, target, and application data into CSV files for overview and review.
 
 .DESCRIPTION
+    Reads a EPMP export from the CyberArk EPM console, extracts policy properties, targets (endpoints,
+    executors, and accounts), application definitions with pattern weights, and application group
+    definitions, and writes structured CSV files for easy overview and downstream analysis.
 
-.PARAMETER EPMPoliciesExport
-    EPM File exported from EPM
+.PARAMETER EpmPoliciesExport
+    Path to the EPMP policy export file generated from the EPM console.
 
-.PARAMETER exportCSVPath
-    The name of the EPM set.
+.PARAMETER exportCsvPath
+    Directory path where the generated CSV reports are written.
 
 .PARAMETER tenant
-    Export output in CSV file
+    Identifier or name of the EPM set/tenant being reviewed.
 
 .PARAMETER destinationFolder
-
+    Target folder path for output artifacts or related destination files.
 
 .NOTES
-    File: Test-IdiraEpmPolicyHealth.ps1
+    File: Export-IdiraEpmPolicyOverview.ps1
     Author: Giulio Compagnone
-    Company: CyberArk
+    Company: Palo Alto Networks
     Version: 0.2
     Created: 09/2025
 
     Update: 11/2026
-    - Add gathering Application Group application definition
+    - Added extraction of application definitions from Application Groups.
 #>
 
 [CmdletBinding()]
@@ -398,7 +399,6 @@ function Measure-EpmApplication {
         $appTypeName       = $script:AppTypeMapping[$Application.applicationType]
         $matchedConditions = [System.Collections.Generic.List[object]]::new()
         $totalWeight       = 0.0
-        $applicationName   = $null
 
         if ([string]::IsNullOrEmpty($appTypeName) -or -not $script:EpmPatternMatrix.ContainsKey($appTypeName)) {
             Write-Log "Application Type '$($Application.applicationType)' ($appTypeName) not supported." WARN
@@ -482,22 +482,6 @@ function Measure-EpmApplication {
                     }
                 }
             }
-
-            # 4. Resolve display name from the first non-empty priority pattern (no pipeline overhead)
-            foreach ($priorityName in 'FILE_NAME', 'ORIGINAL_FILE_NAME', 'PUBLISHER') {
-                foreach ($cond in $matchedConditions) {
-                    if ($cond.PatternName -eq $priorityName -and -not [string]::IsNullOrWhiteSpace($cond.Value)) {
-                        $applicationName = $cond.Value
-                        break
-                    }
-                }
-                if ($null -ne $applicationName) { break }
-            }
-        }
-
-        if ([string]::IsNullOrWhiteSpace($applicationName)) {
-            $idProp = $Application.PSObject.Properties['id']
-            $applicationName = if ($null -ne $idProp -and -not [string]::IsNullOrWhiteSpace($idProp.Value)) { $idProp.Value } else { 'Unknown' }
         }
 
         if ($Pause) {
@@ -505,10 +489,11 @@ function Measure-EpmApplication {
         }
 
         [pscustomobject]@{
-            ApplicationName       = $applicationName
-            ApplicationType       = $appTypeName
-            TotalWeight           = $totalWeight
-            ApplicationDefinition = $matchedConditions
+            ApplicationDisplayName = $Application.displayName
+            ApplicationDescription = $Application.description
+            ApplicationType        = $appTypeName
+            TotalWeight            = $totalWeight
+            ApplicationDefinition  = $matchedConditions
         }
     }
     catch {
@@ -548,7 +533,8 @@ function Get-EpmApplicationData {
                 PolicyName               = $policyName
                 PolicyType               = $policyType
                 PolicyAction             = $policyAction
-                ApplicationName          = $null
+                ApplicationDisplayName   = $null
+                ApplicationDescription   = $null
                 ApplicationType          = $null
                 TotalWeight              = $null
                 FILE_NAME                = $null
@@ -577,9 +563,10 @@ function Get-EpmApplicationData {
                 $row    = & $newRowTemplate
                 $result = Measure-EpmApplication -Application $application
 
-                $row['ApplicationName'] = $result.ApplicationName
-                $row['ApplicationType'] = $result.ApplicationType
-                $row['TotalWeight']     = $result.TotalWeight
+                $row['ApplicationDisplayName'] = $result.ApplicationDisplayName
+                $row['ApplicationDescription'] = $result.ApplicationDescription
+                $row['ApplicationType']        = $result.ApplicationType
+                $row['TotalWeight']            = $result.TotalWeight
 
                 foreach ($definition in $result.ApplicationDefinition) {
                     if ($row.Contains($definition.PatternName)) {
@@ -745,6 +732,7 @@ function Export-EpmCsv {
     }
 }
 
+<#
 function appCounter {
     param (
         [object]$policyFile
@@ -763,13 +751,13 @@ function appCounter {
     }
     
 
-    <#    
-    $appCount = [PSCustomObject]@{
-        Name  = $policy.Name
-        Type  = $policy.Description
-        Count = $policyTypeMap[$policy.PolicyType]
-    }
-    #>
+        
+    #$appCount = [PSCustomObject]@{
+    #    Name  = $policy.Name
+    #    Type  = $policy.Description
+    #    Count = $policyTypeMap[$policy.PolicyType]
+    #}
+    
 
     $appGroupCounter = @()
     $policyCounter = @()
@@ -817,6 +805,7 @@ function appCounter {
 
     # 
 }
+#>
 
 ### Begin Script ###
 
